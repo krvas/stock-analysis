@@ -1,0 +1,12 @@
+# Indian Stock Analysis Platform
+# Python 3.12+
+
+duckdb>=1.1.0
+pandas>=2.2.0
+pyarrow>=17.0.0
+pydantic>=2.8.0
+tenacity>=9.0.0
+pytest>=9.0.0
+
+# Market data — finfetch (install per your environment; not always on PyPI)
+# finfetch

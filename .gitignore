@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+.env
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Data (large files — keep structure via .gitkeep)
+data/raw/**/*.parquet
+data/processed/**/*.parquet
+data/duckdb/*.duckdb
+data/duckdb/*.wal
+
+# IDE
+.idea/
+.vscode/settings.json
+*.swp
+.DS_Store
+
+# Logs
+logs/
+*.log
+
+# Jupyter
+.ipynb_checkpoints/
