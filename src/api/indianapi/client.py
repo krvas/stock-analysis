@@ -75,7 +75,7 @@ class IndianAPIClient:
             raise ValueError("INDIAN_API_KEY is required (env var or constructor argument)")
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
-        self._stock_cache: URLCache = URLCache(directory="data/raw/indianapi", format="json")
+        self._cache: URLCache = URLCache(directory="data/raw/indianapi", format="json")
         self.registry_manager = RegistryManager()
 
     def _request(self, path: str, params: dict[str, str]) -> Any:
@@ -112,14 +112,14 @@ class IndianAPIClient:
         return data
 
     def _fetch_stock_raw(self, name: str, *, use_cache: bool = True) -> dict[str, Any]:
-        cached_data = self._stock_cache.get(name) if use_cache else None
+        cached_data = self._cache.get(f"stock_{name}") if use_cache else None
         if cached_data is not None:
             return cached_data
         data = self._request("/stock", {"name": name})
         if not isinstance(data, dict):
             raise IndianAPIError(f"Unexpected /stock response type: {type(data).__name__}")
         if use_cache:
-            self._stock_cache.set(name, data)
+            self._cache.set(f"stock_{name}", data)
         return data
 
     def fetch_company(self, name: str) -> dict[str, Any]:
@@ -233,15 +233,22 @@ class IndianAPIClient:
         *,
         period: str = "5yr",
         filter_: str = "price",
+        use_cache: bool = True,
     ) -> pd.DataFrame:
         """Return daily close + volume rows aligned with ``prices`` schema (minus ``company_id``)."""
         resolved = resolve_api_name(self.registry_manager, name)
-        data = self._request(
-            "/historical_data",
-            {"stock_name": resolved, "period": period, "filter": filter_},
-        )
-        if not isinstance(data, dict):
-            raise IndianAPIError("historical_data response is not a dict")
+        cached_data = self._cache.get(f"historical_{resolved}_{period}_{filter_}") if use_cache else None
+        if cached_data is not None:
+            data = cached_data
+        else:
+            data = self._request(
+                "/historical_data",
+                {"stock_name": resolved, "period": period, "filter": filter_},
+            )
+            if not isinstance(data, dict):
+                raise IndianAPIError("historical_data response is not a dict")
+            if use_cache:
+                self._cache.set(f"historical_{resolved}_{period}_{filter_}", data)
 
         datasets = data.get("datasets") or []
         price_ds = next((d for d in datasets if d.get("metric") == "Price"), None)
@@ -276,12 +283,18 @@ class IndianAPIClient:
             )
         return pd.DataFrame(rows)
 
-    def fetch_corporate_actions(self, name: str) -> pd.DataFrame:
+    def fetch_corporate_actions(self, name: str, use_cache: bool = True) -> pd.DataFrame:
         """Parse corporate actions into a ``corporate_actions``-shaped DataFrame."""
         resolved = resolve_api_name(self.registry_manager, name)
-        data = self._request("/corporate_actions", {"stock_name": resolved})
-        if not isinstance(data, dict):
-            raise IndianAPIError("corporate_actions response is not a dict")
+        cached_data = self._cache.get(f"corporate_actions_{resolved}") if use_cache else None
+        if cached_data is not None:
+            data = cached_data
+        else:
+            data = self._request("/corporate_actions", {"stock_name": resolved})
+            if not isinstance(data, dict):
+                raise IndianAPIError("corporate_actions response is not a dict")
+            if use_cache:
+                self._cache.set(f"corporate_actions_{resolved}", data)
 
         rows: list[dict[str, Any]] = []
 
