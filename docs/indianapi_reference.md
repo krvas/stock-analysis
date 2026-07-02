@@ -551,7 +551,7 @@ Priority issues for wrapper (null-preserving) and ingestion:
 
 ## Wrapper Design Notes (for Step 3)
 
-When `src/api/indianapi_client.py` is built:
+When `src/api/indianapi/client.py` is built:
 
 1. **No retry logic, no DB writes** — fetch + parse only.
 2. **Request counter** — module-level counter + structured log line per call (`path`, `params`, cumulative count).
