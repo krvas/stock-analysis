@@ -13,6 +13,7 @@ from typing import Any, Final
 
 import pandas as pd
 
+from src.api.base_client import BaseAPIClient
 from src.utils.indianapi_parsing import (
     DEFAULT_CURRENCY,
     coalesce,
@@ -61,7 +62,7 @@ def resolve_api_name(registry_manager: RegistryManager, symbol_or_name: str, com
     return symbol_or_name
 
 
-class IndianAPIClient:
+class IndianAPIClient(BaseAPIClient):
     """Thin wrapper around IndianAPI.in stock endpoints."""
 
     def __init__(
@@ -122,8 +123,8 @@ class IndianAPIClient:
             self._cache.set(f"stock_{name}", data)
         return data
 
-    def fetch_company(self, name: str) -> dict[str, Any]:
-        """Return one row dict aligned with ``companies`` schema (minus ``company_id``)."""
+    def fetch_company(self, name: str) -> pd.DataFrame:
+        """Return one row DataFrame aligned with ``companies`` schema (minus ``company_id``)."""
         resolved = resolve_api_name(self.registry_manager, name)
         payload = self._fetch_stock_raw(resolved)
         profile = payload.get("companyProfile") or {}
@@ -152,7 +153,7 @@ class IndianAPIClient:
             if raw_diluted is not None:
                 shares_diluted = int(raw_diluted)
 
-        return {
+        return pd.DataFrame([{
             "symbol": symbol,
             "exchange": exchange,
             "country": "India",
@@ -165,7 +166,7 @@ class IndianAPIClient:
             "listing_date": None,
             "is_active": True,
             "source": SOURCE,
-        }
+        }])
 
     def _iter_statement_periods(self, name: str) -> list[dict[str, Any]]:
         resolved = resolve_api_name(self.registry_manager, name)

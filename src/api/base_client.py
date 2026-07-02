@@ -77,13 +77,35 @@ class BaseAPIClient(ABC):
                 )
                 return func(*args, **kwargs)
 
+
+    # TODO: Right now these functions work on name because that is what the IndianAPI client uses.
+    # But we should make them work on ticker instead, and then resolve to name internally.
+
     @abstractmethod
-    def fetch(self, *args: Any, **kwargs: Any) -> pd.DataFrame:
-        """Fetch data and return as DataFrame.
+    def fetch_company(self, name: str, **kwargs: Any) -> pd.DataFrame:
+        """Fetch company metadata as a DataFrame.
 
-        Must be implemented by subclasses.
-
-        Returns:
-            Pandas DataFrame with fetched data.
+        Expected to return a single-row DataFrame aligned with the project's
+        companies schema (minus company_id).
         """
-        pass
+
+    @abstractmethod
+    def fetch_financials(self, name: str, **kwargs: Any) -> pd.DataFrame:
+        """Fetch income statement periods as a DataFrame."""
+
+    @abstractmethod
+    def fetch_balance_sheets(self, name: str, **kwargs: Any) -> pd.DataFrame:
+        """Fetch balance sheet periods as a DataFrame."""
+
+    @abstractmethod
+    def fetch_cash_flows(self, name: str, **kwargs: Any) -> pd.DataFrame:
+        """Fetch cash flow periods as a DataFrame."""
+
+    @abstractmethod
+    def fetch_prices(self, name: str, **kwargs: Any) -> pd.DataFrame:
+        """Fetch time series price rows as a DataFrame."""
+
+    @abstractmethod
+    def fetch_corporate_actions(self, name: str, **kwargs: Any) -> pd.DataFrame:
+        """Fetch corporate actions (dividends, splits, bonuses) as a DataFrame."""
+

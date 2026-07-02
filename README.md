@@ -92,7 +92,7 @@ data/raw/
 
 - [x] Project structure and DuckDB schema
 - [x] DatabaseManager class
-- [ ] finfetch API wrappers
+- [x] IndianAPI API wrappers
 - [ ] Ingestion pipelines (companies, prices, financials)
 - [ ] CLI (`init`, `ingest`, `update-prices`, `update-financials`, `screen`)
 - [ ] Sample screener (ROE > 15%, D/E < 0.5, 3Y revenue growth)
