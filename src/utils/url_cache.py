@@ -4,7 +4,7 @@ import json
 import os
 from typing import Final
 
-REPO_DIR: Final[str] = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+REPO_DIR: Final[str] = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 class URLCache:
     def __init__(self, directory: str, format:str = "json"):
@@ -24,4 +24,4 @@ class URLCache:
     def set(self, key, value):
         with open(self._get_file_path(key), "w") as f:
             if self.format == "json":
-                json.dump(value, f)
+                json.dump(value, f, indent=4)

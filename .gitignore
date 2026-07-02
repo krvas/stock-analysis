@@ -19,6 +19,7 @@ htmlcov/
 
 # Data (large files — keep structure via .gitkeep)
 data/raw/**/*.parquet
+data/raw/**/*.json
 data/processed/**/*.parquet
 data/duckdb/*.duckdb
 data/duckdb/*.wal
