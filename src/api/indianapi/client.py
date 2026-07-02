@@ -23,6 +23,7 @@ from src.utils.indianapi_parsing import (
     period_metadata,
     rows_to_dict,
 )
+from src.utils.url_cache import URLCache
 from .registry_manager import RegistryManager
 
 logger = logging.getLogger(__name__)
@@ -74,7 +75,7 @@ class IndianAPIClient:
             raise ValueError("INDIAN_API_KEY is required (env var or constructor argument)")
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
-        self._stock_cache: dict[str, dict[str, Any]] = {}
+        self._stock_cache: URLCache = URLCache(directory="data/raw/indianapi", format="json")
         self.registry_manager = RegistryManager()
 
     def _request(self, path: str, params: dict[str, str]) -> Any:
@@ -111,17 +112,15 @@ class IndianAPIClient:
         return data
 
     def _fetch_stock_raw(self, name: str, *, use_cache: bool = True) -> dict[str, Any]:
-        if use_cache and name in self._stock_cache:
-            return self._stock_cache[name]
+        cached_data = self._stock_cache.get(name) if use_cache else None
+        if cached_data is not None:
+            return cached_data
         data = self._request("/stock", {"name": name})
         if not isinstance(data, dict):
             raise IndianAPIError(f"Unexpected /stock response type: {type(data).__name__}")
         if use_cache:
-            self._stock_cache[name] = data
+            self._stock_cache.set(name, data)
         return data
-
-    def clear_cache(self) -> None:
-        self._stock_cache.clear()
 
     def fetch_company(self, name: str) -> dict[str, Any]:
         """Return one row dict aligned with ``companies`` schema (minus ``company_id``)."""
