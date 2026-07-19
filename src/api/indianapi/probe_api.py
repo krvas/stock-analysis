@@ -17,7 +17,8 @@ def main(name: str):
     if not api_key:
         raise ValueError("INDIAN_API_KEY environment variable is not set.")
     Client = IndianAPIClient(api_key=api_key)
-    Client.fetch_company(name)
+    bs = Client.fetch_balance_sheets(name)
+    print(bs)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
