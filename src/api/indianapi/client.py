@@ -10,6 +10,7 @@ import urllib.parse
 import urllib.request
 from datetime import date
 from typing import Any, Final
+from dotenv import load_dotenv
 
 import pandas as pd
 
@@ -71,6 +72,7 @@ class IndianAPIClient(BaseAPIClient):
         base_url: str = BASE_URL,
         timeout: float = 60.0,
     ) -> None:
+        load_dotenv()
         self.api_key = api_key or os.environ.get("INDIAN_API_KEY")
         if not self.api_key:
             raise ValueError("INDIAN_API_KEY is required (env var or constructor argument)")
@@ -109,7 +111,7 @@ class IndianAPIClient(BaseAPIClient):
             raise IndianAPIError(f"Invalid JSON from {path}") from exc
 
         if isinstance(data, dict) and data.get("error"):
-            raise IndianAPIError(str(data["error"]))
+            raise IndianAPIError(f"{str(data['error'])} for {path}")
         return data
 
     def _fetch_stock_raw(self, name: str, *, use_cache: bool = True) -> dict[str, Any]:
