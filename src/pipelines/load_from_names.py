@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import argparse
 import logging
-import sys
 from typing import Sequence
 
 from src.api.indianapi.client import IndianAPIClient
+from src.api.alphavantage.client import AlphaVantageClient
 from src.config import DEFAULT_DB_PATH, SCHEMA_SQL_PATH
 from src.database.manager import DatabaseManager
 from src.ingestion.load_to_database import DEFAULT_TABLE_ORDER, load_company_to_db
@@ -15,13 +15,16 @@ from src.ingestion.load_to_database import DEFAULT_TABLE_ORDER, load_company_to_
 logger = logging.getLogger(__name__)
 
 
-def load_from_names(names: Sequence[str]) -> None:
+def load_from_names(names: Sequence[str], api: str) -> None:
     """Fetch all 6 tables for each stock name and upsert into DuckDB.
 
     This function orchestrates the pipeline without directly calling the API
     or database — it delegates to the ingestion layer which handles both.
     """
-    client = IndianAPIClient()
+    if api == "indianapi":
+        client = IndianAPIClient()
+    else:
+        client = AlphaVantageClient()
     db = DatabaseManager(db_path=str(DEFAULT_DB_PATH))
 
     try:
@@ -59,11 +62,17 @@ def main() -> None:
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
         help="Logging level (default: INFO).",
     )
+    parser.add_argument(
+        "--api",
+        default="indianapi",
+        choices=["indianapi", "alphavantage"],
+        help="Which API to fetch the stock data from"
+    )
 
     args = parser.parse_args()
     logging.basicConfig(level=args.log_level, format="%(levelname)s: %(name)s: %(message)s")
 
-    load_from_names(args.names)
+    load_from_names(args.names, args.api)
 
 
 if __name__ == "__main__":
