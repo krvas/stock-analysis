@@ -2,12 +2,8 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import os
-import urllib.error
-import urllib.parse
-import urllib.request
 from datetime import date
 from typing import Any, Final
 from dotenv import load_dotenv
@@ -72,47 +68,33 @@ class IndianAPIClient(BaseAPIClient):
         base_url: str = BASE_URL,
         timeout: float = 60.0,
     ) -> None:
+        super().__init__(base_url, timeout)
         load_dotenv()
         self.api_key = api_key or os.environ.get("INDIAN_API_KEY")
         if not self.api_key:
             raise ValueError("INDIAN_API_KEY is required (env var or constructor argument)")
-        self.base_url = base_url.rstrip("/")
-        self.timeout = timeout
         self._cache: URLCache = URLCache(directory="data/raw/indianapi", format="json")
         self.registry_manager = RegistryManager()
 
-    def _request(self, path: str, params: dict[str, str]) -> Any:
+    def _headers(self) -> dict[str, str]:
+        return {"x-api-key": self.api_key, "Accept": "application/json"}
+
+    def _request_error(self, message: str) -> Exception:
+        return IndianAPIError(message)
+
+    def _validate_response(self, data: Any, path: str) -> None:
+        if isinstance(data, dict) and data.get("error"):
+            raise IndianAPIError(f"{str(data['error'])} for {path}")
+
+    def _before_request(self, path: str, params: dict[str, str]) -> None:
         global _request_count
         _request_count += 1
-        qs = urllib.parse.urlencode(params)
-        url = f"{self.base_url}{path}?{qs}"
-        req = urllib.request.Request(
-            url,
-            headers={"x-api-key": self.api_key, "Accept": "application/json"},
-        )
         logger.info(
             "IndianAPI request #%d GET %s params=%s",
             _request_count,
             path,
             params,
         )
-        try:
-            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
-                body = resp.read()
-        except urllib.error.HTTPError as exc:
-            detail = exc.read().decode("utf-8", errors="replace")
-            raise IndianAPIError(f"HTTP {exc.code} for {path}: {detail}") from exc
-        except urllib.error.URLError as exc:
-            raise IndianAPIError(f"Network error for {path}: {exc}") from exc
-
-        try:
-            data = json.loads(body)
-        except json.JSONDecodeError as exc:
-            raise IndianAPIError(f"Invalid JSON from {path}") from exc
-
-        if isinstance(data, dict) and data.get("error"):
-            raise IndianAPIError(f"{str(data['error'])} for {path}")
-        return data
 
     def _fetch_stock_raw(self, name: str, *, use_cache: bool = True) -> dict[str, Any]:
         cached_data = self._cache.get(f"stock_{name}") if use_cache else None

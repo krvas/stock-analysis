@@ -22,6 +22,7 @@ class URLCache:
         return None
 
     def set(self, key, value):
+        os.makedirs(self.directory, exist_ok=True)
         with open(self._get_file_path(key), "w") as f:
             if self.format == "json":
                 json.dump(value, f, indent=4)
