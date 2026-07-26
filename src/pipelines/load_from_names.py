@@ -6,8 +6,7 @@ import argparse
 import logging
 from typing import Sequence
 
-from src.api.indianapi.client import IndianAPIClient
-from src.api.alphavantage.client import AlphaVantageClient
+from src.api import IndianAPIClient, AlphaVantageClient, FinnhubClient
 from src.config import DEFAULT_DB_PATH, SCHEMA_SQL_PATH
 from src.database.manager import DatabaseManager
 from src.ingestion.load_to_database import DEFAULT_TABLE_ORDER, load_company_to_db
@@ -23,6 +22,8 @@ def load_from_names(names: Sequence[str], api: str) -> None:
     """
     if api == "indianapi":
         client = IndianAPIClient()
+    elif api == "finnhub":
+        client = FinnhubClient()
     else:
         client = AlphaVantageClient()
     db = DatabaseManager(db_path=str(DEFAULT_DB_PATH))
@@ -65,7 +66,7 @@ def main() -> None:
     parser.add_argument(
         "--api",
         default="indianapi",
-        choices=["indianapi", "alphavantage"],
+        choices=["indianapi", "alphavantage", "finnhub"],
         help="Which API to fetch the stock data from"
     )
 
