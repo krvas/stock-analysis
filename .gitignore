@@ -21,6 +21,7 @@ htmlcov/
 data/raw/**/*.parquet
 data/raw/**/*.json
 data/processed/**/*.parquet
+data/processed/*.html
 data/duckdb/*.duckdb
 data/duckdb/*.wal
 

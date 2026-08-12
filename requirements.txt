@@ -8,6 +8,7 @@ pydantic>=2.8.0
 tenacity>=9.0.0
 pytest>=9.0.0
 dotenv>=1.2.0
+edgartools>=5.0.0
 
 # Market data — finfetch (install per your environment; not always on PyPI)
 # finfetch

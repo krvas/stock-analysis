@@ -20,6 +20,9 @@ SCHEMA_SQL_PATH = Path(__file__).resolve().parent / "database" / "schema.sql"
 # Historical data retention target (years)
 HISTORY_YEARS = 10
 
+# SEC EDGAR identity (contact email loaded from SEC_CONTACT_EMAIL in .env)
+SEC_APP_IDENTITY = "ScreenerApp/1.0"
+
 # Logging
 LOG_DIR = PROJECT_ROOT / "logs"
 LOG_FILE = LOG_DIR / "platform.log"

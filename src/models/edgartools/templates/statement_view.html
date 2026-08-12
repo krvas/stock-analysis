@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Financial Statement</title>
+  <style>
+    :root {
+      --bg: #f8f9fb;
+      --surface: #ffffff;
+      --border: #d9dee7;
+      --text: #1f2937;
+      --muted: #6b7280;
+      --accent: #2563eb;
+      --header-bg: #eef2f7;
+      --row-hover: #f3f6fa;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.4;
+    }
+
+    .page {
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: 24px 20px 48px;
+    }
+
+    .header {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 20px;
+    }
+
+    .title-block h1 {
+      margin: 0 0 4px;
+      font-size: 1.5rem;
+      font-weight: 600;
+    }
+
+    .title-block p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.95rem;
+    }
+
+    .controls {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .controls label {
+      font-size: 0.875rem;
+      color: var(--muted);
+    }
+
+    .controls select {
+      padding: 8px 12px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--surface);
+      font-size: 0.875rem;
+      color: var(--text);
+    }
+
+    .table-wrap {
+      overflow: auto;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--surface);
+      box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      min-width: 720px;
+      font-size: 0.875rem;
+    }
+
+    thead th {
+      position: sticky;
+      top: 0;
+      z-index: 1;
+      background: var(--header-bg);
+      border-bottom: 1px solid var(--border);
+      padding: 10px 12px;
+      text-align: right;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+
+    thead th:first-child {
+      text-align: left;
+      left: 0;
+      z-index: 2;
+    }
+
+    tbody td {
+      border-bottom: 1px solid #edf0f5;
+      padding: 8px 12px;
+      text-align: right;
+      white-space: nowrap;
+      font-variant-numeric: tabular-nums;
+    }
+
+    tbody td:first-child {
+      text-align: left;
+      white-space: normal;
+      min-width: 260px;
+      position: sticky;
+      left: 0;
+      background: var(--surface);
+    }
+
+    tbody tr:hover td {
+      background: var(--row-hover);
+    }
+
+    tbody tr:hover td:first-child {
+      background: var(--row-hover);
+    }
+
+    .line-label {
+      display: inline-block;
+    }
+
+    .line-label.total {
+      font-weight: 700;
+    }
+
+    .empty {
+      color: var(--muted);
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <div class="header">
+      <div class="title-block">
+        <h1 id="page-title">Financial Statement</h1>
+        <p id="page-subtitle"></p>
+      </div>
+      <div class="controls">
+        <label for="view-select">View</label>
+        <select id="view-select" aria-label="Statement view">
+          <option value="summary">Summary</option>
+          <option value="standard" selected>Standard</option>
+          <option value="detailed">Detailed</option>
+        </select>
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table id="statement-table">
+        <thead></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+
+  <script id="statement-data" type="application/json">__STATEMENT_DATA__</script>
+  <script>
+    const APP_DATA = JSON.parse(document.getElementById("statement-data").textContent);
+
+    const STATEMENT_LABELS = {
+      income: "Income Statement",
+      balance: "Balance Sheet",
+      cashflow: "Cash Flow Statement",
+    };
+
+    function formatNumber(value) {
+      if (value === null || value === undefined) {
+        return '<span class="empty">—</span>';
+      }
+      const abs = Math.abs(value);
+      let formatted;
+      if (abs >= 1e9) {
+        formatted = (value / 1e9).toFixed(2) + "B";
+      } else if (abs >= 1e6) {
+        formatted = (value / 1e6).toFixed(2) + "M";
+      } else if (abs >= 1e3) {
+        formatted = (value / 1e3).toFixed(2) + "K";
+      } else {
+        formatted = value.toLocaleString(undefined, { maximumFractionDigits: 2 });
+      }
+      return formatted;
+    }
+
+    function renderTable(rows, periods) {
+      const table = document.getElementById("statement-table");
+      const thead = table.querySelector("thead");
+      const tbody = table.querySelector("tbody");
+
+      thead.innerHTML = "";
+      tbody.innerHTML = "";
+
+      const headerRow = document.createElement("tr");
+      const labelHeader = document.createElement("th");
+      labelHeader.textContent = "Line Item";
+      headerRow.appendChild(labelHeader);
+
+      periods.forEach((period) => {
+        const th = document.createElement("th");
+        th.textContent = period;
+        headerRow.appendChild(th);
+      });
+      thead.appendChild(headerRow);
+
+      rows.forEach((row) => {
+        const tr = document.createElement("tr");
+        const labelCell = document.createElement("td");
+
+        const labelSpan = document.createElement("span");
+        labelSpan.className = "line-label" + (row.is_total ? " total" : "");
+        labelSpan.style.paddingLeft = `${Math.max(row.level, 0) * 16}px`;
+        labelSpan.textContent = row.label;
+        labelCell.appendChild(labelSpan);
+        tr.appendChild(labelCell);
+
+        periods.forEach((period) => {
+          const valueCell = document.createElement("td");
+          valueCell.innerHTML = formatNumber(row.values[period]);
+          tr.appendChild(valueCell);
+        });
+
+        tbody.appendChild(tr);
+      });
+    }
+
+    function handleViewChange(viewName) {
+      const view = APP_DATA.views[viewName];
+      if (!view) {
+        return;
+      }
+      renderTable(view.rows, view.periods);
+    }
+
+    function initPage() {
+      const statementLabel = STATEMENT_LABELS[APP_DATA.statement_type] || APP_DATA.statement_type;
+      const periodLabel = APP_DATA.period === "quarterly" ? "Quarterly" : "Annual";
+
+      document.getElementById("page-title").textContent =
+        `${APP_DATA.ticker} — ${statementLabel}`;
+      document.getElementById("page-subtitle").textContent =
+        `${periodLabel} · SEC EDGAR via edgartools`;
+
+      const select = document.getElementById("view-select");
+      select.addEventListener("change", (event) => {
+        handleViewChange(event.target.value);
+      });
+
+      handleViewChange(select.value);
+    }
+
+    initPage();
+  </script>
+</body>
+</html>
