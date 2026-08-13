@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 import re
-from pathlib import Path
+from datetime import date
 from typing import Literal
 
 import pandas as pd
@@ -13,8 +13,20 @@ from edgar import Company
 from edgar.xbrl import XBRLS
 from edgar.xbrl.stitching.periods import determine_optimal_periods
 
+from src.api.edgartools.cache import (
+    PeriodBundle,
+    find_cached_cik,
+    load_period_bundle,
+    save_period_bundle,
+    touch_company_cache,
+)
+from src.config import EDGARTOOLS_CACHE_DIR, EDGARTOOLS_COMPANY_CACHE_SIZE
+
 StatementType = Literal["income", "balance", "cashflow"]
 PeriodType = Literal["annual", "quarterly"]
+
+_STATEMENT_TYPES: tuple[StatementType, ...] = ("income", "balance", "cashflow")
+_VIEWS = ("summary", "standard", "detailed")
 
 _STATEMENT_METHODS: dict[StatementType, str] = {
     "income": "income_statement",
@@ -52,9 +64,12 @@ _METADATA_COLUMNS = {
     "parent_abstract_concept",
 }
 
-def _configure_edgartools_cache():
-    os.environ["EDGAR_USE_LOCAL_DATA"] = "True"
-    os.environ["EDGAR_LOCAL_DATA_DIR"] = str(Path(__file__).resolve().parent.parent / "data" / "edgartools_cache")
+
+def _configure_edgartools_cache() -> None:
+    """Point edgartools at our cache directory and allow network fetches."""
+    EDGARTOOLS_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    os.environ["EDGAR_LOCAL_DATA_DIR"] = str(EDGARTOOLS_CACHE_DIR)
+    os.environ["EDGAR_ALLOW_NETWORK_FALLBACK"] = "True"
 
 def _period_columns(df: pd.DataFrame) -> list[str]:
     return [col for col in df.columns if col not in _METADATA_COLUMNS]
@@ -147,6 +162,53 @@ def _build_view_dataframe(
     return pd.DataFrame(data)
 
 
+def _latest_filing_date(filings) -> date:
+    if getattr(filings, "end_date", None):
+        return date.fromisoformat(str(filings.end_date)[:10])
+    filing_dates = [
+        date.fromisoformat(str(getattr(filing, "filing_date", filing))[:10])
+        for filing in filings
+    ]
+    if not filing_dates:
+        raise ValueError("Cannot determine latest filing date from empty filings.")
+    return max(filing_dates)
+
+
+def _build_all_statement_views(xbrls: XBRLS, num_periods: int) -> PeriodBundle:
+    return {
+        statement_type: {
+            view: _build_view_dataframe(xbrls, statement_type, view, num_periods)
+            for view in _VIEWS
+        }
+        for statement_type in _STATEMENT_TYPES
+    }
+
+
+def _load_cached_statement_views(
+    *,
+    cik: int | str,
+    ticker: str,
+    statement_type: StatementType,
+    period: PeriodType,
+    num_periods: int,
+) -> dict[str, pd.DataFrame] | None:
+    bundle = load_period_bundle(
+        cik=cik,
+        period=period,
+        num_periods=num_periods,
+        cache_dir=EDGARTOOLS_CACHE_DIR,
+    )
+    if bundle is None:
+        return None
+    touch_company_cache(
+        cik=cik,
+        ticker=ticker,
+        cache_dir=EDGARTOOLS_CACHE_DIR,
+        max_companies=EDGARTOOLS_COMPANY_CACHE_SIZE,
+    )
+    return bundle[statement_type]
+
+
 def get_statement_views(
     ticker: str,
     statement_type: StatementType,
@@ -159,12 +221,48 @@ def get_statement_views(
         raise ValueError("EDGAR_IDENTITY environment variable is not set.")
     _configure_edgartools_cache()
 
+    cached_cik = find_cached_cik(EDGARTOOLS_CACHE_DIR, ticker)
+    if cached_cik is not None:
+        cached = _load_cached_statement_views(
+            cik=cached_cik,
+            ticker=ticker,
+            statement_type=statement_type,
+            period=period,
+            num_periods=num_periods,
+        )
+        if cached is not None:
+            return cached
+
     company = Company(ticker)
+    cached = _load_cached_statement_views(
+        cik=company.cik,
+        ticker=ticker,
+        statement_type=statement_type,
+        period=period,
+        num_periods=num_periods,
+    )
+    if cached is not None:
+        return cached
+
     form = _FORM_BY_PERIOD[period]
     filings = company.get_filings(form=form, amendments=False).head(num_periods)
+    latest_filing_date = _latest_filing_date(filings)
     xbrls = XBRLS.from_filings(filings, filter_amendments=True)
 
-    return {
-        view: _build_view_dataframe(xbrls, statement_type, view, num_periods)
-        for view in ("summary", "standard", "detailed")
-    }
+    all_views = _build_all_statement_views(xbrls, num_periods)
+
+    save_period_bundle(
+        cik=company.cik,
+        period=period,
+        num_periods=num_periods,
+        latest_filing_date=latest_filing_date,
+        views=all_views,
+        cache_dir=EDGARTOOLS_CACHE_DIR,
+    )
+    touch_company_cache(
+        cik=company.cik,
+        ticker=ticker,
+        cache_dir=EDGARTOOLS_CACHE_DIR,
+        max_companies=EDGARTOOLS_COMPANY_CACHE_SIZE,
+    )
+    return all_views[statement_type]

@@ -62,7 +62,14 @@ Then open:
 - Screener placeholder: `http://127.0.0.1:8000/screener`
 - API docs: `http://127.0.0.1:8000/docs`
 
-SEC identity for edgartools uses `EDGAR_IDENTITY` from `.env`.
+SEC identity for edgartools uses `EDGAR_IDENTITY` from `.env`. Computed statement
+views are cached under `data/edgartools_cache/companies/{cik}/{period}_{num_periods}/`
+as a bundle covering income, balance, and cashflow together. The app keeps the
+`EDGARTOOLS_COMPANY_CACHE_SIZE` most recently viewed companies (default 10) and
+deletes older company caches automatically. Bundles older than
+`EDGARTOOLS_CACHE_MAX_AGE_MONTHS` (default 3) by latest filing date are
+refetched. Override sizes via those env vars when storage or freshness needs
+differ. Filings are fetched directly from the SEC on cache miss.
 
 ### DatabaseManager
 
@@ -111,7 +118,7 @@ data/raw/
 - [x] DatabaseManager class
 - [x] IndianAPI / Alpha Vantage / Finnhub clients
 - [x] edgartools statement fetch + FastAPI/Jinja statement viewer
-- [ ] Implement caching for edgartools
+- [x] Implement caching for edgartools (local filings + LRU company eviction)
 - [ ] Add new processed views
 - [ ] Change the statement parameter to a toggle (like level of detail)
 - [ ] Ingestion pipelines (companies, prices, financials)
