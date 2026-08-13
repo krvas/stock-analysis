@@ -1,5 +1,5 @@
-"""HTML rendering for edgartools financial statement views."""
+"""Payload builders for edgartools financial statement views."""
 
-from src.models.edgartools.html_renderer import render_statement_html
+from src.models.edgartools.html_renderer import build_statement_payload
 
-__all__ = ["render_statement_html"]
+__all__ = ["build_statement_payload"]

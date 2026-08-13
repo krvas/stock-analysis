@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Stock Analysis{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', path='css/app.css') }}">
+  {% block head %}{% endblock %}
+</head>
+<body>
+  <nav class="site-nav" aria-label="Primary">
+    <a href="/statements/AAPL" {% if active_nav == 'statements' %}aria-current="page"{% endif %}>Statements</a>
+    <a href="/screener" {% if active_nav == 'screener' %}aria-current="page"{% endif %}>Screener</a>
+  </nav>
+  {% block content %}{% endblock %}
+  {% block scripts %}{% endblock %}
+</body>
+</html>

@@ -1,16 +1,11 @@
-"""Render edgartools statement views as a self-contained HTML file."""
+"""Serialize edgartools statement views for the HTML statement page."""
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
 from typing import Any
 
 import pandas as pd
 
-from src.config import PROCESSED_DATA_DIR
-
-_TEMPLATE_PATH = Path(__file__).resolve().parent / "templates" / "statement_view.html"
 _METADATA_COLUMNS = {
     "label",
     "concept",
@@ -47,26 +42,17 @@ def _serialize_views(views: dict[str, pd.DataFrame]) -> dict[str, Any]:
     return {name: _serialize_dataframe(df) for name, df in views.items()}
 
 
-def render_statement_html(
+def build_statement_payload(
     views: dict[str, pd.DataFrame],
     *,
     ticker: str,
     statement_type: str,
     period: str,
-    output_path: Path | None = None,
-) -> Path:
-    """Inject view data into the static template and write a standalone HTML file."""
-    template = _TEMPLATE_PATH.read_text(encoding="utf-8")
-    payload = {
+) -> dict[str, Any]:
+    """Build the JSON payload embedded in the statement Jinja template."""
+    return {
         "ticker": ticker,
         "statement_type": statement_type,
         "period": period,
         "views": _serialize_views(views),
     }
-    rendered = template.replace("__STATEMENT_DATA__", json.dumps(payload))
-    destination = output_path or (
-        PROCESSED_DATA_DIR / f"{ticker.lower()}_{statement_type}_{period}.html"
-    )
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    destination.write_text(rendered, encoding="utf-8")
-    return destination.resolve()
