@@ -12,22 +12,34 @@
     cashflow: "Cash Flow Statement",
   };
 
-  function formatNumber(value) {
+  const UNIT_OPTIONS = {
+    billions: { scale: 1e9, label: 'billions' },
+    millions: { scale: 1e6, label: 'millions' },
+    thousands: { scale: 1e3, label: 'thousands' },
+    units: { scale: 1, label: 'units' },
+  };
+  // runtime-selected unit; replaceable by future feature
+  let CURRENT_UNIT = 'millions';
+
+  // Expose simple runtime getters/setters so a future UI or server
+  // integration can call `window.setStatementUnit('billions')`.
+  window.getStatementUnit = function () {
+    return window.STATEMENT_UNIT || CURRENT_UNIT;
+  };
+  window.setStatementUnit = function (key) {
+    if (UNIT_OPTIONS[key]) {
+      CURRENT_UNIT = key;
+      window.STATEMENT_UNIT = key;
+    }
+  };
+
+  function formatNumber(value, unitKey) {
     if (value === null || value === undefined) {
       return '<span class="empty">—</span>';
     }
-    const abs = Math.abs(value);
-    let formatted;
-    if (abs >= 1e9) {
-      formatted = (value / 1e9).toFixed(2) + "B";
-    } else if (abs >= 1e6) {
-      formatted = (value / 1e6).toFixed(2) + "M";
-    } else if (abs >= 1e3) {
-      formatted = (value / 1e3).toFixed(2) + "K";
-    } else {
-      formatted = value.toLocaleString(undefined, { maximumFractionDigits: 2 });
-    }
-    return formatted;
+    const unit = UNIT_OPTIONS[unitKey] || UNIT_OPTIONS.millions;
+    const scaled = value / unit.scale;
+    return scaled.toLocaleString(undefined, { maximumFractionDigits: 0 });
   }
 
   function renderTable(rows, periods) {
@@ -40,7 +52,9 @@
 
     const headerRow = document.createElement("tr");
     const labelHeader = document.createElement("th");
-    labelHeader.textContent = "Line Item";
+    const currentUnit = window.getStatementUnit();
+    const unitLabel = UNIT_OPTIONS[currentUnit].label;
+    labelHeader.textContent = `Line Item (in ${unitLabel})`;
     headerRow.appendChild(labelHeader);
 
     periods.forEach((period) => {
@@ -63,7 +77,7 @@
 
       periods.forEach((period) => {
         const valueCell = document.createElement("td");
-        valueCell.innerHTML = formatNumber(row.values[period]);
+        valueCell.innerHTML = formatNumber(row.values[period], currentUnit);
         tr.appendChild(valueCell);
       });
 
