@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import os
 import re
+from pathlib import Path
 from typing import Literal
 
-from anyio import Path
 import pandas as pd
 from dotenv import load_dotenv
-from edgar import Company, set_identity
+from edgar import Company
 from edgar.xbrl import XBRLS
 from edgar.xbrl.stitching.periods import determine_optimal_periods
 
@@ -60,10 +60,15 @@ def _period_columns(df: pd.DataFrame) -> list[str]:
     return [col for col in df.columns if col not in _METADATA_COLUMNS]
 
 
-def _column_for_end_date(df: pd.DataFrame, end_date) -> str | None:
-    end = str(end_date)
+def _period_date(meta: dict) -> object:
+    """Return the as-of date for a period (instant balance sheets use ``date``)."""
+    return meta.get("end_date") or meta["date"]
+
+
+def _column_for_period_date(df: pd.DataFrame, period_date) -> str | None:
+    date_str = str(period_date)
     for column in _period_columns(df):
-        if column.startswith(end):
+        if column.startswith(date_str):
             return column
     return None
 
@@ -100,7 +105,7 @@ def _build_view_dataframe(
     if not period_metas:
         return pd.DataFrame()
 
-    period_labels = [str(meta["end_date"]) for meta in period_metas]
+    period_labels = [str(_period_date(meta)) for meta in period_metas]
     rows_by_key: dict[tuple, dict] = {}
     row_order: list[tuple] = []
 
@@ -108,8 +113,9 @@ def _build_view_dataframe(
         xbrl = xbrls.xbrl_list[meta["xbrl_index"]]
         statement = getattr(xbrl.statements, statement_getter_name)(view=view)
         filing_df = statement.to_dataframe(view=view)
-        period_column = _column_for_end_date(filing_df, meta["end_date"])
-        period_label = str(meta["end_date"])
+        period_date = _period_date(meta)
+        period_column = _column_for_period_date(filing_df, period_date)
+        period_label = str(period_date)
 
         for _, row in filing_df.iterrows():
             key = _row_key(row)
