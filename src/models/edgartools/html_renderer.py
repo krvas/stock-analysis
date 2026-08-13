@@ -43,16 +43,17 @@ def _serialize_views(views: dict[str, pd.DataFrame]) -> dict[str, Any]:
 
 
 def build_statement_payload(
-    views: dict[str, pd.DataFrame],
+    all_views: dict[str, dict[str, pd.DataFrame]],
     *,
     ticker: str,
-    statement_type: str,
     period: str,
 ) -> dict[str, Any]:
     """Build the JSON payload embedded in the statement Jinja template."""
     return {
         "ticker": ticker,
-        "statement_type": statement_type,
         "period": period,
-        "views": _serialize_views(views),
+        "statements": {
+            statement_type: _serialize_views(views)
+            for statement_type, views in all_views.items()
+        },
     }

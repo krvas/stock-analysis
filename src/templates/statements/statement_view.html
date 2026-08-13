@@ -10,12 +10,33 @@
       <p id="page-subtitle"></p>
     </div>
     <div class="controls">
-      <label for="view-select">View</label>
-      <select id="view-select" aria-label="Statement view">
-        <option value="summary">Summary</option>
-        <option value="standard" selected>Standard</option>
-        <option value="detailed">Detailed</option>
-      </select>
+      <div class="control-group">
+        <label for="statement-type-select">Statement</label>
+        <select id="statement-type-select" aria-label="Statement type">
+          <option value="income" selected>Income</option>
+          <option value="balance">Balance</option>
+          <option value="cashflow">Cash Flow</option>
+        </select>
+      </div>
+      <div class="control-group">
+        <label for="view-select">View</label>
+        <select id="view-select" aria-label="Statement view">
+          <option value="summary">Summary</option>
+          <option value="standard" selected>Standard</option>
+          <option value="detailed">Detailed</option>
+        </select>
+      </div>
+      <div class="control-group" id="fund-flow-controls" hidden>
+        <label for="display-mode-select">Layout</label>
+        <select id="display-mode-select" aria-label="Balance sheet layout">
+          <option value="periods" selected>Periods</option>
+          <option value="fund-flow">Fund Flow</option>
+        </select>
+      </div>
+      <div class="control-group" id="compare-period-controls" hidden>
+        <label for="compare-period-select">Compare to</label>
+        <select id="compare-period-select" aria-label="Previous period for fund flow"></select>
+      </div>
     </div>
   </div>
   <div class="table-wrap">

@@ -58,7 +58,7 @@ uvicorn src.web.app:app --reload
 Then open:
 
 - Statements: `http://127.0.0.1:8000/statements/AAPL`
-- Optional query params: `statement_type=income|balance|cashflow`, `period=annual|quarterly`, `num_periods=10`
+- Optional query params: `period=annual|quarterly`, `num_periods=10`
 - Screener placeholder: `http://127.0.0.1:8000/screener`
 - API docs: `http://127.0.0.1:8000/docs`
 
@@ -120,7 +120,7 @@ data/raw/
 - [x] edgartools statement fetch + FastAPI/Jinja statement viewer
 - [x] Implement caching for edgartools (local filings + LRU company eviction)
 - [ ] Add new processed views
-- [ ] Change the statement parameter to a toggle (like level of detail)
+- [x] Change the statement parameter to a toggle (like level of detail)
 - [ ] Ingestion pipelines (companies, prices, financials)
 - [ ] Cross-company screener (HTMX + DuckDB / `src/analytics`)
 - [ ] CLI (`init`, `ingest`, `update-prices`, `update-financials`, `screen`)

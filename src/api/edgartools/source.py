@@ -184,14 +184,13 @@ def _build_all_statement_views(xbrls: XBRLS, num_periods: int) -> PeriodBundle:
     }
 
 
-def _load_cached_statement_views(
+def _load_cached_bundle(
     *,
     cik: int | str,
     ticker: str,
-    statement_type: StatementType,
     period: PeriodType,
     num_periods: int,
-) -> dict[str, pd.DataFrame] | None:
+) -> PeriodBundle | None:
     bundle = load_period_bundle(
         cik=cik,
         period=period,
@@ -206,16 +205,15 @@ def _load_cached_statement_views(
         cache_dir=EDGARTOOLS_CACHE_DIR,
         max_companies=EDGARTOOLS_COMPANY_CACHE_SIZE,
     )
-    return bundle[statement_type]
+    return bundle
 
 
-def get_statement_views(
+def get_all_statement_views(
     ticker: str,
-    statement_type: StatementType,
     period: PeriodType,
     num_periods: int = 10,
-) -> dict[str, pd.DataFrame]:
-    """Return summary/standard/detailed DataFrames for a stitched SEC statement."""
+) -> PeriodBundle:
+    """Return summary/standard/detailed DataFrames for all statement types."""
     load_dotenv()  # Load environment variables from .env
     if not os.environ.get("EDGAR_IDENTITY"):
         raise ValueError("EDGAR_IDENTITY environment variable is not set.")
@@ -223,10 +221,9 @@ def get_statement_views(
 
     cached_cik = find_cached_cik(EDGARTOOLS_CACHE_DIR, ticker)
     if cached_cik is not None:
-        cached = _load_cached_statement_views(
+        cached = _load_cached_bundle(
             cik=cached_cik,
             ticker=ticker,
-            statement_type=statement_type,
             period=period,
             num_periods=num_periods,
         )
@@ -234,10 +231,9 @@ def get_statement_views(
             return cached
 
     company = Company(ticker)
-    cached = _load_cached_statement_views(
+    cached = _load_cached_bundle(
         cik=company.cik,
         ticker=ticker,
-        statement_type=statement_type,
         period=period,
         num_periods=num_periods,
     )
@@ -265,4 +261,14 @@ def get_statement_views(
         cache_dir=EDGARTOOLS_CACHE_DIR,
         max_companies=EDGARTOOLS_COMPANY_CACHE_SIZE,
     )
-    return all_views[statement_type]
+    return all_views
+
+
+def get_statement_views(
+    ticker: str,
+    statement_type: StatementType,
+    period: PeriodType,
+    num_periods: int = 10,
+) -> dict[str, pd.DataFrame]:
+    """Return summary/standard/detailed DataFrames for one statement type."""
+    return get_all_statement_views(ticker, period, num_periods)[statement_type]

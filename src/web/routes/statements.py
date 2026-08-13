@@ -7,13 +7,12 @@ from typing import Literal
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import HTMLResponse
 
-from src.api.edgartools.source import get_statement_views
+from src.api.edgartools.source import get_all_statement_views
 from src.models.edgartools.html_renderer import build_statement_payload
 from src.web.templating import templates
 
 router = APIRouter(tags=["statements"])
 
-StatementType = Literal["income", "balance", "cashflow"]
 PeriodType = Literal["annual", "quarterly"]
 
 
@@ -21,17 +20,15 @@ PeriodType = Literal["annual", "quarterly"]
 def statement_view(
     request: Request,
     ticker: str,
-    statement_type: StatementType = Query(default="income"),
     period: PeriodType = Query(default="annual"),
     num_periods: int = Query(default=10, ge=1, le=40),
 ) -> HTMLResponse:
-    """Serve an interactive statement page; view toggling stays client-side."""
+    """Serve an interactive statement page; toggles stay client-side."""
     symbol = ticker.upper().strip()
-    views = get_statement_views(symbol, statement_type, period, num_periods)
+    all_views = get_all_statement_views(symbol, period, num_periods)
     statement_data = build_statement_payload(
-        views,
+        all_views,
         ticker=symbol,
-        statement_type=statement_type,
         period=period,
     )
     return templates.TemplateResponse(
