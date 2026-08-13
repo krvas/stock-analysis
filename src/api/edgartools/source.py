@@ -6,13 +6,12 @@ import os
 import re
 from typing import Literal
 
+from anyio import Path
 import pandas as pd
 from dotenv import load_dotenv
 from edgar import Company, set_identity
 from edgar.xbrl import XBRLS
 from edgar.xbrl.stitching.periods import determine_optimal_periods
-
-from src.config import SEC_APP_IDENTITY
 
 StatementType = Literal["income", "balance", "cashflow"]
 PeriodType = Literal["annual", "quarterly"]
@@ -53,12 +52,9 @@ _METADATA_COLUMNS = {
     "parent_abstract_concept",
 }
 
-
-def _configure_sec_identity() -> None:
-    load_dotenv()
-    contact = os.environ.get("SEC_CONTACT_EMAIL", "contact@example.com")
-    set_identity(f"{SEC_APP_IDENTITY} ({contact})")
-
+def _configure_edgartools_cache():
+    os.environ["EDGAR_USE_LOCAL_DATA"] = "True"
+    os.environ["EDGAR_LOCAL_DATA_DIR"] = str(Path(__file__).resolve().parent.parent / "data" / "edgartools_cache")
 
 def _period_columns(df: pd.DataFrame) -> list[str]:
     return [col for col in df.columns if col not in _METADATA_COLUMNS]
@@ -152,7 +148,10 @@ def get_statement_views(
     num_periods: int = 10,
 ) -> dict[str, pd.DataFrame]:
     """Return summary/standard/detailed DataFrames for a stitched SEC statement."""
-    _configure_sec_identity()
+    load_dotenv()  # Load environment variables from .env
+    if not os.environ.get("EDGAR_IDENTITY"):
+        raise ValueError("EDGAR_IDENTITY environment variable is not set.")
+    _configure_edgartools_cache()
 
     company = Company(ticker)
     form = _FORM_BY_PERIOD[period]

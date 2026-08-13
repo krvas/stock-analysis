@@ -24,6 +24,7 @@ data/processed/**/*.parquet
 data/processed/*.html
 data/duckdb/*.duckdb
 data/duckdb/*.wal
+data/edgartools_cache/*
 
 # IDE
 .idea/

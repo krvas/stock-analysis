@@ -62,7 +62,7 @@ Then open:
 - Screener placeholder: `http://127.0.0.1:8000/screener`
 - API docs: `http://127.0.0.1:8000/docs`
 
-SEC identity for edgartools uses `SEC_CONTACT_EMAIL` from `.env`.
+SEC identity for edgartools uses `EDGAR_IDENTITY` from `.env`.
 
 ### DatabaseManager
 
