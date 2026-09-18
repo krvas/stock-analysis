@@ -2,6 +2,20 @@
 
 {% block subpage_content %}
 <div class="wizard-landing">
+  <form class="wizard-ticker-form" method="get" action="/wizard">
+    <label for="wizard-ticker">Ticker</label>
+    <input
+      id="wizard-ticker"
+      name="ticker"
+      type="text"
+      value="{{ ticker }}"
+      autocomplete="off"
+      spellcheck="false"
+      required
+      maxlength="12"
+    >
+    <button type="submit">Open</button>
+  </form>
   {% for group_key, group_label, group_pages in wizard_groups %}
     <section class="wizard-group" data-group="{{ group_key }}">
       <h2>{{ group_label }}</h2>

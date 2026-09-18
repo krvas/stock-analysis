@@ -56,6 +56,14 @@ def _subpage_template(page_slug: str, subpage_slug: str) -> str:
     return candidate
 
 
+@router.get("/wizard")
+def wizard_ticker_redirect(ticker: str) -> RedirectResponse:
+    symbol = _normalize_ticker(ticker)
+    if not symbol:
+        raise HTTPException(status_code=400, detail="Ticker is required")
+    return RedirectResponse(url=f"/wizard/{symbol}", status_code=303)
+
+
 @router.get("/wizard/{ticker}", response_class=HTMLResponse)
 def wizard_landing(request: Request, ticker: str) -> HTMLResponse:
     symbol = _normalize_ticker(ticker)

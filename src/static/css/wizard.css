@@ -125,6 +125,43 @@
   gap: 20px;
 }
 
+.wizard-ticker-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.wizard-ticker-form label {
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.wizard-ticker-form input {
+  font: inherit;
+  text-transform: uppercase;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--header-bg);
+  color: var(--text);
+  width: 8rem;
+}
+
+.wizard-ticker-form button {
+  font: inherit;
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--header-bg);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.wizard-ticker-form button:hover {
+  color: var(--accent);
+}
+
 .wizard-group h2 {
   margin: 0 0 8px;
   font-size: 1rem;
