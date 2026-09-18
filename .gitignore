@@ -38,3 +38,6 @@ logs/
 
 # Jupyter
 .ipynb_checkpoints/
+
+# State file
+STATE.md
