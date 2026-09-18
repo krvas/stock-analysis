@@ -22,6 +22,7 @@ app.include_router(api_router)
 def root() -> dict[str, str]:
     return {
         "statements": "/statements/{ticker}",
+        "wizard": "/wizard/{ticker}",
         "screener": "/screener",
         "docs": "/docs",
     }

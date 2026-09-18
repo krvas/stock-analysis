@@ -1,0 +1,27 @@
+{% extends "wizard/base_subpage.html" %}
+
+{% block subpage_content %}
+<div class="wizard-landing">
+  {% for group_key, group_label, group_pages in wizard_groups %}
+    <section class="wizard-group" data-group="{{ group_key }}">
+      <h2>{{ group_label }}</h2>
+      <ul class="wizard-landing-pages">
+        {% for landing_page in group_pages %}
+          <li>
+            <strong>{{ landing_page.title }}</strong>
+            <ul>
+              {% for landing_subpage in landing_page.subpages %}
+                <li>
+                  <a href="/wizard/{{ ticker }}/{{ landing_page.slug }}/{{ landing_subpage.slug }}">
+                    {{ landing_subpage.title }}
+                  </a>
+                </li>
+              {% endfor %}
+            </ul>
+          </li>
+        {% endfor %}
+      </ul>
+    </section>
+  {% endfor %}
+</div>
+{% endblock %}

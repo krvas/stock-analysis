@@ -1,0 +1,138 @@
+.wizard-page {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.wizard-nav {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  padding: 8px;
+}
+
+.wizard-page-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.wizard-page-tab-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 140px;
+  padding: 8px;
+  border-radius: 6px;
+  background: var(--header-bg);
+}
+
+.wizard-page-tab,
+.wizard-subpage-tab {
+  display: block;
+  text-decoration: none;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.wizard-page-tab {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.wizard-page-tab.is-active,
+.wizard-subpage-tab.is-active,
+.wizard-page-tab:hover,
+.wizard-subpage-tab:hover {
+  color: var(--accent);
+}
+
+.wizard-subpage-tabs {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-left: 4px;
+  border-left: 2px solid var(--border);
+}
+
+.wizard-header {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.wizard-breadcrumb {
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.wizard-breadcrumb a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.wizard-breadcrumb-sep {
+  margin: 0 6px;
+}
+
+.wizard-layout {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.wizard-main {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  padding: 20px;
+  min-height: 160px;
+}
+
+.wizard-region:empty {
+  display: none;
+}
+
+.wizard-computed,
+.wizard-human-input,
+.wizard-source-trace {
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  padding: 12px;
+  min-height: 0;
+}
+
+.wizard-source-trace {
+  background: var(--header-bg);
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.wizard-nyi {
+  margin: 0;
+  font-size: 1.1rem;
+  color: var(--muted);
+}
+
+.wizard-landing {
+  display: grid;
+  gap: 20px;
+}
+
+.wizard-group h2 {
+  margin: 0 0 8px;
+  font-size: 1rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.wizard-landing-pages {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.wizard-landing-pages ul {
+  margin: 4px 0 12px;
+  padding-left: 18px;
+}
