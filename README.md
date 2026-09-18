@@ -1,16 +1,18 @@
 # Indian Stock Analysis Platform
 
-Python-based data platform for NSE and BSE listed companies. Ingests market and financial data via **finfetch**, stores raw responses as **Parquet**, and loads normalized tables into **DuckDB** for screening, factor research, backtesting, and ML workflows.
+Python-based data platform for NSE/BSE and US equities. Ingests market and financial data into **DuckDB**, and serves interactive HTML views via **FastAPI + Jinja2** (with room for HTMX-backed screening).
 
 ## Tech Stack
 
 | Layer | Technology |
 |-------|------------|
 | Runtime | Python 3.12 |
+| Web | FastAPI, Jinja2, uvicorn |
 | Analytics DB | DuckDB |
 | DataFrames | pandas |
 | Raw storage | Parquet (PyArrow) |
-| Market/financial data | finfetch |
+| US filings | edgartools (SEC EDGAR) |
+| Market/financial data | IndianAPI, Alpha Vantage, Finnhub (finfetch planned) |
 | Resilience | tenacity (retries) |
 
 ## Project Structure
@@ -18,35 +20,25 @@ Python-based data platform for NSE and BSE listed companies. Ingests market and 
 ```
 project_root/
 ├── data/
-│   ├── raw/              # API responses as Parquet (partitioned by dataset)
-│   ├── processed/        # Cleaned Parquet before DuckDB load
+│   ├── raw/              # Cached API / filing responses
+│   ├── processed/        # Intermediate artifacts
 │   └── duckdb/           # indian_stocks.duckdb
 ├── src/
-│   ├── api/              # finfetch wrapper clients
-│   ├── ingestion/        # Fetch → Parquet → DuckDB loaders
+│   ├── api/              # Vendor clients (IndianAPI, Alpha Vantage, Finnhub, edgartools)
+│   ├── ingestion/        # Load API data into DuckDB
 │   ├── database/         # Schema, DatabaseManager
-│   ├── models/           # Pydantic/dataclass models
-│   ├── pipelines/        # Orchestration (full / incremental)
-│   ├── utils/            # Logging, retry decorators
-│   └── analytics/        # Screeners, factor SQL
+│   ├── models/           # Payload builders / view models
+│   ├── pipelines/        # CLI orchestration (ingest, etc.)
+│   ├── analytics/        # Screeners, factor SQL (planned)
+│   ├── web/              # FastAPI app + routes
+│   ├── templates/        # Jinja2 HTML templates
+│   ├── static/           # Shared CSS / JS
+│   └── utils/
 ├── notebooks/
 ├── tests/
 ├── requirements.txt
 └── README.md
 ```
-
-## DuckDB Schema
-
-| Table | Purpose | Primary key |
-|-------|---------|-------------|
-| `companies` | Master list of NSE/BSE symbols | `company_id` (unique: `symbol`, `exchange`) |
-| `prices` | Daily OHLCV | `(company_id, trade_date)` |
-| `financials` | P&L (annual + quarterly) | `(company_id, period_end_date, period_type)` |
-| `balance_sheets` | Assets / liabilities / equity | `(company_id, period_end_date, period_type)` |
-| `cash_flows` | Operating / investing / financing CF | `(company_id, period_end_date, period_type)` |
-| `corporate_actions` | Splits / bonuses / dividends / etc. | `(company_id, action_date, action_type)` |
-
-`period_type` on `financials`, `balance_sheets`, and `cash_flows` is `'annual'` or `'quarterly'`.
 
 ## Quick Start
 
@@ -58,7 +50,26 @@ pip install -r requirements.txt
 
 # Initialize DuckDB schema
 python -m src.database.init_schema
+
+# Run the web app
+uvicorn src.web.app:app --reload
 ```
+
+Then open:
+
+- Statements: `http://127.0.0.1:8000/statements/AAPL`
+- Optional query params: `period=annual|quarterly`, `num_periods=10`
+- Screener placeholder: `http://127.0.0.1:8000/screener`
+- API docs: `http://127.0.0.1:8000/docs`
+
+SEC identity for edgartools uses `EDGAR_IDENTITY` from `.env`. Computed statement
+views are cached under `data/edgartools_cache/companies/{cik}/{period}_{num_periods}/`
+as a bundle covering income, balance, and cashflow together. The app keeps the
+`EDGARTOOLS_COMPANY_CACHE_SIZE` most recently viewed companies (default 10) and
+deletes older company caches automatically. Bundles older than
+`EDGARTOOLS_CACHE_MAX_AGE_MONTHS` (default 3) by latest filing date are
+refetched. Override sizes via those env vars when storage or freshness needs
+differ. Filings are fetched directly from the SEC on cache miss.
 
 ### DatabaseManager
 
@@ -73,6 +84,19 @@ with DatabaseManager() as db:
     db.load_parquet("prices", "data/processed/reliance_prices.parquet")
     latest = db.max_trade_date(company_id=1)  # incremental price updates
 ```
+
+## DuckDB Schema
+
+| Table | Purpose | Primary key |
+|-------|---------|-------------|
+| `companies` | Master list of NSE/BSE symbols | `company_id` (unique: `symbol`, `exchange`) |
+| `prices` | Daily OHLCV | `(company_id, trade_date)` |
+| `financials` | P&L (annual + quarterly) | `(company_id, period_end_date, period_type)` |
+| `balance_sheets` | Assets / liabilities / equity | `(company_id, period_end_date, period_type)` |
+| `cash_flows` | Operating / investing / financing CF | `(company_id, period_end_date, period_type)` |
+| `corporate_actions` | Splits / bonuses / dividends / etc. | `(company_id, action_date, action_type)` |
+
+`period_type` on `financials`, `balance_sheets`, and `cash_flows` is `'annual'` or `'quarterly'`.
 
 ## Data Layout (Parquet)
 
@@ -92,8 +116,13 @@ data/raw/
 
 - [x] Project structure and DuckDB schema
 - [x] DatabaseManager class
-- [x] IndianAPI API wrappers
+- [x] IndianAPI / Alpha Vantage / Finnhub clients
+- [x] edgartools statement fetch + FastAPI/Jinja statement viewer
+- [x] Implement caching for edgartools (local filings + LRU company eviction)
+- [ ] Add new processed views
+- [x] Change the statement parameter to a toggle (like level of detail)
 - [ ] Ingestion pipelines (companies, prices, financials)
+- [ ] Cross-company screener (HTMX + DuckDB / `src/analytics`)
 - [ ] CLI (`init`, `ingest`, `update-prices`, `update-financials`, `screen`)
 - [ ] Sample screener (ROE > 15%, D/E < 0.5, 3Y revenue growth)
 

@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+
+{% block title %}{{ statement_data.ticker }} — Financial Statement{% endblock %}
+
+{% block content %}
+<div class="page">
+  <div class="header">
+    <div class="title-block">
+      <h1 id="page-title">Financial Statement</h1>
+      <p id="page-subtitle"></p>
+    </div>
+    <div class="controls">
+      <div class="control-group">
+        <label for="statement-type-select">Statement</label>
+        <select id="statement-type-select" aria-label="Statement type">
+          <option value="income" selected>Income</option>
+          <option value="balance">Balance</option>
+          <option value="cashflow">Cash Flow</option>
+        </select>
+      </div>
+      <div class="control-group">
+        <label for="view-select">View</label>
+        <select id="view-select" aria-label="Statement view">
+          <option value="summary">Summary</option>
+          <option value="standard" selected>Standard</option>
+          <option value="detailed">Detailed</option>
+        </select>
+      </div>
+      <div class="control-group" id="fund-flow-controls" hidden>
+        <label for="display-mode-select">Layout</label>
+        <select id="display-mode-select" aria-label="Balance sheet layout">
+          <option value="periods" selected>Periods</option>
+          <option value="fund-flow">Fund Flow</option>
+        </select>
+      </div>
+      <div class="control-group" id="compare-period-controls" hidden>
+        <label for="compare-period-select">Compare to</label>
+        <select id="compare-period-select" aria-label="Previous period for fund flow"></select>
+      </div>
+    </div>
+  </div>
+  <div class="table-wrap">
+    <table id="statement-table">
+      <thead></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script id="statement-data" type="application/json">{{ statement_data | tojson }}</script>
+<script src="{{ url_for('static', path='js/statement_view.js') }}"></script>
+{% endblock %}
