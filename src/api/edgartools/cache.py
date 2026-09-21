@@ -3,7 +3,7 @@
 Caches all statement types (income, balance, cashflow) and detail levels for a
 given ``(cik, period, num_periods)`` bundle so browsing one company reuses a
 single SEC fetch. Bundles are invalidated when the stored latest filing date is
-more than ``EDGARTOOLS_CACHE_MAX_AGE_MONTHS`` old.
+more than the period-specific cache age old.
 """
 
 from __future__ import annotations
@@ -18,9 +18,10 @@ from typing import Literal
 import pandas as pd
 
 from src.config import (
+    EDGARTOOLS_ANNUAL_CACHE_MAX_AGE_MONTHS,
     EDGARTOOLS_CACHE_DIR,
-    EDGARTOOLS_CACHE_MAX_AGE_MONTHS,
     EDGARTOOLS_COMPANY_CACHE_SIZE,
+    EDGARTOOLS_QUARTERLY_CACHE_MAX_AGE_MONTHS,
 )
 
 logger = logging.getLogger(__name__)
@@ -125,12 +126,18 @@ def _add_months(value: date, months: int) -> date:
 def is_period_bundle_stale(
     latest_filing_date: date,
     *,
+    period: PeriodType = "quarterly",
     reference: date | None = None,
     max_age_months: int | None = None,
 ) -> bool:
     """Return True when ``latest_filing_date`` is more than ``max_age_months`` old."""
     reference = reference or date.today()
-    max_age_months = EDGARTOOLS_CACHE_MAX_AGE_MONTHS if max_age_months is None else max_age_months
+    if max_age_months is None:
+        max_age_months = (
+            EDGARTOOLS_ANNUAL_CACHE_MAX_AGE_MONTHS
+            if period == "annual"
+            else EDGARTOOLS_QUARTERLY_CACHE_MAX_AGE_MONTHS
+        )
     return reference > _add_months(latest_filing_date, max_age_months)
 
 
@@ -181,7 +188,7 @@ def load_period_bundle(
         delete_period_bundle(cik=cik, period=period, num_periods=num_periods, cache_dir=cache_dir)
         return None
 
-    if is_period_bundle_stale(latest_filing_date, reference=reference):
+    if is_period_bundle_stale(latest_filing_date, period=period, reference=reference):
         logger.info(
             "Period bundle stale for CIK %s (%s, %d periods); latest filing %s",
             cik,

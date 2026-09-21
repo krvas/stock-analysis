@@ -31,10 +31,14 @@ EDGARTOOLS_COMPANY_CACHE_SIZE = max(
     1,
     int(os.environ.get("EDGARTOOLS_COMPANY_CACHE_SIZE", "10")),
 )
-# Refetch cached statements when the latest stored filing date is older than this.
-EDGARTOOLS_CACHE_MAX_AGE_MONTHS = max(
+# Refetch cached statements when the latest stored filing date is older than these.
+EDGARTOOLS_QUARTERLY_CACHE_MAX_AGE_MONTHS = max(
     1,
-    int(os.environ.get("EDGARTOOLS_CACHE_MAX_AGE_MONTHS", "3")),
+    int(os.environ.get("EDGARTOOLS_QUARTERLY_CACHE_MAX_AGE_MONTHS", "3")),
+)
+EDGARTOOLS_ANNUAL_CACHE_MAX_AGE_MONTHS = max(
+    1,
+    int(os.environ.get("EDGARTOOLS_ANNUAL_CACHE_MAX_AGE_MONTHS", "12")),
 )
 
 # Logging
