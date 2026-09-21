@@ -1,0 +1,17 @@
+
+{% macro table(table_id, table_data) %}
+
+<div class="table-wrap">
+  <table id="{{ table_id }}">
+    <thead></thead>
+    <tbody></tbody>
+  </table>
+</div>
+<script
+  type="application/json"
+  id="{{ table_id }}-data"
+  data-line-item-table
+  data-table-id="{{ table_id }}"
+>{{ table_data | tojson }}</script>
+
+{% endmacro %}
