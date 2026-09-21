@@ -32,12 +32,9 @@ data/edgartools_cache/*
 *.swp
 .DS_Store
 
-# Logs
-logs/
-*.log
-
 # Jupyter
 .ipynb_checkpoints/
 
-# Rough page
-feature-list.md
+# Rough notes
+specs/feature-list.md
+specs/feature-template.md
