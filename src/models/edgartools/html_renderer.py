@@ -21,7 +21,8 @@ def _period_columns(df: pd.DataFrame) -> list[str]:
     return [col for col in df.columns if col not in _METADATA_COLUMNS]
 
 
-def _serialize_dataframe(df: pd.DataFrame) -> dict[str, Any]:
+def serialize_line_item_view(df: pd.DataFrame) -> dict[str, Any]:
+    """Serialize a statement DataFrame for client-side rendering via tables.js."""
     periods = _period_columns(df)
     rows: list[dict[str, Any]] = []
     for record in df.to_dict(orient="records"):
@@ -39,7 +40,7 @@ def _serialize_dataframe(df: pd.DataFrame) -> dict[str, Any]:
 
 
 def _serialize_views(views: dict[str, pd.DataFrame]) -> dict[str, Any]:
-    return {name: _serialize_dataframe(df) for name, df in views.items()}
+    return {name: serialize_line_item_view(df) for name, df in views.items()}
 
 
 def build_statement_payload(
