@@ -60,7 +60,8 @@ WIZARD_PAGES: list[Page] = [
         group="business",
         subpages=[
             SubPage(slug="look-through-earnings", title="Look-through Earnings", order=1),
-            SubPage(slug="opex-to-capex", title="Capitalizing Opex", order=2),
+            SubPage(slug="opex-to-capex", title="Capitalizing Opex", order=2,
+                    context_builder=adjustments.opex_to_capex_context),
             SubPage(slug="owner-earnings", title="Owner Earnings", order=3),
             SubPage(slug="assets-in-use", title="Assets in Use", order=4),
         ],
