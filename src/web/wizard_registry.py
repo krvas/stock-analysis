@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Final, Literal
+from typing import Any, Callable, Final, Literal
+
+from src.web.routes.wizard_pages import adjustments
 
 PageGroup = Literal["business", "people", "price", "red_flags"]
 
@@ -21,12 +23,15 @@ GROUP_ORDER: Final[tuple[PageGroup, ...]] = (
     "red_flags",
 )
 
+SubPageContextBuilder = Callable[[str, str], dict[str, Any]]
+default_context_builder: Final[SubPageContextBuilder] = lambda ticker, period: {}
 
 @dataclass(frozen=True)
 class SubPage:
     slug: str
     title: str
     order: int
+    context_builder: SubPageContextBuilder = default_context_builder
 
 
 @dataclass(frozen=True)
@@ -55,6 +60,9 @@ WIZARD_PAGES: list[Page] = [
         group="business",
         subpages=[
             SubPage(slug="look-through-earnings", title="Look-through Earnings", order=1),
+            SubPage(slug="opex-to-capex", title="Capitalizing Opex", order=2),
+            SubPage(slug="owner-earnings", title="Owner Earnings", order=3),
+            SubPage(slug="assets-in-use", title="Assets in Use", order=4),
         ],
     ),
     Page(
