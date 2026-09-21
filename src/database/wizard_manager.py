@@ -1,0 +1,141 @@
+"""DuckDB manager for wizard adjustment preferences (wizard.sql)."""
+
+from __future__ import annotations
+
+import logging
+from pathlib import Path
+import duckdb
+import pandas as pd
+
+from src.config import DEFAULT_WIZARD_DB_PATH, WIZARD_SCHEMA_SQL_PATH
+from src.database import wizard_tables as wt
+from src.database.manager import BaseDatabaseManager, STAGING_PREFIX, UpsertResult, _utc_now
+
+logger = logging.getLogger(__name__)
+
+
+class WizardDatabaseManager(BaseDatabaseManager):
+    """Connection and upserts for ``adjustment_preferences``."""
+
+    default_schema_path: Path = WIZARD_SCHEMA_SQL_PATH
+
+    def __init__(
+        self,
+        db_path: Path | str | None = None,
+        *,
+        read_only: bool = False,
+        auto_connect: bool = True,
+    ) -> None:
+        super().__init__(
+            Path(db_path or DEFAULT_WIZARD_DB_PATH),
+            read_only=read_only,
+            auto_connect=auto_connect,
+        )
+
+    def __enter__(self) -> WizardDatabaseManager:
+        self.connect()
+        return self
+
+    def _ensure_schema(self) -> None:
+        if wt.ADJUSTMENT_PREFERENCES not in self.list_tables():
+            self.initialize_schema()
+
+    def upsert_adjustment_preferences(self, df: pd.DataFrame) -> UpsertResult:
+        """Upsert rows into ``adjustment_preferences``.
+
+        Conflicts on ``(ticker, exchange, adjustment_type, base_concept)`` update
+        the existing preference so stored rules track the latest user intent.
+        """
+        table = wt.ADJUSTMENT_PREFERENCES
+        self._ensure_schema()
+        if df.empty:
+            logger.debug("Skipping empty upsert for %s", table)
+            return UpsertResult(table=table, rows_written=0)
+
+        if self.read_only:
+            raise RuntimeError("Cannot upsert on a read-only connection.")
+
+        prepared = self._prepare_adjustment_preferences(df)
+        conflict_cols = wt.UNIQUE_KEYS[table]
+        missing = [c for c in conflict_cols if c not in prepared.columns]
+        if missing:
+            raise ValueError(f"{table} upsert missing columns: {missing}")
+
+        staging = f"{STAGING_PREFIX}{table}"
+        sql = _build_adjustment_preferences_upsert_sql(table, staging, conflict_cols)
+        con = self.connection
+        try:
+            con.register(staging, prepared)
+            con.execute(sql)
+        finally:
+            try:
+                con.unregister(staging)
+            except duckdb.CatalogException:
+                pass
+
+        logger.info("Upserted %d rows into %s", len(prepared), table)
+        return UpsertResult(table=table, rows_written=len(prepared))
+
+    def read_adjustment_preferences(
+        self,
+        ticker: str,
+        exchange: str,
+    ) -> pd.DataFrame:
+        """Return all adjustment preferences for a ticker on an exchange."""
+        if wt.ADJUSTMENT_PREFERENCES not in self.list_tables():
+            return pd.DataFrame(columns=list(wt.TABLE_COLUMNS[wt.ADJUSTMENT_PREFERENCES]))
+        return self.query(
+            """
+            SELECT *
+            FROM adjustment_preferences
+            WHERE ticker = ? AND exchange = ?
+            ORDER BY adjustment_type, base_concept
+            """,
+            [ticker.upper(), exchange.upper()],
+        )
+
+    def _prepare_adjustment_preferences(self, df: pd.DataFrame) -> pd.DataFrame:
+        table = wt.ADJUSTMENT_PREFERENCES
+        allowed = set(wt.TABLE_COLUMNS[table])
+        extra = set(df.columns) - allowed
+        if extra:
+            logger.warning("Dropping unknown columns for %s: %s", table, sorted(extra))
+
+        cols = [c for c in wt.TABLE_COLUMNS[table] if c in df.columns]
+        out = df[cols].copy()
+
+        if "ticker" in out.columns:
+            out["ticker"] = out["ticker"].astype(str).str.upper()
+        if "exchange" in out.columns:
+            out["exchange"] = out["exchange"].astype(str).str.upper()
+
+        now = _utc_now()
+        if "updated_at" not in out.columns:
+            out["updated_at"] = now
+        else:
+            out["updated_at"] = out["updated_at"].fillna(now)
+
+        for col in wt.TABLE_COLUMNS[table]:
+            if col not in out.columns:
+                out[col] = pd.NA
+
+        for col, default in wt.SCHEMA_DEFAULTS.get(table, {}).items():
+            if col in out.columns:
+                out[col] = out[col].fillna(default)
+
+        return out[list(wt.TABLE_COLUMNS[table])]
+
+
+def _build_adjustment_preferences_upsert_sql(
+    table: str,
+    staging: str,
+    conflict_cols: tuple[str, ...],
+) -> str:
+    update_cols = [c for c in wt.TABLE_COLUMNS[table] if c not in conflict_cols]
+    set_clause = ", ".join(f"{c} = excluded.{c}" for c in update_cols)
+    conflict_target = ", ".join(conflict_cols)
+    return f"""
+        INSERT INTO {table} BY NAME
+        SELECT * FROM {staging}
+        ON CONFLICT ({conflict_target}) DO UPDATE SET {set_clause}
+    """

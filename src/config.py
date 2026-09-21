@@ -14,9 +14,11 @@ DUCKDB_DIR = DATA_DIR / "duckdb"
 
 # Default DuckDB file path
 DEFAULT_DB_PATH = DUCKDB_DIR / "indian_stocks.duckdb"
+DEFAULT_WIZARD_DB_PATH = DUCKDB_DIR / "wizard.duckdb"
 
-# Schema SQL file
+# Schema SQL files
 SCHEMA_SQL_PATH = Path(__file__).resolve().parent / "database" / "schema.sql"
+WIZARD_SCHEMA_SQL_PATH = Path(__file__).resolve().parent / "database" / "wizard.sql"
 
 # Historical data retention target (years)
 HISTORY_YEARS = 10
