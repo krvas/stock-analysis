@@ -9,6 +9,10 @@ def opex_to_capex_context(ticker: str, period: PeriodType) -> dict[str, object]:
     views = get_statement_views(ticker=ticker, statement_type="income", period=period, num_periods=2)
     df = views["detailed"]
     opex = df[df["standard_concept"].isin(OPERATING_EXPENSES)]
+    add_cols = [
+            {"name": "Capitalize", "type": "checkbox"},
+            {"name": "Years", "type": "number"}
+        ]
     return {
-        "opex_table": serialize_line_item_view(opex)
+        "opex_table": serialize_line_item_view(opex, add_cols)
     }

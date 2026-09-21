@@ -7,6 +7,7 @@ import {
   formatNumber,
   getStatementUnit,
   getUnitLabel,
+  type_to_html,
 } from "./utils.js";
 
 function getTableParts(tableId) {
@@ -61,6 +62,17 @@ function appendValueCells(tr, values, unitKey) {
   });
 }
 
+function appendInputCells(tr, cols, label) {
+  cols.forEach((col) => {
+    const element = document.createElement("input");
+    element.type = col.type;
+    element.id = "input-" + col.name + "-" + label;
+    const td = document.createElement("td");
+    td.appendChild(element);
+    tr.appendChild(td);
+})
+}
+
 /**
  * Render rows with one column per period (standard statement layout).
  *
@@ -68,14 +80,16 @@ function appendValueCells(tr, values, unitKey) {
  * @param {Array<{ label, level, is_total, values: Record<string, number|null> }>} rows
  * @param {string[]} periods - Column keys matching row.values
  * @param {{ unitKey?: string }} [options]
+ * @param {{ name: string, type: string}[]} [add_cols] - columns to be added
  */
-export function renderLineItemPeriodsTable(tableId, rows, periods, options = {}) {
+export function renderLineItemPeriodsTable(tableId, rows, periods, options = {}, add_cols = []) {
   const { thead, tbody } = getTableParts(tableId);
   clearTable(thead, tbody);
 
   const unitLabel = getUnitLabel(options.unitKey);
+  const add_names = add_cols.map((col) => col.name);
   thead.appendChild(
-    buildHeaderRow(periods, `Line Item (in ${unitLabel})`),
+    buildHeaderRow([...periods, ...add_names], `Line Item (in ${unitLabel})`),
   );
 
   rows.forEach((row) => {
@@ -86,6 +100,7 @@ export function renderLineItemPeriodsTable(tableId, rows, periods, options = {})
       periods.map((period) => row.values[period]),
       options.unitKey,
     );
+    appendInputCells(tr, add_cols, row.label);
     tbody.appendChild(tr);
   });
 }

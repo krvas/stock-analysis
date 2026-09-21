@@ -11,6 +11,10 @@ export const UNIT_OPTIONS = {
 
 let CURRENT_UNIT = "millions";
 
+export function type_to_html(name, type) {
+  return '<input type="' + type + '" id="' + name + '-checkbox" disabled></input>'
+}
+
 export function getStatementUnit() {
   return window.STATEMENT_UNIT || CURRENT_UNIT;
 }
