@@ -1,5 +1,6 @@
 {% extends "wizard/base_subpage.html" %}
+{% import "macros/line_item_table.html" as table_macro %}
 
 {% block subpage_content %}
-    {{ table | safe }}
+{{ table_macro.table('opex-to-capex-table', opex_table) }}
 {% endblock %}
