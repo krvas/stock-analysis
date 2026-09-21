@@ -1,0 +1,23 @@
+<nav class="wizard-nav" aria-label="Wizard">
+  <div class="wizard-page-tabs" role="tablist" aria-label="Pages">
+    {% for nav_page in wizard_pages %}
+      {% set first = nav_page.subpages[0] if nav_page.subpages else none %}
+      <a
+        class="wizard-page-tab{% if page and page.slug == nav_page.slug %} is-active{% endif %}"
+        href="{% if first %}/wizard/{{ ticker }}/{{ nav_page.slug }}/{{ first.slug }}{% else %}/wizard/{{ ticker }}/{{ nav_page.slug }}{% endif %}"
+        {% if page and page.slug == nav_page.slug %}aria-current="page"{% endif %}
+      >{{ nav_page.title }}</a>
+    {% endfor %}
+  </div>
+  {% if page and page.subpages %}
+    <div class="wizard-subpage-tabs" role="tablist" aria-label="{{ page.title }} sub-pages">
+      {% for nav_subpage in page.subpages %}
+        <a
+          class="wizard-subpage-tab{% if subpage and subpage.slug == nav_subpage.slug %} is-active{% endif %}"
+          href="/wizard/{{ ticker }}/{{ page.slug }}/{{ nav_subpage.slug }}"
+          {% if subpage and subpage.slug == nav_subpage.slug %}aria-current="page"{% endif %}
+        >{{ nav_subpage.title }}</a>
+      {% endfor %}
+    </div>
+  {% endif %}
+</nav>

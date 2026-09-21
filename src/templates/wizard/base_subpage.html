@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+
+{% block title %}
+  {% if page and subpage %}
+    {{ ticker }} — {{ page.title }} — {{ subpage.title }}
+  {% elif page %}
+    {{ ticker }} — {{ page.title }}
+  {% else %}
+    {{ ticker }} — Analysis
+  {% endif %}
+{% endblock %}
+
+{% block head %}
+<link rel="stylesheet" href="{{ url_for('static', path='css/wizard.css') }}">
+{% endblock %}
+
+{% block content %}
+<div class="page wizard-page">
+  {# Pages as tabs, sub-pages as nested tabs. A future long-scroll layout can replace .wizard-nav with stacked sections. #}
+  {% include "wizard/_nav.html" %}
+
+  <header class="wizard-header">
+    <nav class="wizard-breadcrumb" aria-label="Breadcrumb">
+      <a href="/wizard/{{ ticker }}">{{ ticker }}</a>
+      {% if page %}
+        <span class="wizard-breadcrumb-sep" aria-hidden="true">›</span>
+        <span>{{ page.title }}</span>
+      {% endif %}
+      {% if subpage %}
+        <span class="wizard-breadcrumb-sep" aria-hidden="true">›</span>
+        <span>{{ subpage.title }}</span>
+      {% endif %}
+    </nav>
+    <div class="title-block">
+      <h1>{% if page %}{{ page.title }}{% else %}{{ ticker }}{% endif %}</h1>
+      {% if subpage %}
+        <p>{{ subpage.title }}</p>
+      {% elif group_label %}
+        <p>{{ group_label }}</p>
+      {% endif %}
+    </div>
+  </header>
+
+  <div class="wizard-layout">
+    <main class="wizard-main">
+      {% block subpage_content %}{% endblock %}
+
+      <section class="wizard-region wizard-computed" aria-label="Computed values">
+        {% block computed_values %}{% endblock %}
+      </section>
+
+      <section class="wizard-region wizard-human-input" aria-label="Human input">
+        {% block human_input %}{% endblock %}
+      </section>
+    </main>
+
+    <footer class="wizard-region wizard-source-trace" aria-label="Source and trace">
+      {% block source_trace %}{% endblock %}
+    </footer>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script type="module" src="{{ url_for('static', path='js/api_client.js') }}"></script>
+{% endblock %}
