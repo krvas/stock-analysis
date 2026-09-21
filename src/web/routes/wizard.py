@@ -123,5 +123,5 @@ def wizard_subpage(
         request,
         template_name,
         _wizard_context(ticker=symbol, page=page, subpage=subpage)\
-            .update(subpage.context_builder(symbol, period)),
+            | subpage.context_builder(symbol, period),
     )
