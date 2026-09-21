@@ -50,5 +50,5 @@
 
 {% block scripts %}
 <script id="statement-data" type="application/json">{{ statement_data | tojson }}</script>
-<script src="{{ url_for('static', path='js/statement_view.js') }}"></script>
+<script type="module" src="{{ url_for('static', path='js/statement_view.js') }}"></script>
 {% endblock %}
