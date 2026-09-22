@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from uuid import uuid4
 
 import pandas as pd
 import pytest
@@ -27,7 +26,6 @@ def wizard_db(wizard_db_path: Path) -> WizardDatabaseManager:
 
 def _sample_row(**overrides: object) -> dict[str, object]:
     row = {
-        "adjustment_id": str(uuid4()),
         "ticker": "AAPL",
         "exchange": "NASDAQ",
         "statement": "PL",
@@ -57,18 +55,40 @@ def test_upsert_and_read_adjustment_preferences(wizard_db_path: Path) -> None:
 
 
 def test_upsert_updates_on_unique_key(wizard_db_path: Path) -> None:
-    first_id = str(uuid4())
     upsert_adjustment_preferences(
-        pd.DataFrame([_sample_row(adjustment_id=first_id, value=2.0)]),
+        pd.DataFrame([_sample_row(value=2.0)]),
         db_path=wizard_db_path,
     )
-    second_id = str(uuid4())
     upsert_adjustment_preferences(
-        pd.DataFrame([_sample_row(adjustment_id=second_id, value=5.0)]),
+        pd.DataFrame([_sample_row(value=5.0)]),
         db_path=wizard_db_path,
     )
 
     loaded = read_adjustment_preferences("AAPL", "NASDAQ", db_path=wizard_db_path)
     assert len(loaded) == 1
     assert loaded.iloc[0]["value"] == 5.0
-    assert loaded.iloc[0]["adjustment_id"] == second_id
+    assert loaded.iloc[0]["adjustment_id"] == "0"
+
+
+def test_upsert_ignores_external_adjustment_id(wizard_db_path: Path) -> None:
+    upsert_adjustment_preferences(
+        pd.DataFrame([_sample_row(adjustment_id="999")]),
+        db_path=wizard_db_path,
+    )
+    loaded = read_adjustment_preferences("AAPL", "NASDAQ", db_path=wizard_db_path)
+    assert loaded.iloc[0]["adjustment_id"] == "0"
+
+
+def test_sequential_adjustment_ids(wizard_db_path: Path) -> None:
+    upsert_adjustment_preferences(
+        pd.DataFrame(
+            [
+                _sample_row(base_concept="ResearchAndDevelopmentExpense"),
+                _sample_row(base_concept="SellingGeneralAndAdministrative"),
+            ]
+        ),
+        db_path=wizard_db_path,
+    )
+    loaded = read_adjustment_preferences("AAPL", "NASDAQ", db_path=wizard_db_path)
+    ids = sorted(loaded["adjustment_id"].tolist())
+    assert ids == ["0", "1"]

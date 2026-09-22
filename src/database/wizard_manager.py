@@ -123,7 +123,56 @@ class WizardDatabaseManager(BaseDatabaseManager):
             if col in out.columns:
                 out[col] = out[col].fillna(default)
 
+        out = self._resolve_adjustment_ids(out)
         return out[list(wt.TABLE_COLUMNS[table])]
+
+    def next_adjustment_id(self) -> int:
+        """Return the next sequential ``adjustment_id`` (0, 1, 2, …)."""
+        table = wt.ADJUSTMENT_PREFERENCES
+        if table not in self.list_tables():
+            return 0
+        row = self.query(
+            f"""
+            SELECT COALESCE(MAX(TRY_CAST(adjustment_id AS INTEGER)), -1) + 1 AS next_id
+            FROM {table}
+            """
+        )
+        return int(row.iloc[0]["next_id"])
+
+    def _resolve_adjustment_ids(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Assign ``adjustment_id`` for new rows; reuse ids for unique-key matches.
+
+        Incoming ``adjustment_id`` values are ignored so callers outside this
+        package cannot control primary keys.
+        """
+        table = wt.ADJUSTMENT_PREFERENCES
+        conflict_cols = list(wt.UNIQUE_KEYS[table])
+        if df.empty:
+            return df
+
+        out = df.copy()
+        if "adjustment_id" in out.columns:
+            logger.debug("Ignoring caller-supplied adjustment_id for %s", table)
+            out = out.drop(columns=["adjustment_id"])
+
+        existing = self.query(
+            f"SELECT adjustment_id, {', '.join(conflict_cols)} FROM {table}"
+        )
+
+        if existing.empty:
+            out["adjustment_id"] = [str(i) for i in range(len(out))]
+            return out
+
+        merged = out.merge(existing, on=conflict_cols, how="left")
+        needs_id = merged["adjustment_id"].isna()
+        if needs_id.any():
+            next_id = self.next_adjustment_id()
+            merged.loc[needs_id, "adjustment_id"] = [
+                str(value) for value in range(next_id, next_id + int(needs_id.sum()))
+            ]
+
+        out["adjustment_id"] = merged["adjustment_id"].astype(str)
+        return out
 
 
 def _build_adjustment_preferences_upsert_sql(
