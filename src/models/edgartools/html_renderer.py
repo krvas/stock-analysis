@@ -6,41 +6,11 @@ from typing import Any
 
 import pandas as pd
 
-_METADATA_COLUMNS = {
-    "label",
-    "concept",
-    "standard_concept",
-    "preferred_sign",
-    "level",
-    "is_total",
-    "is_abstract",
-}
-
-
-def _period_columns(df: pd.DataFrame) -> list[str]:
-    return [col for col in df.columns if col not in _METADATA_COLUMNS]
-
-
-def serialize_line_item_view(df: pd.DataFrame, add_cols: list=None) -> dict[str, Any]:
-    """Serialize a statement DataFrame for client-side rendering via tables.js."""
-    periods = _period_columns(df)
-    rows: list[dict[str, Any]] = []
-    for record in df.to_dict(orient="records"):
-        row = {
-            "label": record.get("label", ""),
-            "level": int(record.get("level", 0) or 0),
-            "is_total": bool(record.get("is_total", False)),
-            "values": {
-                period: None if pd.isna(record.get(period)) else record.get(period)
-                for period in periods
-            },
-        }
-        rows.append(row)
-    return {"periods": periods, "rows": rows, "add_cols": add_cols or []}
+from src.models.table import statement_table_from_dataframe
 
 
 def _serialize_views(views: dict[str, pd.DataFrame]) -> dict[str, Any]:
-    return {name: serialize_line_item_view(df) for name, df in views.items()}
+    return {name: statement_table_from_dataframe(df).serialize() for name, df in views.items()}
 
 
 def build_statement_payload(

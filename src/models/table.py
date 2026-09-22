@@ -8,11 +8,23 @@ from typing import Any, Literal
 import pandas as pd
 
 ColumnKind = Literal["static", "input", "link"]
-ColumnDtype = Literal["number", "string"]
+ColumnDtype = Literal["number", "string", "boolean"]
 LinkedGroupType = Literal["pct_of_base"]
 NumberFormat = Literal["financial", "percent", "integer"]
 
 _NUMBER_FORMATS: frozenset[str] = frozenset({"financial", "percent", "integer"})
+
+STATEMENT_VIEW_METADATA_COLUMNS: frozenset[str] = frozenset(
+    {
+        "label",
+        "concept",
+        "standard_concept",
+        "preferred_sign",
+        "level",
+        "is_total",
+        "is_abstract",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -57,7 +69,41 @@ def _validate_column_spec(spec: ColumnSpec) -> None:
             )
         return
     raise TableSerializationError(
-        f"Column '{spec.id}': string columns cannot have a format"
+        f"Column '{spec.id}': only number columns may have a format"
+    )
+
+
+def period_columns(
+    df: pd.DataFrame,
+    metadata_columns: frozenset[str] = STATEMENT_VIEW_METADATA_COLUMNS,
+) -> list[str]:
+    return [col for col in df.columns if col not in metadata_columns]
+
+
+def period_column_specs(df: pd.DataFrame) -> list[ColumnSpec]:
+    """Column specs for multi-period numeric columns in a statement view DataFrame."""
+    return [
+        ColumnSpec(
+            id=period,
+            label=period,
+            kind="static",
+            dtype="number",
+            format="financial",
+        )
+        for period in period_columns(df)
+    ]
+
+
+def statement_table_from_dataframe(df: pd.DataFrame) -> Table:
+    """Build a :class:`Table` for a standard multi-period statement view."""
+    return Table(
+        df,
+        period_column_specs(df),
+        linked_groups={},
+        row_id_col="concept",
+        level_col="level",
+        parent_id_col=None,
+        is_total_col="is_total",
     )
 
 
@@ -84,6 +130,7 @@ class Table:
         level_col: str | None = None,
         parent_id_col: str | None = None,
         label_col: str = "label",
+        is_total_col: str | None = "is_total",
     ) -> None:
         if not row_id_col:
             raise TableSerializationError("row_id_col must be non-empty")
@@ -125,6 +172,10 @@ class Table:
                 f"parent_id_col '{parent_id_col}' not found in DataFrame"
             )
 
+        resolved_is_total_col = is_total_col
+        if resolved_is_total_col is not None and resolved_is_total_col not in df.columns:
+            resolved_is_total_col = None
+
         self._df = df
         self._columns = columns
         self._linked_groups = linked_groups
@@ -132,6 +183,7 @@ class Table:
         self._level_col = resolved_level_col
         self._parent_id_col = parent_id_col
         self._label_col = label_col
+        self._is_total_col = resolved_is_total_col
 
     def serialize(self) -> dict[str, Any]:
         """Return the column-based table JSON shape."""
@@ -163,6 +215,10 @@ class Table:
             if self._level_col is not None:
                 level = int(record.get(self._level_col, 0) or 0)
 
+            is_total = False
+            if self._is_total_col is not None:
+                is_total = bool(record.get(self._is_total_col, False))
+
             cells: dict[str, Any] = {}
             for spec in self._columns:
                 if spec.kind == "input" and spec.id not in self._df.columns:
@@ -177,6 +233,7 @@ class Table:
                     "id": row_id_str,
                     "label": str(record.get(self._label_col, "") or ""),
                     "level": level,
+                    "is_total": is_total,
                     "parent_id": parent_id,
                     "cells": cells,
                 }
