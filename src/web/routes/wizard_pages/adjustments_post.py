@@ -20,6 +20,18 @@ def _validate_opex_to_capex_body(
     if not exchange or not str(exchange).strip():
         raise ValueError("exchange is required")
 
+    columns = body.get("columns")
+    if not isinstance(columns, list) or not columns:
+        raise ValueError("columns is required")
+    column_ids = {
+        col.get("id") for col in columns if isinstance(col, dict)
+    }
+    missing_columns = {"capitalize", "years"} - column_ids
+    if missing_columns:
+        raise ValueError(
+            f"columns is missing required id(s): {sorted(missing_columns)}"
+        )
+
     raw_rows = body.get("rows")
     if raw_rows is None:
         raise ValueError("rows is required")

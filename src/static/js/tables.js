@@ -122,34 +122,6 @@ export function staticPeriodColumnIds(columns) {
 }
 
 /**
- * Read current values from input columns rendered by {@link renderLineItemPeriodsTable}.
- *
- * @param {string} tableId
- * @param {{ columns: object[], rows: object[] }} tableData
- * @returns {Array<{ id: string, cells: Record<string, *> }>}
- */
-export function collectTableInputRows(tableId, tableData) {
-  const inputColumns = tableData.columns.filter((col) => col.kind === "input");
-  return tableData.rows.map((row) => {
-    const cells = {};
-    for (const col of inputColumns) {
-      const input = document.getElementById(`input-${col.id}-${row.id}`);
-      if (!input) {
-        continue;
-      }
-      if (col.dtype === "boolean") {
-        cells[col.id] = input.checked;
-      } else if (col.dtype === "number") {
-        cells[col.id] = input.value === "" ? null : Number(input.value);
-      } else {
-        cells[col.id] = input.value;
-      }
-    }
-    return { id: row.id, cells };
-  });
-}
-
-/**
  * Render a column-schema table (periods, inputs, links).
  *
  * @param {string} tableId - Element id of a table with thead/tbody

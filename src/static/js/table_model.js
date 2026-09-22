@@ -189,18 +189,25 @@ export class TableModel {
     return Number.isNaN(parsed) ? null : parsed;
   }
 
+  /**
+   * Build the POST body for saving this table back to the backend: only the
+   * columns the user can actually edit (kind === "input"), and only those
+   * columns' values per row. Not a round-trip mirror of the ingested data —
+   * linked groups and static/link column values are intentionally omitted.
+   */
   serialize() {
+    const inputColumns = [...this._columns.values()].filter(
+      (col) => col.kind === "input",
+    );
     return {
-      columns: [...this._columns.values()],
-      linked_groups: Object.fromEntries(this._linkedGroups.entries()),
-      rows: [...this._rows.values()].map((row) => ({
-        id: row.id,
-        label: row.label,
-        level: row.level,
-        is_total: row.is_total,
-        parent_id: row.parent_id,
-        cells: { ...row.cells },
-      })),
+      columns: inputColumns,
+      rows: [...this._rows.values()].map((row) => {
+        const cells = {};
+        for (const col of inputColumns) {
+          cells[col.id] = row.cells[col.id];
+        }
+        return { id: row.id, cells };
+      }),
     };
   }
 }

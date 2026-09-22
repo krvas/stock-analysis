@@ -3,10 +3,7 @@
  */
 
 import { postJson } from "./api_client.js";
-import {
-  collectTableInputRows,
-  renderLineItemPeriodsTable,
-} from "./tables.js";
+import { renderLineItemPeriodsTable } from "./tables.js";
 import { TableModel } from "./table_model.js";
 
 /** @type {Map<string, TableModel>} tableId -> model, for later lookup (e.g. at submit time). */
@@ -35,12 +32,13 @@ document
   });
 
 /**
- * Generic wizard save-body builder: {exchange, rows}, where rows is exactly
- * what collectTableInputRows returns ([{id, cells}, ...]). No subpage-specific
- * field knowledge belongs here — that lives in the backend route builder for
- * the subpage in question.
+ * Generic wizard save-body builder: {exchange, columns, rows}, where
+ * {columns, rows} is exactly what TableModel.serialize() returns (only the
+ * input columns and their values). No subpage-specific field knowledge
+ * belongs here — that lives in the backend route builder for the subpage
+ * in question.
  */
-function buildWizardSaveBody(form, tableData) {
+function buildWizardSaveBody(form) {
   const exchange = form.dataset.exchange;
   if (!exchange || !String(exchange).trim()) {
     throw new Error("Missing data-exchange on form");
@@ -49,19 +47,15 @@ function buildWizardSaveBody(form, tableData) {
   if (!tableId) {
     throw new Error("Missing data-table-id on form");
   }
+  const model = tableModels.get(tableId);
+  if (!model) {
+    throw new Error(`Table model not found: ${tableId}`);
+  }
 
   return {
     exchange: String(exchange).trim(),
-    rows: collectTableInputRows(tableId, tableData),
+    ...model.serialize(),
   };
-}
-
-function tableDataFromDom(tableId) {
-  const dataEl = document.getElementById(`${tableId}-data`);
-  if (!dataEl) {
-    throw new Error(`Table data not found: #${tableId}-data`);
-  }
-  return JSON.parse(dataEl.textContent);
 }
 
 function bindWizardSaveForms() {
@@ -71,8 +65,7 @@ function bindWizardSaveForms() {
 
       let body;
       try {
-        const tableData = tableDataFromDom(form.dataset.tableId);
-        body = buildWizardSaveBody(form, tableData);
+        body = buildWizardSaveBody(form);
       } catch (err) {
         alert(err instanceof Error ? err.message : String(err));
         return;
