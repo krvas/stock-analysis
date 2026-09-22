@@ -119,6 +119,7 @@ def wizard_subpage(
     page_slug: str,
     subpage_slug: str,
     period: str = "annual",
+    exchange: str = "NASDAQ",
 ) -> HTMLResponse:
     page = get_page(page_slug)
     if page is None:
@@ -133,8 +134,8 @@ def wizard_subpage(
     return templates.TemplateResponse(
         request,
         template_name,
-        _wizard_context(ticker=symbol, page=page, subpage=subpage)\
-            | subpage.context_builder(symbol, period),
+        _wizard_context(ticker=symbol, page=page, subpage=subpage)
+        | subpage.context_builder(symbol, period, exchange.upper().strip()),
     )
 
 

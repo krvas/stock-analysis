@@ -108,10 +108,24 @@ def statement_table_from_dataframe(df: pd.DataFrame) -> Table:
 
 
 def _cell_value_from_raw(raw: object) -> Any:
-    if raw is None or (isinstance(raw, float) and pd.isna(raw)):
+    if raw is None:
         return None
-    if pd.isna(raw):
-        return None
+    if isinstance(raw, bool):
+        return raw
+    if isinstance(raw, (int, float, str)):
+        if isinstance(raw, float) and pd.isna(raw):
+            return None
+        return raw
+    if hasattr(raw, "item") and not isinstance(raw, (bytes, dict, list, tuple)):
+        try:
+            return _cell_value_from_raw(raw.item())
+        except (AttributeError, TypeError, ValueError):
+            pass
+    try:
+        if pd.isna(raw):
+            return None
+    except (TypeError, ValueError):
+        pass
     if isinstance(raw, dict) and "text" in raw and "href" in raw:
         return {"text": raw["text"], "href": raw["href"]}
     return raw
@@ -198,6 +212,41 @@ class Table:
     def to_dict(self) -> dict[str, Any]:
         """Alias for :meth:`serialize` (template / API embedding)."""
         return self.serialize()
+
+    def find_row_id(self, base_concept: str) -> str | None:
+        """Map a stored ``base_concept`` key to this table's ``row_id_col`` value."""
+        key = str(base_concept).strip()
+        if not key:
+            return None
+
+        concepts = self._df[self._row_id_col].astype(str)
+        if key in concepts.values:
+            return key
+
+        if "standard_concept" in self._df.columns:
+            standard = self._df["standard_concept"].astype(str)
+            match = standard == key
+            if match.any():
+                return str(self._df.loc[match, self._row_id_col].iloc[0])
+
+        return None
+
+    def set_cell(self, column_id: str, row_id: str, value: Any) -> None:
+        """Set ``column_id`` for the row identified by ``row_id``.
+
+        If ``column_id`` is not yet a DataFrame column, it is added and
+        initialized with null values for every row.
+        """
+        if column_id not in self._df.columns:
+            self._df[column_id] = pd.NA
+
+        row_key = str(row_id)
+        mask = self._df[self._row_id_col].astype(str) == row_key
+        if not mask.any():
+            raise TableSerializationError(
+                f"row id '{row_id}' not found in column '{self._row_id_col}'"
+            )
+        self._df.loc[mask, column_id] = value
 
     def _serialize_rows(self) -> list[dict[str, Any]]:
         rows: list[dict[str, Any]] = []

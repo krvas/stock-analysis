@@ -59,13 +59,21 @@ function appendStaticValueCell(tr, value, unitKey) {
 }
 
 function appendInputCell(tr, col, row) {
+  const value = row.cells[col.id];
   const element = document.createElement("input");
   if (col.dtype === "boolean") {
     element.type = "checkbox";
+    element.checked = Boolean(value);
   } else if (col.dtype === "number") {
     element.type = "number";
+    if (value != null && value !== "") {
+      element.value = value;
+    }
   } else {
     element.type = "text";
+    if (value != null) {
+      element.value = value;
+    }
   }
   element.id = `input-${col.id}-${row.id}`;
   const td = document.createElement("td");
@@ -96,6 +104,34 @@ export function staticPeriodColumnIds(columns) {
   return columns
     .filter((col) => col.kind === "static" && col.dtype === "number")
     .map((col) => col.id);
+}
+
+/**
+ * Read current values from input columns rendered by {@link renderLineItemPeriodsTable}.
+ *
+ * @param {string} tableId
+ * @param {{ columns: object[], rows: object[] }} tableData
+ * @returns {Array<{ id: string, cells: Record<string, *> }>}
+ */
+export function collectTableInputRows(tableId, tableData) {
+  const inputColumns = tableData.columns.filter((col) => col.kind === "input");
+  return tableData.rows.map((row) => {
+    const cells = {};
+    for (const col of inputColumns) {
+      const input = document.getElementById(`input-${col.id}-${row.id}`);
+      if (!input) {
+        continue;
+      }
+      if (col.dtype === "boolean") {
+        cells[col.id] = input.checked;
+      } else if (col.dtype === "number") {
+        cells[col.id] = input.value === "" ? null : Number(input.value);
+      } else {
+        cells[col.id] = input.value;
+      }
+    }
+    return { id: row.id, cells };
+  });
 }
 
 /**

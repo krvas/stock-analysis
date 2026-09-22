@@ -29,8 +29,10 @@ GROUP_ORDER: Final[tuple[PageGroup, ...]] = (
     "red_flags",
 )
 
-SubPageContextBuilder = Callable[[str, str], dict[str, Any]]
-default_context_builder: Final[SubPageContextBuilder] = lambda ticker, period: {}
+SubPageContextBuilder = Callable[[str, str, str], dict[str, Any]]
+default_context_builder: Final[SubPageContextBuilder] = (
+    lambda ticker, period, exchange: {}
+)
 
 SubPagePostHandler = Callable[[str, dict[str, Any]], dict[str, Any]]
 default_post_handler: Final[SubPagePostHandler | None] = None
