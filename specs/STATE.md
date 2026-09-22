@@ -138,7 +138,7 @@ No restatement (prefs only, not applied to displayed numbers).
 %. Tested; written/read by `adjustments_post.py` / `adjustments_context.py`
 for `opex_to_capex` — other adjustment types still unused by routes.
 
-## 5. Table contract (`src/models/table.py`)
+## 5. Table / TableModel contract (`src/models/table.py`, `table_model.js`)
 
 Column-schema JSON so statement views and wizard tables share one renderer.
 
@@ -157,10 +157,30 @@ serialize() → {
   periods. Metadata: `label, concept, standard_concept, preferred_sign, level,
   is_total, is_abstract`.
 - Missing input cols → `null`. NaN → `null`. Bad spec → `TableSerializationError`.
-- Python only *describes* `linked_groups`; math is `TableModel` (`table_model.js`),
-  **not wired to DOM yet**. Inputs are display-only by default; wired to a
-  save path only where a sub-page opts in — currently just
-  `adjustments/opex-to-capex` (see §4).
+- Python only *describes* `linked_groups`; math lives in `TableModel`
+  (`table_model.js`). `TableModel` receives table data (`fromSerialized`),
+  owns rendering (`columns`/`rows` getters, consumed by
+  `renderLineItemPeriodsTable`) and DOM sync (`subscribe`), and drives
+  linked-group math live (`setCell` → `LINKED_GROUP_HANDLERS.pct_of_base` →
+  DOM update) for any table that declares `linked_groups` and has inputs
+  wired — currently just `adjustments/opex-to-capex` (see §4), not every
+  wizard sub-page.
+- `Table.serialize()` / `TableModel.fromSerialized()` (receive direction) and
+  `TableModel.serialize()` (send direction) are **intentionally asymmetric**,
+  not two encodings of the same shape. Receive: full `{columns,
+  linked_groups, rows}`, every `kind`. Send: `{columns, rows}`, only
+  `kind === "input"` columns and only those columns' cell values — no
+  `linked_groups`, because the backend only ever needs what the user edited,
+  not the full read-side payload it already computed and sent down. Do not
+  "fix" `TableModel.serialize()` to match `Table.serialize()`'s shape, and do
+  not expect `TableModel.serialize(TableModel.fromSerialized(x))` to
+  round-trip `x`.
+- `TableModel` owns wizard-table frontend state: the shared rendering files
+  (`tables.js`, `line_item_tables.js`) must not read/write DOM input state
+  directly except via `TableModel` (`setCell`/`getCell`/`subscribe`/
+  `serialize`) — no ad-hoc DOM scraping of input values for save payloads, no
+  per-sub-page field-shaping logic in these shared files. Generalizes the
+  "registry = identity, builders = data" split in §4.
 - `find_row_id(base_concept)` / `set_cell(column_id, row_id, value)`: write
   helpers used to inject saved wizard prefs into a `Table` before
   `serialize()`. `find_row_id` maps a stored pref key to a row id (exact match
@@ -176,10 +196,11 @@ object under `statements[type][view]`. Tests: `tests/test_table.py`.
 
 Working: vendor DuckDB + IndianAPI/AlphaVantage; edgartools fetch/cache;
 `/statements`; wizard shell + opex table; Table used by statements + opex;
-prefs store (no UI).
+`TableModel` wired for opex-to-capex (receive, render, DOM sync, live
+linked-group math); prefs store (no UI).
 
 Partial: opex (save/prefill for `adjustments/opex-to-capex` only; no
-restatement); Finnhub; `load_to_database.py`; `TableModel` unused.
+restatement); Finnhub; `load_to_database.py`.
 
 NYI: every other wizard sub-page; wizard UI ↔ DuckDB; screener; analytics;
 finfetch; README parquet layout.
