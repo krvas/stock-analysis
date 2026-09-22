@@ -1,0 +1,6 @@
+{% macro form(action, form_id=none, method='post') %}
+<form{% if form_id %} id="{{ form_id }}"{% endif %} action="{{ action }}" method="{{ method }}">
+  {{ caller() }}
+  <button type="submit">Save</button>
+</form>
+{% endmacro %}

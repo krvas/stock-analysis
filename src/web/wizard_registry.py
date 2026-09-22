@@ -1,11 +1,17 @@
-"""Single source of truth for wizard page and sub-page identity."""
+"""Single source of truth for wizard page and sub-page identity.
+
+GET sub-pages are rendered from ``src/web/routes/wizard.py``. Sub-pages that
+accept user saves declare a ``post_handler``; requests go to
+``POST /wizard/{ticker}/{page_slug}/{subpage_slug}`` (see
+``src/web/routes/wizard_pages/adjustments_post.py``).
+"""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any, Callable, Final, Literal
 
-from src.web.routes.wizard_pages import adjustments_context
+from src.web.routes.wizard_pages import adjustments_context, adjustments_post
 
 PageGroup = Literal["business", "people", "price", "red_flags"]
 
@@ -26,12 +32,16 @@ GROUP_ORDER: Final[tuple[PageGroup, ...]] = (
 SubPageContextBuilder = Callable[[str, str], dict[str, Any]]
 default_context_builder: Final[SubPageContextBuilder] = lambda ticker, period: {}
 
+SubPagePostHandler = Callable[[str, dict[str, Any]], dict[str, Any]]
+default_post_handler: Final[SubPagePostHandler | None] = None
+
 @dataclass(frozen=True)
 class SubPage:
     slug: str
     title: str
     order: int
     context_builder: SubPageContextBuilder = default_context_builder
+    post_handler: SubPagePostHandler | None = default_post_handler
 
 
 @dataclass(frozen=True)
@@ -60,8 +70,13 @@ WIZARD_PAGES: list[Page] = [
         group="business",
         subpages=[
             SubPage(slug="look-through-earnings", title="Look-through Earnings", order=1),
-            SubPage(slug="opex-to-capex", title="Capitalizing Opex", order=2,
-                    context_builder=adjustments_context.opex_to_capex_context),
+            SubPage(
+                slug="opex-to-capex",
+                title="Capitalizing Opex",
+                order=2,
+                context_builder=adjustments_context.opex_to_capex_context,
+                post_handler=adjustments_post.opex_to_capex_post,
+            ),
             SubPage(slug="owner-earnings", title="Owner Earnings", order=3),
             SubPage(slug="assets-in-use", title="Assets in Use", order=4),
         ],

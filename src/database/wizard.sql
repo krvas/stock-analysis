@@ -1,7 +1,7 @@
 -- Wizard / edgartools analysis preferences (separate from core ingestion schema).
 
 CREATE TABLE IF NOT EXISTS adjustment_preferences (
-    adjustment_id     VARCHAR PRIMARY KEY,      -- uuid
+    adjustment_id     VARCHAR PRIMARY KEY,      -- sequential string ids (0, 1, 2, …)
     ticker            VARCHAR NOT NULL,
     exchange          VARCHAR NOT NULL,
     statement         VARCHAR NOT NULL,          -- 'BS' | 'CF' | 'PL'
