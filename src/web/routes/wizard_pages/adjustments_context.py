@@ -60,7 +60,7 @@ def opex_to_capex_context(
         opex,
         columns,
         linked_groups={},
-        row_id_col="concept",
+        row_id_col="standard_concept",
         level_col="level",
         parent_id_col=None,
     )
