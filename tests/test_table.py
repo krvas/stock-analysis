@@ -5,7 +5,7 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
-from src.models.edgartools.html_renderer import serialize_line_item_view
+from src.models.table import statement_table_from_dataframe
 from src.models.table import ColumnSpec, LinkedGroupSpec, Table, TableSerializationError
 
 
@@ -20,7 +20,7 @@ def test_table_serialize_statement_shape() -> None:
             "2023-12-31": [90.0, 90.0],
         }
     )
-    payload = serialize_line_item_view(df)
+    payload = statement_table_from_dataframe(df).serialize()
 
     assert list(payload.keys()) == ["columns", "linked_groups", "rows"]
     assert len(payload["columns"]) == 2
@@ -28,6 +28,7 @@ def test_table_serialize_statement_shape() -> None:
     assert payload["columns"][0]["format"] == "financial"
     assert payload["rows"][0]["id"] == "c1"
     assert payload["rows"][0]["cells"]["2024-12-31"] == 100.0
+    assert payload["rows"][1]["is_total"] is True
 
 
 def test_table_rejects_unknown_linked_group_column() -> None:

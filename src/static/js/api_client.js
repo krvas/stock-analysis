@@ -5,7 +5,7 @@
  * rather than calling `fetch` themselves.
  *
  * Statement pages currently embed JSON from `build_statement_payload`
- * (`{ ticker, period, statements: { income|balance|cashflow: { summary|standard|detailed: { periods, rows } } } }`).
+ * (`{ ticker, period, statements: { income|balance|cashflow: { summary|standard|detailed: { columns, rows, linked_groups } } } }`).
  * Wizard data fetching is not wired to a live endpoint yet.
  */
 
