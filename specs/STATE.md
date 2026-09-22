@@ -123,13 +123,20 @@ per-sub-page routes.
 
 Slots match `vision.md`; **only `adjustments/opex-to-capex` has UI.** That
 builder: detailed income, `standard_concept` in `OPERATING_EXPENSES`, `Table`
-with period cols + input `capitalize` (bool) + `years` (number). No save, no
-restatement, inputs not submitted.
+with period cols + input `capitalize` (bool) + `years` (number). Saves: POSTs
+to `/wizard/{ticker}/{page_slug}/{subpage_slug}` →
+`wizard_pages/adjustments_post.py::opex_to_capex_post` →
+`WizardDatabaseManager.upsert_adjustment_preferences` (writes
+`adjustment_preferences`). Saved prefs are read back and pre-filled into the
+`Table` on load via
+`wizard_pages/adjustments_context.py::_apply_saved_opex_to_capex_preferences`.
+No restatement (prefs only, not applied to displayed numbers).
 
 **wizard.duckdb** `adjustment_preferences`: PK `adjustment_id`, unique
 `(ticker, exchange, adjustment_type, base_concept)`. Types intended:
 `opex_to_capex` | `maintenance_capex` | `assets_in_use`; `value` is years or
-%. Tested; wizard routes do not call it.
+%. Tested; written/read by `adjustments_post.py` / `adjustments_context.py`
+for `opex_to_capex` — other adjustment types still unused by routes.
 
 ## 5. Table contract (`src/models/table.py`)
 
@@ -151,7 +158,15 @@ serialize() → {
   is_total, is_abstract`.
 - Missing input cols → `null`. NaN → `null`. Bad spec → `TableSerializationError`.
 - Python only *describes* `linked_groups`; math is `TableModel` (`table_model.js`),
-  **not wired to DOM yet** — inputs are display-only.
+  **not wired to DOM yet**. Inputs are display-only by default; wired to a
+  save path only where a sub-page opts in — currently just
+  `adjustments/opex-to-capex` (see §4).
+- `find_row_id(base_concept)` / `set_cell(column_id, row_id, value)`: write
+  helpers used to inject saved wizard prefs into a `Table` before
+  `serialize()`. `find_row_id` maps a stored pref key to a row id (exact match
+  on `row_id_col`, else exact match on `standard_concept`); `set_cell` mutates
+  the underlying DataFrame (adding the column if missing). `Table` is not
+  read-only.
 
 Embed: `{% table(id, data) %}` → JSON script + empty `<table>`;
 `line_item_tables.js` → `renderLineItemPeriodsTable`. Statements nest the same
@@ -163,8 +178,8 @@ Working: vendor DuckDB + IndianAPI/AlphaVantage; edgartools fetch/cache;
 `/statements`; wizard shell + opex table; Table used by statements + opex;
 prefs store (no UI).
 
-Partial: opex (no apply/persist); Finnhub; `load_to_database.py`;
-`TableModel` unused.
+Partial: opex (save/prefill for `adjustments/opex-to-capex` only; no
+restatement); Finnhub; `load_to_database.py`; `TableModel` unused.
 
 NYI: every other wizard sub-page; wizard UI ↔ DuckDB; screener; analytics;
 finfetch; README parquet layout.
