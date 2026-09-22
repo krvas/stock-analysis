@@ -60,6 +60,65 @@ def test_table_rejects_unknown_linked_group_column() -> None:
         )
 
 
+def test_table_find_row_id_matches_row_id_col_and_standard_concept() -> None:
+    df = pd.DataFrame(
+        {
+            "concept": ["us-gaap_ResearchAndDevelopmentExpense"],
+            "standard_concept": ["ResearchAndDevelopmentExpenses"],
+            "label": ["R&D"],
+        }
+    )
+    table = Table(
+        df,
+        [ColumnSpec(id="x", label="X", kind="input", dtype="string")],
+        {},
+        row_id_col="concept",
+    )
+    # Exact match against row_id_col ("concept").
+    assert table.find_row_id("us-gaap_ResearchAndDevelopmentExpense") == (
+        "us-gaap_ResearchAndDevelopmentExpense"
+    )
+    # Exact match against standard_concept.
+    assert (
+        table.find_row_id("ResearchAndDevelopmentExpenses")
+        == "us-gaap_ResearchAndDevelopmentExpense"
+    )
+    # A key that would have matched under the old unscoped suffix heuristic
+    # (it's a suffix of the concept string, but not an exact match against
+    # either row_id_col or standard_concept) must now return None rather
+    # than silently guessing.
+    assert table.find_row_id("ResearchAndDevelopmentExpense") is None
+
+
+def test_table_set_cell_adds_column_and_updates_row() -> None:
+    df = pd.DataFrame({"concept": ["a", "b"], "label": ["A", "B"], "2024": [1.0, 2.0]})
+    table = Table(
+        df,
+        [
+            ColumnSpec(id="2024", label="2024", kind="static", dtype="number"),
+            ColumnSpec(id="note", label="Note", kind="input", dtype="string"),
+        ],
+        {},
+        row_id_col="concept",
+    )
+    table.set_cell("note", "b", "saved")
+    row = table.serialize()["rows"][1]
+    assert row["cells"]["note"] == "saved"
+    assert table.serialize()["rows"][0]["cells"]["note"] is None
+
+
+def test_table_set_cell_unknown_row_raises() -> None:
+    df = pd.DataFrame({"concept": ["a"], "label": ["A"]})
+    table = Table(
+        df,
+        [ColumnSpec(id="x", label="X", kind="input", dtype="string")],
+        {},
+        row_id_col="concept",
+    )
+    with pytest.raises(TableSerializationError, match="row id 'missing'"):
+        table.set_cell("x", "missing", "value")
+
+
 def test_table_input_columns_without_dataframe_column() -> None:
     df = pd.DataFrame({"concept": ["a"], "label": ["A"], "2024": [5.0]})
     table = Table(

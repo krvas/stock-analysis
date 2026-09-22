@@ -8,7 +8,6 @@ from datetime import date
 from typing import Literal
 
 import pandas as pd
-from dotenv import load_dotenv
 from edgar import Company
 from edgar.xbrl import XBRLS
 from edgar.xbrl.stitching.periods import determine_optimal_periods
@@ -20,7 +19,7 @@ from src.api.edgartools.cache import (
     save_period_bundle,
     touch_company_cache,
 )
-from src.config import EDGARTOOLS_CACHE_DIR, EDGARTOOLS_COMPANY_CACHE_SIZE
+from src.config import EDGARTOOLS_CACHE_DIR, EDGARTOOLS_COMPANY_CACHE_SIZE, load_project_dotenv
 
 StatementType = Literal["income", "balance", "cashflow"]
 PeriodType = Literal["annual", "quarterly"]
@@ -214,7 +213,7 @@ def get_all_statement_views(
     num_periods: int = 10,
 ) -> PeriodBundle:
     """Return summary/standard/detailed DataFrames for all statement types."""
-    load_dotenv()  # Load environment variables from .env
+    load_project_dotenv()
     if not os.environ.get("EDGAR_IDENTITY"):
         raise ValueError("EDGAR_IDENTITY environment variable is not set.")
     _configure_edgartools_cache()

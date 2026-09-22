@@ -1,7 +1,14 @@
 """Central configuration: paths, retention, and database location."""
 
+from __future__ import annotations
+
+import logging
 import os
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
+
+_dotenv_loaded = False
 
 # Project root is two levels above src/
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -54,3 +61,26 @@ RAW_SUBDIRS = {
     "cash_flows": RAW_DATA_DIR / "cash_flows",
     "corporate_actions": RAW_DATA_DIR / "corporate_actions",
 }
+
+
+def load_project_dotenv() -> None:
+    """Load ``.env`` from the project root once (no-op if already loaded)."""
+    global _dotenv_loaded
+    if _dotenv_loaded:
+        return
+    _dotenv_loaded = True
+
+    env_path = PROJECT_ROOT / ".env"
+    if not env_path.is_file():
+        return
+
+    try:
+        from dotenv import load_dotenv
+
+        load_dotenv(env_path)
+    except (PermissionError, OSError) as exc:
+        logger.warning(
+            "Could not read %s (%s); using existing process environment",
+            env_path,
+            exc,
+        )
