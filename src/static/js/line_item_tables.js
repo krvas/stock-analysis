@@ -7,6 +7,10 @@ import {
   collectTableInputRows,
   renderLineItemPeriodsTable,
 } from "./tables.js";
+import { TableModel } from "./table_model.js";
+
+/** @type {Map<string, TableModel>} tableId -> model, for later lookup (e.g. at submit time). */
+const tableModels = new Map();
 
 document
   .querySelectorAll('script[type="application/json"][data-line-item-table]')
@@ -14,7 +18,20 @@ document
     const tableId =
       dataEl.dataset.tableId || dataEl.id.replace(/-data$/, "");
     const tableData = JSON.parse(dataEl.textContent);
-    renderLineItemPeriodsTable(tableId, tableData);
+    const model = TableModel.fromSerialized(tableData);
+    tableModels.set(tableId, model);
+    model.subscribe((rowId, colId, value) => {
+      const input = document.getElementById(`input-${colId}-${rowId}`);
+      if (!input) {
+        return;
+      }
+      if (input.type === "checkbox") {
+        input.checked = Boolean(value);
+      } else {
+        input.value = value == null ? "" : value;
+      }
+    });
+    renderLineItemPeriodsTable(tableId, model, { model });
   });
 
 /**

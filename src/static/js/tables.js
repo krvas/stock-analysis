@@ -58,7 +58,7 @@ function appendStaticValueCell(tr, value, unitKey) {
   tr.appendChild(valueCell);
 }
 
-function appendInputCell(tr, col, row) {
+function appendInputCell(tr, col, row, model) {
   const value = row.cells[col.id];
   const element = document.createElement("input");
   if (col.dtype === "boolean") {
@@ -76,6 +76,21 @@ function appendInputCell(tr, col, row) {
     }
   }
   element.id = `input-${col.id}-${row.id}`;
+  if (model) {
+    const handleChange = () => {
+      let coerced;
+      if (col.dtype === "boolean") {
+        coerced = element.checked;
+      } else if (col.dtype === "number") {
+        coerced = element.value === "" ? null : Number(element.value);
+      } else {
+        coerced = element.value;
+      }
+      model.setCell(row.id, col.id, coerced);
+    };
+    element.addEventListener("change", handleChange);
+    element.addEventListener("input", handleChange);
+  }
   const td = document.createElement("td");
   td.appendChild(element);
   tr.appendChild(td);
@@ -139,7 +154,7 @@ export function collectTableInputRows(tableId, tableData) {
  *
  * @param {string} tableId - Element id of a table with thead/tbody
  * @param {{ columns: object[], rows: object[] }} tableData
- * @param {{ unitKey?: string }} [options]
+ * @param {{ unitKey?: string, model?: object }} [options]
  */
 export function renderLineItemPeriodsTable(tableId, tableData, options = {}) {
   const { thead, tbody } = getTableParts(tableId);
@@ -165,7 +180,7 @@ export function renderLineItemPeriodsTable(tableId, tableData, options = {}) {
         return;
       }
       if (col.kind === "input") {
-        appendInputCell(tr, col, row);
+        appendInputCell(tr, col, row, options.model);
         return;
       }
       if (col.kind === "link") {

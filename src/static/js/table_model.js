@@ -107,6 +107,14 @@ export class TableModel {
     }
   }
 
+  get columns() {
+    return [...this._columns.values()];
+  }
+
+  get rows() {
+    return [...this._rows.values()];
+  }
+
   /**
    * @param {(rowId: string, colId: string, value: *) => void} callback
    */
