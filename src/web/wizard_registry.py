@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable, Final, Literal
 
-from src.web.routes.wizard_pages import adjustments
+from src.web.routes.wizard_pages import adjustments_context
 
 PageGroup = Literal["business", "people", "price", "red_flags"]
 
@@ -61,7 +61,7 @@ WIZARD_PAGES: list[Page] = [
         subpages=[
             SubPage(slug="look-through-earnings", title="Look-through Earnings", order=1),
             SubPage(slug="opex-to-capex", title="Capitalizing Opex", order=2,
-                    context_builder=adjustments.opex_to_capex_context),
+                    context_builder=adjustments_context.opex_to_capex_context),
             SubPage(slug="owner-earnings", title="Owner Earnings", order=3),
             SubPage(slug="assets-in-use", title="Assets in Use", order=4),
         ],
