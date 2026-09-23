@@ -15,6 +15,11 @@ logger = logging.getLogger(__name__)
 
 OPEX_TO_CAPEX_ADJUSTMENT_TYPE = "opex_to_capex"
 
+OPEX_TO_CAPEX_INPUT_COLUMNS: list[ColumnSpec] = [
+    ColumnSpec(id="capitalize", label="Capitalize", kind="input", dtype="boolean"),
+    ColumnSpec(id="years", label="Years", kind="input", dtype="number"),
+]
+
 
 def _apply_saved_opex_to_capex_preferences(
     table: Table,
@@ -52,10 +57,7 @@ def opex_to_capex_context(
     views = get_statement_views(ticker=ticker, statement_type="income", period=period, num_periods=2)
     df = views["detailed"]
     opex = df[df["standard_concept"].isin(OPERATING_EXPENSES)]
-    columns = period_column_specs(opex) + [
-        ColumnSpec(id="capitalize", label="Capitalize", kind="input", dtype="boolean"),
-        ColumnSpec(id="years", label="Years", kind="input", dtype="number"),
-    ]
+    columns = period_column_specs(opex) + OPEX_TO_CAPEX_INPUT_COLUMNS
     table = Table(
         opex,
         columns,
