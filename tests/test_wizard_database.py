@@ -10,6 +10,7 @@ import pytest
 from src.database import read_adjustment_preferences, upsert_adjustment_preferences
 from src.database import wizard_tables as wt
 from src.database.wizard_manager import WizardDatabaseManager
+from src.web.routes.wizard_pages.adjustments_post import opex_to_capex_post
 
 
 @pytest.fixture
@@ -155,4 +156,45 @@ def test_delete_adjustment_preferences_matches_case_insensitively(
     assert result.rows_deleted == 1
 
     loaded = wizard_db.read_adjustment_preferences("AAPL", "NASDAQ")
+    assert len(loaded) == 0
+
+
+def test_opex_to_capex_post_uncheck_deletes_previously_saved_row(
+    wizard_db_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """End-to-end: checked -> save, then unchecked -> save removes the row."""
+    monkeypatch.setattr(
+        "src.database.wizard_manager.DEFAULT_WIZARD_DB_PATH", wizard_db_path
+    )
+
+    checked_body = {
+        "exchange": "NASDAQ",
+        "rows": [
+            {
+                "id": "ResearchAndDevelopmentExpense",
+                "cells": {"capitalize": True, "years": 5, "consolidated_ids": None},
+            }
+        ],
+    }
+    result = opex_to_capex_post("AAPL", checked_body)
+    assert result == {"ok": True, "rows_written": 1, "rows_deleted": 0}
+
+    with WizardDatabaseManager(wizard_db_path) as db:
+        loaded = db.read_adjustment_preferences("AAPL", "NASDAQ")
+    assert len(loaded) == 1
+
+    unchecked_body = {
+        "exchange": "NASDAQ",
+        "rows": [
+            {
+                "id": "ResearchAndDevelopmentExpense",
+                "cells": {"capitalize": False, "years": None},
+            }
+        ],
+    }
+    result = opex_to_capex_post("AAPL", unchecked_body)
+    assert result == {"ok": True, "rows_written": 0, "rows_deleted": 1}
+
+    with WizardDatabaseManager(wizard_db_path) as db:
+        loaded = db.read_adjustment_preferences("AAPL", "NASDAQ")
     assert len(loaded) == 0
