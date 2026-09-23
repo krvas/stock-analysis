@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 from collections import defaultdict
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pandas as pd
@@ -63,7 +63,7 @@ def summarize_df(df: pd.DataFrame | None, name: str) -> dict:
 
 
 def main() -> None:
-    end = datetime.now()
+    end = datetime.now(UTC)
     start = end - timedelta(days=30)
     report: dict[str, Any] = {"yfinance_version": yf.__version__, "tickers": {}}
 
@@ -138,7 +138,7 @@ def main() -> None:
 
     # cross-ticker row label union for financial statements
     unions: dict[str, set[str]] = defaultdict(set)
-    for sym, data in report["tickers"].items():
+    for data in report["tickers"].values():
         for attr in [
             "financials",
             "quarterly_financials",
@@ -154,7 +154,7 @@ def main() -> None:
 
     # info key union
     info_keys: set[str] = set()
-    for sym, data in report["tickers"].items():
+    for data in report["tickers"].values():
         info_keys.update(data["info"]["fields"].keys())
     report["all_info_keys"] = sorted(info_keys)
 

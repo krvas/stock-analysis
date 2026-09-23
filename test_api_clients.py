@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 """Quick test of API client imports and instantiation."""
 
 import sys
@@ -172,7 +171,7 @@ if __name__ == "__main__":
         test_converters_with_sample_data()
         print("\n✅ All tests passed!")
         sys.exit(0)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - top-level script guard to report any failure and exit non-zero
         print(f"\n❌ Test failed: {e}")
         import traceback
 

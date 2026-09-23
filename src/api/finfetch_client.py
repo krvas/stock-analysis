@@ -16,6 +16,3 @@ class FinfetchClient(BaseAPIClient):
             db.initialize_schema()
             stock = ff.Ticker(ticker)
             db.upsert_dataframe("balance_sheets", stock.balance_sheet)
-            stock.balance_sheet
-
-        

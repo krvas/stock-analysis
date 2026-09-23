@@ -83,11 +83,11 @@ def api_get(path: str, params: dict[str, str]) -> tuple[int, Any]:
         entry["ok"] = False
         try:
             entry["error_body"] = e.read().decode("utf-8", errors="replace")[:500]
-        except Exception:
+        except Exception:  # noqa: BLE001 - best-effort error body extraction, must not itself raise
             entry["error_body"] = str(e)
         request_log.append(entry)
         return e.code, {"error": entry.get("error_body", str(e))}
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - top-level probe request guard, logs and continues
         entry["ok"] = False
         entry["error"] = str(e)
         request_log.append(entry)

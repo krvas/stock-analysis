@@ -250,15 +250,19 @@ class TestAlphaVantageClient:
         def bad_urlopen(req, timeout=60):
             return FakeResponse({"Note": "API call frequency exceeded"})
 
-        with patch("urllib.request.urlopen", bad_urlopen):
-            with pytest.raises(AlphaVantageError, match="API call frequency"):
-                client._fetch_function("OVERVIEW", "IBM", use_cache=False)
+        with (
+            patch("urllib.request.urlopen", bad_urlopen),
+            pytest.raises(AlphaVantageError, match="API call frequency"),
+        ):
+            client._fetch_function("OVERVIEW", "IBM", use_cache=False)
 
     def test_missing_api_key_raises(self) -> None:
-        with patch.dict("os.environ", {"ALPHAVANTAGE_API_KEY": ""}, clear=False):
-            with patch("src.api.alphavantage.client.load_dotenv"):
-                with pytest.raises(ValueError, match="ALPHAVANTAGE_API_KEY"):
-                    AlphaVantageClient(api_key=None)
+        with (
+            patch.dict("os.environ", {"ALPHAVANTAGE_API_KEY": ""}, clear=False),
+            patch("src.api.alphavantage.client.load_dotenv"),
+            pytest.raises(ValueError, match="ALPHAVANTAGE_API_KEY"),
+        ):
+            AlphaVantageClient(api_key=None)
 
     def test_parse_split_factor(self) -> None:
         assert parse_split_factor("4/1") == (1, 4)

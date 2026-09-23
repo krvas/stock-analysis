@@ -69,11 +69,11 @@ def load_company_to_db(
             logger.exception("Failed to fetch company: %s", name)
             raise
 
-        # ensure exchange present if provided
-        if exchange is not None:
-            # If column missing or value is null, set it
-            if "exchange" not in comp_df.columns or pd.isna(comp_df.iloc[0].get("exchange", None)):
-                comp_df.loc[:, "exchange"] = exchange
+        # ensure exchange present if provided; if column missing or value is null, set it
+        if exchange is not None and (
+            "exchange" not in comp_df.columns or pd.isna(comp_df.iloc[0].get("exchange", None))
+        ):
+            comp_df.loc[:, "exchange"] = exchange
 
         db.upsert_dataframe(t.COMPANIES, comp_df)
 
@@ -86,7 +86,7 @@ def load_company_to_db(
             symbol = comp_df.iloc[0].get('symbol')
             exch = comp_df.iloc[0].get('exchange', exch)
     except Exception:
-        pass
+        logger.debug("Could not resolve symbol/exchange from comp_df", exc_info=True)
 
     company_id = None
     if symbol is not None and exch is not None:
