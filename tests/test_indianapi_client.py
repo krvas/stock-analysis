@@ -170,12 +170,16 @@ class TestIndianAPIClient:
         def fake_urlopen(req, timeout=60):
             return FakeResponse({"error": "Stock not found"})
 
-        with patch("urllib.request.urlopen", fake_urlopen):
-            with pytest.raises(IndianAPIError, match="Stock not found"):
-                client.fetch_company("Missing Co")
+        with (
+            patch("urllib.request.urlopen", fake_urlopen),
+            pytest.raises(IndianAPIError, match="Stock not found"),
+        ):
+            client.fetch_company("Missing Co")
 
     def test_missing_api_key_raises(self) -> None:
-        with patch.dict("os.environ", {}, clear=True):
-            with pytest.raises(ValueError, match="INDIAN_API_KEY"):
-                IndianAPIClient()
+        with (
+            patch.dict("os.environ", {}, clear=True),
+            pytest.raises(ValueError, match="INDIAN_API_KEY"),
+        ):
+            IndianAPIClient()
 

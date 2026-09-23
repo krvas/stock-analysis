@@ -161,9 +161,8 @@ class FinnhubClient(BaseAPIClient):
 
     def _validate_response(self, data: Any, path: str) -> None:
         # Finnhub typically returns JSON objects; detect common error shapes
-        if isinstance(data, dict):
-            if data.get("error"):
-                raise FinnhubError(str(data.get("error")))
+        if isinstance(data, dict) and data.get("error"):
+            raise FinnhubError(str(data.get("error")))
 
     def _fetch_endpoint(
         self,
@@ -178,7 +177,7 @@ class FinnhubClient(BaseAPIClient):
         slash required). `params` will be merged with the required token.
         """
         path = endpoint.lstrip("/")
-        key = f'{path.split("/")[-1].replace("-", "_")}_{params["symbol"] if "symbol" in params else ""}'
+        key = f'{path.split("/")[-1].replace("-", "_")}_{params.get("symbol", "")}'
         if use_cache:
             cached = self._cache.get(key)
             if cached is not None:

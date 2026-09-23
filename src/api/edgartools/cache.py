@@ -131,7 +131,7 @@ def is_period_bundle_stale(
     max_age_months: int | None = None,
 ) -> bool:
     """Return True when ``latest_filing_date`` is more than ``max_age_months`` old."""
-    reference = reference or date.today()
+    reference = reference or datetime.now(UTC).date()
     if max_age_months is None:
         max_age_months = (
             EDGARTOOLS_ANNUAL_CACHE_MAX_AGE_MONTHS
