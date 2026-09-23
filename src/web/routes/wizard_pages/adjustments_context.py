@@ -6,8 +6,8 @@ import logging
 
 import pandas as pd
 
-from src.api.edgartools.standard_terms import OPERATING_EXPENSES
 from src.api.edgartools.source import PeriodType, get_statement_views
+from src.api.edgartools.standard_terms import OPERATING_EXPENSES
 from src.database import read_adjustment_preferences
 from src.models.table import ColumnSpec, Table, period_column_specs
 
