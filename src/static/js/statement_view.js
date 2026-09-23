@@ -1,8 +1,11 @@
-import {
-  renderLineItemFundFlowTable,
-  renderLineItemPeriodsTable,
-  staticPeriodColumnIds,
-} from "./components/table_view.js";
+import { render_table } from "./components/table_view.js";
+import { computeDifference } from "./utils.js";
+
+function staticPeriodColumnIds(columns) {
+  return columns
+    .filter((col) => col.kind === "static" && col.dtype === "number")
+    .map((col) => col.id);
+}
 
 const dataEl = document.getElementById("statement-data");
 if (!dataEl) {
@@ -96,22 +99,55 @@ function handleViewChange() {
   updateComparePeriodOptions(periodIds);
   updateControlVisibility();
 
+  const tableEl = document.getElementById(STATEMENT_TABLE_ID);
+
   if (
     currentStatementType === "balance" &&
     displayMode === "fund-flow" &&
     periodIds.length > 1 &&
     comparePeriod
   ) {
-    renderLineItemFundFlowTable(
-      STATEMENT_TABLE_ID,
-      view,
-      periodIds[0],
-      comparePeriod,
-    );
+    const latestPeriodId = periodIds[0];
+    const previousPeriodId = comparePeriod;
+    render_table(tableEl, {
+      columns: [
+        {
+          id: latestPeriodId,
+          label: latestPeriodId,
+          kind: "static",
+          dtype: "number",
+        },
+        {
+          id: previousPeriodId,
+          label: previousPeriodId,
+          kind: "static",
+          dtype: "number",
+        },
+        {
+          id: "change",
+          label: "Change",
+          kind: "static",
+          dtype: "number",
+        },
+      ],
+      rows: view.rows.map((row) => ({
+        id: row.id,
+        label: row.label,
+        level: row.level,
+        is_total: row.is_total,
+        cells: {
+          ...row.cells,
+          change: computeDifference(
+            row.cells[latestPeriodId],
+            row.cells[previousPeriodId],
+          ),
+        },
+      })),
+    });
     return;
   }
 
-  renderLineItemPeriodsTable(STATEMENT_TABLE_ID, view);
+  render_table(tableEl, view);
 }
 
 function handleStatementTypeChange(statementType) {

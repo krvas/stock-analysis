@@ -6,7 +6,7 @@
  *
  * Statement pages currently embed JSON from `build_statement_payload`
  * (`{ ticker, period, statements: { income|balance|cashflow: { summary|standard|detailed: { columns, rows, linked_groups } } } }`).
- * Wizard sub-page saves POST JSON via `line_item_tables.js` and `postJson`.
+ * Wizard sub-page saves POST JSON via `table_wiring.js` and `postJson`.
  */
 
 async function apiFetch(url, options = {}) {
