@@ -49,8 +49,9 @@ src/web/routes/wizard_pages/  context builders (adjustments.py)
 src/templates/wizard/      landing, base_subpage, _nav, not_implemented,
                            {page}/{subpage}.html
 src/templates/macros/line_item_table.html
-src/static/js/             api_client.js (only fetch() home; wizard stub)
-                           tables.js, table_model.js, line_item_tables.js,
+src/static/js/             api_client.js (only fetch() home; wizard save posts)
+                           components/table_model.js, linked_groups.js,
+                           table_view.js, generic_input.js, table_wiring.js
                            statement_view.js, utils.js
 tests/                     pytest; no HTTP/route tests
 ```
@@ -138,7 +139,7 @@ No restatement (prefs only, not applied to displayed numbers).
 %. Tested; written/read by `adjustments_post.py` / `adjustments_context.py`
 for `opex_to_capex` — other adjustment types still unused by routes.
 
-## 5. Table / TableModel contract (`src/models/table.py`, `table_model.js`)
+## 5. Table / TableModel contract (`src/models/table.py`, `components/table_model.js`)
 
 Column-schema JSON so statement views and wizard tables share one renderer.
 
@@ -157,14 +158,31 @@ serialize() → {
   periods. Metadata: `label, concept, standard_concept, preferred_sign, level,
   is_total, is_abstract`.
 - Missing input cols → `null`. NaN → `null`. Bad spec → `TableSerializationError`.
-- Python only *describes* `linked_groups`; math lives in `TableModel`
-  (`table_model.js`). `TableModel` receives table data (`fromSerialized`),
-  owns rendering (`columns`/`rows` getters, consumed by
-  `renderLineItemPeriodsTable`) and DOM sync (`subscribe`), and drives
-  linked-group math live (`setCell` → `LINKED_GROUP_HANDLERS.pct_of_base` →
-  DOM update) for any table that declares `linked_groups` and has inputs
-  wired — currently just `adjustments/opex-to-capex` (see §4), not every
-  wizard sub-page.
+- **Model** (`components/table_model.js`): receives table data
+  (`fromSerialized`), owns cell state (`getCell`/`setCell`/`subscribe`/
+  `serialize`). No DOM. Linked-group math runs on `setCell` via
+  `LINKED_GROUP_HANDLERS` imported from `components/linked_groups.js`.
+  Python only *describes* `linked_groups` in the payload; it does not
+  compute them.
+- **View** (`components/table_view.js`): `render_table(container, table)`.
+  `container` is the `<table>` element. Paints headers, labels, static cells,
+  link cells, and empty input slots (`data-input-slot`, `data-row-id`,
+  `data-col-id`, `data-dtype`). No event handlers.
+- **Input controller** (`components/generic_input.js`): `GenericInput` is the
+  only module that creates an `<input>` and attaches `input`/`change`
+  listeners; `subscribe` receives the coerced value; `set()` writes the
+  element and skips notify when unchanged.
+- **Wiring** (`components/table_wiring.js`): wizard hydration — JSON →
+  `TableModel.fromSerialized` → `render_table` → one `GenericInput` per slot;
+  `input.subscribe` → `model.setCell`; `model.subscribe` → `input.set`.
+  Must not read `input.value` / `input.checked`. Save posts
+  `model.serialize()`. Currently just `adjustments/opex-to-capex` (see §4),
+  not every wizard sub-page.
+- **Statements** (`statement_view.js`): calls `render_table` with the nested
+  statement view object or a fund-flow-shaped plain object (latest, previous,
+  change columns) built client-side; `staticPeriodColumnIds` is local to
+  that file. Page `<select>` listeners stay there (controls, not table-cell
+  inputs).
 - `Table.serialize()` / `TableModel.fromSerialized()` (receive direction) and
   `TableModel.serialize()` (send direction) are **intentionally asymmetric**,
   not two encodings of the same shape. Receive: full `{columns,
@@ -175,12 +193,10 @@ serialize() → {
   "fix" `TableModel.serialize()` to match `Table.serialize()`'s shape, and do
   not expect `TableModel.serialize(TableModel.fromSerialized(x))` to
   round-trip `x`.
-- `TableModel` owns wizard-table frontend state: the shared rendering files
-  (`tables.js`, `line_item_tables.js`) must not read/write DOM input state
-  directly except via `TableModel` (`setCell`/`getCell`/`subscribe`/
-  `serialize`) — no ad-hoc DOM scraping of input values for save payloads, no
-  per-sub-page field-shaping logic in these shared files. Generalizes the
-  "registry = identity, builders = data" split in §4.
+- Wizard table state flows model → view slots → `GenericInput` via
+  `table_wiring.js`; shared component files must not scrape input DOM for
+  save payloads and must not hold per-sub-page field-shaping logic. Generalizes
+  the "registry = identity, builders = data" split in §4.
 - `find_row_id(base_concept)` / `set_cell(column_id, row_id, value)`: write
   helpers used to inject saved wizard prefs into a `Table` before
   `serialize()`. `find_row_id` maps a stored pref key to a row id (exact match
@@ -189,14 +205,16 @@ serialize() → {
   read-only.
 
 Embed: `{% table(id, data) %}` → JSON script + empty `<table>`;
-`line_item_tables.js` → `renderLineItemPeriodsTable`. Statements nest the same
-object under `statements[type][view]`. Tests: `tests/test_table.py`.
+`base_subpage.html` loads `components/table_wiring.js` to hydrate wizard
+tables. Statements nest the same object under `statements[type][view]` and
+use `statement_view.js` → `render_table`. Tests: `tests/test_table.py`.
 
 ## 6. Status (short)
 
 Working: vendor DuckDB + IndianAPI/AlphaVantage; edgartools fetch/cache;
 `/statements`; wizard shell + opex table; Table used by statements + opex;
-`TableModel` wired for opex-to-capex (receive, render, DOM sync, live
+`TableModel` + `linked_groups` + view slots + `GenericInput` subscriptions in
+`table_wiring.js` wired for opex-to-capex (receive, render, live edits,
 linked-group math); prefs store (no UI).
 
 Partial: opex (save/prefill for `adjustments/opex-to-capex` only; no
