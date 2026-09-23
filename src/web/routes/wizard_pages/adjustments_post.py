@@ -6,9 +6,10 @@ import logging
 from typing import Any
 
 import pandas as pd
-from fastapi import APIRouter
 
 from src.database.wizard_manager import WizardDatabaseManager
+from src.models.table import Table, TableSerializationError
+from src.web.routes.wizard_pages.adjustments_context import OPEX_TO_CAPEX_INPUT_COLUMNS
 
 logger = logging.getLogger(__name__)
 
@@ -20,47 +21,34 @@ def _validate_opex_to_capex_body(
     if not exchange or not str(exchange).strip():
         raise ValueError("exchange is required")
 
-    columns = body.get("columns")
-    if not isinstance(columns, list) or not columns:
-        raise ValueError("columns is required")
-    column_ids = {
-        col.get("id") for col in columns if isinstance(col, dict)
-    }
-    missing_columns = {"capitalize", "years"} - column_ids
-    if missing_columns:
-        raise ValueError(
-            f"columns is missing required id(s): {sorted(missing_columns)}"
-        )
-
     raw_rows = body.get("rows")
     if raw_rows is None:
         raise ValueError("rows is required")
-    if not isinstance(raw_rows, list):
-        raise ValueError("rows must be a list")
+
+    try:
+        table = Table.from_rows(raw_rows, OPEX_TO_CAPEX_INPUT_COLUMNS)
+    except TableSerializationError as exc:
+        raise ValueError(str(exc)) from exc
 
     validated_rows: list[dict[str, Any]] = []
     for index, item in enumerate(raw_rows):
-        if not isinstance(item, dict):
-            raise ValueError(f"rows[{index}] must be an object")
+        row_id = item["id"]
 
-        cells = item.get("cells")
-        if not isinstance(cells, dict):
-            raise ValueError(f"rows[{index}].cells must be an object")
-
-        if not cells.get("capitalize"):
+        if not table.get_cell(row_id, "capitalize"):
             continue
 
-        base_concept = item.get("id")
-        if not base_concept or not str(base_concept).strip():
+        if not row_id or not str(row_id).strip():
             raise ValueError(f"rows[{index}].id is required when capitalize is true")
+        base_concept = str(row_id).strip()
 
-        years = cells.get("years")
+        years = table.get_cell(row_id, "years")
         if years is None:
             raise ValueError(f"rows[{index}].cells.years is required when capitalize is true")
 
+        cells = item.get("cells") or {}
         validated_rows.append(
             {
-                "base_concept": str(base_concept).strip(),
+                "base_concept": base_concept,
                 "years": float(years),
                 "consolidated_ids": cells.get("consolidated_ids"),
             }
