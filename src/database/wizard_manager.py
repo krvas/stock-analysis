@@ -3,15 +3,30 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from pathlib import Path
+
 import duckdb
 import pandas as pd
 
 from src.config import DEFAULT_WIZARD_DB_PATH, WIZARD_SCHEMA_SQL_PATH
 from src.database import wizard_tables as wt
-from src.database.manager import BaseDatabaseManager, STAGING_PREFIX, UpsertResult, _utc_now
+from src.database.manager import (
+    STAGING_PREFIX,
+    BaseDatabaseManager,
+    UpsertResult,
+    _utc_now,
+)
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class DeleteResult:
+    """Outcome of a bulk delete operation."""
+
+    table: str
+    rows_deleted: int
 
 
 class WizardDatabaseManager(BaseDatabaseManager):
@@ -93,6 +108,44 @@ class WizardDatabaseManager(BaseDatabaseManager):
             """,
             [ticker.upper(), exchange.upper()],
         )
+
+    def delete_adjustment_preferences(
+        self,
+        keys: list[tuple[str, str, str, str]],
+    ) -> DeleteResult:
+        """Hard-delete rows matching ``(ticker, exchange, adjustment_type, base_concept)``.
+
+        ``keys`` uses the same conflict key as ``upsert_adjustment_preferences``.
+        Ticker/exchange are upper-cased to match the normalization applied on
+        upsert, so a delete for a lowercase ticker still hits the stored row.
+        A no-op (no error) for an empty ``keys`` list or for keys that don't
+        match any existing row.
+        """
+        table = wt.ADJUSTMENT_PREFERENCES
+        if not keys:
+            logger.debug("Skipping empty delete for %s", table)
+            return DeleteResult(table=table, rows_deleted=0)
+
+        if self.read_only:
+            raise RuntimeError("Cannot delete on a read-only connection.")
+
+        self._ensure_schema()
+
+        conditions = []
+        params: list[str] = []
+        for ticker, exchange, adjustment_type, base_concept in keys:
+            conditions.append("(ticker = ? AND exchange = ? AND adjustment_type = ? AND base_concept = ?)")
+            params.extend([str(ticker).upper(), str(exchange).upper(), adjustment_type, base_concept])
+
+        sql = f"DELETE FROM {table} WHERE {' OR '.join(conditions)}"
+        con = self.connection
+        before = con.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+        con.execute(sql, params)
+        after = con.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+        rows_deleted = before - after
+
+        logger.info("Deleted %d rows from %s", rows_deleted, table)
+        return DeleteResult(table=table, rows_deleted=rows_deleted)
 
     def _prepare_adjustment_preferences(self, df: pd.DataFrame) -> pd.DataFrame:
         table = wt.ADJUSTMENT_PREFERENCES
