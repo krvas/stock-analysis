@@ -12,19 +12,20 @@ the financials table has just been fetched? How do we connect the company_id?
 - 
 """
 
-from typing import Any, Iterable, List
 import logging
+from collections.abc import Iterable
+from typing import Any
 
 import pandas as pd
 
 from src.api.base_client import BaseAPIClient
-from src.database.manager import DatabaseManager
 from src.database import tables as t
+from src.database.manager import DatabaseManager
 
 logger = logging.getLogger(__name__)
 
 
-DEFAULT_TABLE_ORDER: List[str] = [
+DEFAULT_TABLE_ORDER: list[str] = [
     t.COMPANIES,
     t.FINANCIALS,
     t.BALANCE_SHEETS,

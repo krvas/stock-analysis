@@ -6,9 +6,9 @@ import logging
 import os
 from datetime import date
 from typing import Any, Final
-from dotenv import load_dotenv
 
 import pandas as pd
+from dotenv import load_dotenv
 
 from src.api.base_client import BaseAPIClient
 from src.utils.indianapi_parsing import (
@@ -22,6 +22,7 @@ from src.utils.indianapi_parsing import (
     rows_to_dict,
 )
 from src.utils.url_cache import URLCache
+
 from .registry_manager import RegistryManager
 
 logger = logging.getLogger(__name__)
@@ -84,7 +85,7 @@ class IndianAPIClient(BaseAPIClient):
 
     def _validate_response(self, data: Any, path: str) -> None:
         if isinstance(data, dict) and data.get("error"):
-            raise IndianAPIError(f"{str(data['error'])} for {path}")
+            raise IndianAPIError(f"{data['error']!s} for {path}")
 
     def _before_request(self, path: str, params: dict[str, str]) -> None:
         global _request_count

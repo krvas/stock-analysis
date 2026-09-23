@@ -7,8 +7,8 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from src.database.manager import DatabaseManager
 from src.database import tables as t
+from src.database.manager import DatabaseManager
 
 
 @pytest.fixture

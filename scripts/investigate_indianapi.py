@@ -6,7 +6,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -61,7 +61,7 @@ def api_get(path: str, params: dict[str, str]) -> tuple[int, Any]:
     )
     entry = {
         "n": request_count,
-        "ts": datetime.now(timezone.utc).isoformat(),
+        "ts": datetime.now(UTC).isoformat(),
         "method": "GET",
         "path": path,
         "params": params,
@@ -301,7 +301,7 @@ def analyze_corporate_actions(data: Any) -> dict[str, Any]:
 
 def main() -> None:
     report: dict[str, Any] = {
-        "investigation_date": datetime.now(timezone.utc).isoformat(),
+        "investigation_date": datetime.now(UTC).isoformat(),
         "base_url": BASE_URL,
         "tickers": {},
         "name_resolution_tests": {},

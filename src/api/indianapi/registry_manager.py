@@ -1,9 +1,7 @@
 
-import os
 import json
-from typing import Any
-from typing_extensions import Final
-
+import os
+from typing import Any, Final
 
 API_NAME_BY_SYMBOL_PATH: Final[str] = os.path.join(os.path.dirname(__file__), "registry_names.json")
 FIELD_KEYS_PATH: Final[str] = os.path.join(os.path.dirname(__file__), "registry_field_keys.json")

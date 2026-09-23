@@ -7,15 +7,15 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
-from starlette.responses import Response
 from jinja2 import TemplateNotFound
+from starlette.responses import Response
 
 from src.web.templating import templates
 from src.web.wizard_registry import (
     GROUP_LABELS,
+    WIZARD_PAGES,
     Page,
     SubPage,
-    WIZARD_PAGES,
     first_subpage,
     get_page,
     get_subpage,

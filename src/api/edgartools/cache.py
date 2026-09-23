@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 import logging
 import shutil
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Literal
 
@@ -37,7 +37,7 @@ _VIEWS: tuple[ViewName, ...] = ("summary", "standard", "detailed")
 
 
 def _utc_now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def _index_path(cache_dir: Path) -> Path:

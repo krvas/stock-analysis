@@ -8,7 +8,11 @@ from unittest.mock import patch
 import pandas as pd
 import pytest
 
-from src.api.indianapi.client import IndianAPIClient, IndianAPIError, reset_request_count
+from src.api.indianapi.client import (
+    IndianAPIClient,
+    IndianAPIError,
+    reset_request_count,
+)
 
 SAMPLE_PERIOD = {
     "EndDate": "2025-03-31",
@@ -71,7 +75,7 @@ class TestIndianAPIClient:
     def test_fetch_company_and_financials_from_mock(self) -> None:
         client = IndianAPIClient(api_key="test-key")
 
-        def fake_urlopen(req, timeout=60):  # noqa: ARG001
+        def fake_urlopen(req, timeout=60):
             url = req.full_url
             payload: dict
             if "/stock?" in url:
@@ -116,7 +120,7 @@ class TestIndianAPIClient:
             ]
         }
 
-        def fake_urlopen(req, timeout=60):  # noqa: ARG001
+        def fake_urlopen(req, timeout=60):
             return FakeResponse(historical)
 
         with patch("urllib.request.urlopen", fake_urlopen):
@@ -148,7 +152,7 @@ class TestIndianAPIClient:
             "splits": {"data": []},
         }
 
-        def fake_urlopen(req, timeout=60):  # noqa: ARG001
+        def fake_urlopen(req, timeout=60):
             return FakeResponse(payload)
 
         with patch("urllib.request.urlopen", fake_urlopen):
@@ -163,7 +167,7 @@ class TestIndianAPIClient:
     def test_stock_error_raises(self) -> None:
         client = IndianAPIClient(api_key="test-key")
 
-        def fake_urlopen(req, timeout=60):  # noqa: ARG001
+        def fake_urlopen(req, timeout=60):
             return FakeResponse({"error": "Stock not found"})
 
         with patch("urllib.request.urlopen", fake_urlopen):
