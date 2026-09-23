@@ -1,13 +1,63 @@
 /**
- * Hydrate all line-item tables declared via the {% table %} Jinja tag.
+ * Wizard line-item table hydration and save wiring.
+ *
+ * 1. Read the JSON embedded by the {% table %} tag.
+ * 2. TableModel.fromSerialized is the source of truth.
+ * 3. render_table paints headers, labels, static cells, and link cells. Input columns are empty slots.
+ * 4. Each slot gets a GenericInput. That class is the only place that listens to the input element.
+ * 5. input.subscribe sends the coerced value to model.setCell.
+ * 6. model.subscribe writes linked-group updates back with input.set. GenericInput ignores a set that does not change the value, so this does not loop.
+ * 7. Save posts model.serialize(), which includes input columns only.
  */
 
 import { postJson } from "../api_client.js";
-import { renderLineItemPeriodsTable } from "./table_view.js";
+import { GenericInput } from "./generic_input.js";
+import { render_table } from "./table_view.js";
 import { TableModel } from "./table_model.js";
 
 /** @type {Map<string, TableModel>} tableId -> model, for later lookup (e.g. at submit time). */
 const tableModels = new Map();
+
+function htmlInputType(dtype) {
+  if (dtype === "boolean") {
+    return "checkbox";
+  }
+  if (dtype === "number") {
+    return "number";
+  }
+  return "text";
+}
+
+/**
+ * @param {TableModel} model
+ * @param {HTMLTableElement} container
+ */
+function wireTableInputs(model, container) {
+  /** @type {Map<string, GenericInput>} */
+  const inputsByCell = new Map();
+
+  container.querySelectorAll("[data-input-slot]").forEach((slot) => {
+    const rowId = slot.dataset.rowId;
+    const colId = slot.dataset.colId;
+    const dtype = slot.dataset.dtype;
+    const type = htmlInputType(dtype);
+    const input = new GenericInput(
+      `input-${colId}-${rowId}`,
+      slot,
+      model.getCell(rowId, colId),
+      type,
+    );
+    inputsByCell.set(`${rowId}\0${colId}`, input);
+    input.subscribe((value) => model.setCell(rowId, colId, value));
+  });
+
+  model.subscribe((rowId, colId, value) => {
+    const input = inputsByCell.get(`${rowId}\0${colId}`);
+    if (input) {
+      input.set(value);
+    }
+  });
+}
 
 document
   .querySelectorAll('script[type="application/json"][data-line-item-table]')
@@ -17,18 +67,10 @@ document
     const tableData = JSON.parse(dataEl.textContent);
     const model = TableModel.fromSerialized(tableData);
     tableModels.set(tableId, model);
-    model.subscribe((rowId, colId, value) => {
-      const input = document.getElementById(`input-${colId}-${rowId}`);
-      if (!input) {
-        return;
-      }
-      if (input.type === "checkbox") {
-        input.checked = Boolean(value);
-      } else {
-        input.value = value == null ? "" : value;
-      }
-    });
-    renderLineItemPeriodsTable(tableId, model, { model });
+
+    const container = document.getElementById(tableId);
+    render_table(container, model);
+    wireTableInputs(model, container);
   });
 
 /**
