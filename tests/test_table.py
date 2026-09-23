@@ -119,6 +119,62 @@ def test_table_set_cell_unknown_row_raises() -> None:
         table.set_cell("x", "missing", "value")
 
 
+def test_table_from_rows_happy_path() -> None:
+    columns = [
+        ColumnSpec(id="note", label="Note", kind="input", dtype="string"),
+        ColumnSpec(id="amount", label="Amount", kind="input", dtype="number"),
+    ]
+    rows = [
+        {"id": "r1", "cells": {"note": "first", "amount": 1.0}},
+        {"id": "r2", "cells": {"note": "second", "amount": 2.0}},
+        {"id": "r3", "cells": {"note": "third", "amount": 3.0}},
+    ]
+    table = Table.from_rows(rows, columns)
+
+    assert table.get_cell("r1", "note") == "first"
+    assert table.get_cell("r1", "amount") == 1.0
+    assert table.get_cell("r2", "note") == "second"
+    assert table.get_cell("r3", "amount") == 3.0
+
+
+def test_table_from_rows_missing_id_raises() -> None:
+    columns = [ColumnSpec(id="note", label="Note", kind="input", dtype="string")]
+    rows = [{"cells": {"note": "no id here"}}]
+    with pytest.raises(TableSerializationError, match="missing required 'id'"):
+        Table.from_rows(rows, columns)
+
+
+def test_table_from_rows_duplicate_column_ids_raises() -> None:
+    columns = [
+        ColumnSpec(id="note", label="Note", kind="input", dtype="string"),
+        ColumnSpec(id="note", label="Note2", kind="input", dtype="string"),
+    ]
+    rows = [{"id": "r1", "cells": {"note": "x"}}]
+    with pytest.raises(TableSerializationError, match="Duplicate column ids"):
+        Table.from_rows(rows, columns)
+
+
+def test_table_get_cell_unknown_row_raises() -> None:
+    columns = [ColumnSpec(id="note", label="Note", kind="input", dtype="string")]
+    table = Table.from_rows([{"id": "r1", "cells": {"note": "x"}}], columns)
+    with pytest.raises(TableSerializationError, match="row id 'missing'"):
+        table.get_cell("missing", "note")
+
+
+def test_table_get_cell_unknown_column_raises() -> None:
+    columns = [ColumnSpec(id="note", label="Note", kind="input", dtype="string")]
+    table = Table.from_rows([{"id": "r1", "cells": {"note": "x"}}], columns)
+    with pytest.raises(TableSerializationError, match="column 'missing' not found"):
+        table.get_cell("r1", "missing")
+
+
+def test_table_from_rows_serialize_raises() -> None:
+    columns = [ColumnSpec(id="note", label="Note", kind="input", dtype="string")]
+    table = Table.from_rows([{"id": "r1", "cells": {"note": "x"}}], columns)
+    with pytest.raises(TableSerializationError, match="partial Table cannot be serialized"):
+        table.serialize()
+
+
 def test_table_input_columns_without_dataframe_column() -> None:
     df = pd.DataFrame({"concept": ["a"], "label": ["A"], "2024": [5.0]})
     table = Table(
