@@ -23,7 +23,7 @@ def test_validate_opex_to_capex_body_filters_unchecked_rows() -> None:
         },
     ]
 
-    exchange, validated_rows = _validate_opex_to_capex_body(_body(rows))
+    exchange, validated_rows, base_concepts_to_delete = _validate_opex_to_capex_body(_body(rows))
 
     assert exchange == "NASDAQ"
     assert validated_rows == [
@@ -33,6 +33,7 @@ def test_validate_opex_to_capex_body_filters_unchecked_rows() -> None:
             "consolidated_ids": "a,b",
         }
     ]
+    assert base_concepts_to_delete == ["OtherExpenses"]
 
 
 def test_validate_opex_to_capex_body_missing_exchange_raises() -> None:
@@ -62,3 +63,37 @@ def test_validate_opex_to_capex_body_malformed_rows_missing_id_raises() -> None:
 
     with pytest.raises(ValueError):
         _validate_opex_to_capex_body(_body(rows))
+
+
+def test_validate_opex_to_capex_body_unchecked_row_goes_to_delete_list() -> None:
+    rows = [
+        {
+            "id": "OperatingExpenses",
+            "cells": {"capitalize": True, "years": 5, "consolidated_ids": None},
+        },
+        {
+            "id": "ResearchAndDevelopmentExpense",
+            "cells": {"capitalize": False, "years": None},
+        },
+    ]
+
+    exchange, validated_rows, base_concepts_to_delete = _validate_opex_to_capex_body(_body(rows))
+
+    assert exchange == "NASDAQ"
+    assert [row["base_concept"] for row in validated_rows] == ["OperatingExpenses"]
+    assert base_concepts_to_delete == ["ResearchAndDevelopmentExpense"]
+
+
+def test_validate_opex_to_capex_body_unchecked_row_blank_id_skipped_from_delete() -> None:
+    rows = [
+        {
+            "id": "",
+            "cells": {"capitalize": False, "years": None},
+        },
+    ]
+
+    exchange, validated_rows, base_concepts_to_delete = _validate_opex_to_capex_body(_body(rows))
+
+    assert exchange == "NASDAQ"
+    assert validated_rows == []
+    assert base_concepts_to_delete == []
