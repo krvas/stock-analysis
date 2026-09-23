@@ -2,7 +2,7 @@ import {
   renderLineItemFundFlowTable,
   renderLineItemPeriodsTable,
   staticPeriodColumnIds,
-} from "./tables.js";
+} from "./components/table_view.js";
 
 const dataEl = document.getElementById("statement-data");
 if (!dataEl) {

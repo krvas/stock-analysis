@@ -7,7 +7,7 @@ import {
   formatNumber,
   getStatementUnit,
   getUnitLabel,
-} from "./utils.js";
+} from "../utils.js";
 
 function getTableParts(tableId) {
   const table = document.getElementById(tableId);

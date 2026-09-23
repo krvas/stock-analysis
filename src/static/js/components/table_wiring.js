@@ -2,8 +2,8 @@
  * Hydrate all line-item tables declared via the {% table %} Jinja tag.
  */
 
-import { postJson } from "./api_client.js";
-import { renderLineItemPeriodsTable } from "./tables.js";
+import { postJson } from "../api_client.js";
+import { renderLineItemPeriodsTable } from "./table_view.js";
 import { TableModel } from "./table_model.js";
 
 /** @type {Map<string, TableModel>} tableId -> model, for later lookup (e.g. at submit time). */
