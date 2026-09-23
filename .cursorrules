@@ -1,0 +1,11 @@
+* Read CLAUDE.md first — it has module-boundary rules (what belongs in shared
+  files vs. subpage-specific ones, and the TableModel ownership rule) that
+  apply here exactly as they do in Claude Code. `specs/STATE.md` is the
+  architecture reference underneath both.
+
+* When working on tasks, break your changes down into small, logical, and atomic steps.
+  After completing each single logical unit of work (e.g., modifying one file, adding a helper function, or writing a specific test):
+  1. Stage the relevant changes using git add.
+  2. Create a git commit with a clear, concise commit message following Conventional Commits (e.g., feat:, fix:, refactor:, test:).
+  3. Do not batch multiple unrelated changes into a single large commit.
+  4. Continue to the next step only after the previous mini-commit is complete.
