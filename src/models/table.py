@@ -143,8 +143,9 @@ class Table:
         row_id_col: str,
         level_col: str | None = None,
         parent_id_col: str | None = None,
-        label_col: str = "label",
+        label_col: str | None = "label",
         is_total_col: str | None = "is_total",
+        partial: bool = False,
     ) -> None:
         if not row_id_col:
             raise TableSerializationError("row_id_col must be non-empty")
@@ -177,7 +178,7 @@ class Table:
             raise TableSerializationError(
                 f"row_id_col '{row_id_col}' not found in DataFrame"
             )
-        if label_col not in df.columns:
+        if not partial and label_col is not None and label_col not in df.columns:
             raise TableSerializationError(
                 f"label_col '{label_col}' not found in DataFrame"
             )
@@ -198,9 +199,12 @@ class Table:
         self._parent_id_col = parent_id_col
         self._label_col = label_col
         self._is_total_col = resolved_is_total_col
+        self._partial = partial
 
     def serialize(self) -> dict[str, Any]:
         """Return the column-based table JSON shape."""
+        if self._partial:
+            raise TableSerializationError("partial Table cannot be serialized")
         return {
             "columns": [asdict(spec) for spec in self._columns],
             "linked_groups": {
@@ -247,6 +251,68 @@ class Table:
                 f"row id '{row_id}' not found in column '{self._row_id_col}'"
             )
         self._df.loc[mask, column_id] = value
+
+    def get_cell(self, row_id: str, column_id: str) -> Any:
+        """Return the normalized value of ``column_id`` for the row ``row_id``."""
+        row_key = str(row_id)
+        mask = self._df[self._row_id_col].astype(str) == row_key
+        if not mask.any():
+            raise TableSerializationError(
+                f"row id '{row_id}' not found in column '{self._row_id_col}'"
+            )
+        if column_id not in self._df.columns:
+            raise TableSerializationError(
+                f"column '{column_id}' not found in DataFrame"
+            )
+        raw = self._df.loc[mask, column_id].iloc[0]
+        return _cell_value_from_raw(raw)
+
+    @classmethod
+    def from_rows(
+        cls,
+        rows: list[dict[str, Any]],
+        columns: list[ColumnSpec],
+        *,
+        row_id_col: str = "id",
+    ) -> Table:
+        """Build a partial :class:`Table` from deserialized ``{id, cells}`` rows.
+
+        This matches the wire shape produced by the frontend's
+        ``TableModel.serialize()``. The resulting table has no label/level/
+        metadata and can only be read via :meth:`get_cell` or written via
+        :meth:`set_cell` — it cannot be serialized.
+        """
+        if not isinstance(rows, list):
+            raise TableSerializationError("rows must be a list")
+
+        records: list[dict[str, Any]] = []
+        for entry in rows:
+            if not isinstance(entry, dict):
+                raise TableSerializationError("each row must be a dict")
+            if row_id_col not in entry:
+                raise TableSerializationError(
+                    f"row is missing required '{row_id_col}' key"
+                )
+            cells = entry.get("cells", {}) or {}
+            record: dict[str, Any] = {row_id_col: str(entry[row_id_col])}
+            for col in columns:
+                record[col.id] = cells.get(col.id)
+            records.append(record)
+
+        column_names = [row_id_col] + [col.id for col in columns]
+        df = pd.DataFrame(records, columns=column_names)
+
+        return cls(
+            df,
+            columns,
+            linked_groups={},
+            row_id_col=row_id_col,
+            level_col=None,
+            parent_id_col=None,
+            label_col=None,
+            is_total_col=None,
+            partial=True,
+        )
 
     def _serialize_rows(self) -> list[dict[str, Any]]:
         rows: list[dict[str, Any]] = []
