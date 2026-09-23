@@ -41,3 +41,6 @@ logs/
 
 # Rough page
 feature-list.md
+
+# Node / JS tooling
+node_modules/
