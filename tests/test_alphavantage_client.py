@@ -11,7 +11,6 @@ import pytest
 from src.api.alphavantage.client import AlphaVantageClient, AlphaVantageError
 from src.api.alphavantage.parsing import parse_split_factor
 
-
 SAMPLE_OVERVIEW = {
     "Symbol": "IBM",
     "Name": "International Business Machines",
@@ -168,7 +167,7 @@ class FakeResponse:
         return False
 
 
-def _dispatch(req, timeout=60):  # noqa: ARG001
+def _dispatch(req, timeout=60):
     url = req.full_url
     if "function=OVERVIEW" in url:
         return FakeResponse(SAMPLE_OVERVIEW)
@@ -248,7 +247,7 @@ class TestAlphaVantageClient:
     def test_error_payload_raises(self) -> None:
         client = AlphaVantageClient(api_key="test-key")
 
-        def bad_urlopen(req, timeout=60):  # noqa: ARG001
+        def bad_urlopen(req, timeout=60):
             return FakeResponse({"Note": "API call frequency exceeded"})
 
         with patch("urllib.request.urlopen", bad_urlopen):

@@ -5,7 +5,6 @@ Included just in case there was some issue in refactoring these dictionaries to 
 
 from typing import Final
 
-
 API_NAME_BY_SYMBOL: Final[dict[str, str]] = {
     "TCS": "TCS",
     "SUNPHARMA": "Sun Pharmaceutical",

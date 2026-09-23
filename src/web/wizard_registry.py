@@ -8,8 +8,9 @@ accept user saves declare a ``post_handler``; requests go to
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable, Final, Literal
+from typing import Any, Final, Literal
 
 from src.web.routes.wizard_pages import adjustments_context, adjustments_post
 

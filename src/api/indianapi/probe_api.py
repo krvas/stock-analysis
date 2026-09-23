@@ -2,13 +2,12 @@
 Runs the IndianAPI client against the real API to verify that it can fetch data and parse it into the expected schema.
 """
 
-import os
 import argparse
+import os
+
 from dotenv import load_dotenv
 
-
 from src.api.indianapi.client import IndianAPIClient
-
 
 
 def main(name: str):

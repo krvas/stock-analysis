@@ -19,7 +19,11 @@ from src.api.edgartools.cache import (
     save_period_bundle,
     touch_company_cache,
 )
-from src.config import EDGARTOOLS_CACHE_DIR, EDGARTOOLS_COMPANY_CACHE_SIZE, load_project_dotenv
+from src.config import (
+    EDGARTOOLS_CACHE_DIR,
+    EDGARTOOLS_COMPANY_CACHE_SIZE,
+    load_project_dotenv,
+)
 
 StatementType = Literal["income", "balance", "cashflow"]
 PeriodType = Literal["annual", "quarterly"]

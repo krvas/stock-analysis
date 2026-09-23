@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 import pandas as pd
@@ -135,7 +135,7 @@ def test_default_cache_age_differs_by_period() -> None:
 
 def test_touch_evicts_oldest_company_directory(tmp_path: Path) -> None:
     cache_dir = tmp_path / "edgartools_cache"
-    older = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
+    older = (datetime.now(UTC) - timedelta(days=1)).isoformat()
 
     save_period_bundle(
         cik=1,
@@ -175,7 +175,7 @@ def test_touch_evicts_oldest_company_directory(tmp_path: Path) -> None:
 
 def test_refetch_bumps_company_to_most_recent(tmp_path: Path) -> None:
     cache_dir = tmp_path / "edgartools_cache"
-    t0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    t0 = datetime(2026, 1, 1, tzinfo=UTC)
     t1 = t0 + timedelta(hours=1)
 
     for cik, ticker, when in ((1, "AAA", t0), (2, "BBB", t1)):

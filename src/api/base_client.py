@@ -15,6 +15,10 @@ import pandas as pd
 
 from .base_request_client import APIClientError, BaseRequestClient
 
+# Re-exported for `src.api.base_client.APIClientError` (used by src/api/__init__.py
+# and downstream clients that import the error type from this module).
+__all__ = ["APIClientError", "BaseAPIClient"]
+
 T = TypeVar("T")
 
 

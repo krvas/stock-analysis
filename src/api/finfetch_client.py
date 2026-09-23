@@ -1,8 +1,9 @@
 import finfetch as ff
 import pandas as pd
-
 from base_client import BaseAPIClient
+
 from database import DatabaseManager
+
 
 class FinfetchClient(BaseAPIClient):
 

@@ -3,15 +3,16 @@
 
 import sys
 
+
 def test_imports():
     """Test that all API clients can be imported."""
     from src.api import (
-        CompaniesClient,
-        PricesClient,
-        FinancialsClient,
         BalanceSheetsClient,
-        CashFlowsClient,
         BaseAPIClient,
+        CashFlowsClient,
+        CompaniesClient,
+        FinancialsClient,
+        PricesClient,
     )
     print("✓ All API clients imported successfully")
     return (
@@ -27,11 +28,11 @@ def test_imports():
 def test_converters():
     """Test that all converters can be imported."""
     from src.api.converters import (
-        CompanyResponseConverter,
-        PricesResponseConverter,
-        FinancialsResponseConverter,
         BalanceSheetResponseConverter,
         CashFlowResponseConverter,
+        CompanyResponseConverter,
+        FinancialsResponseConverter,
+        PricesResponseConverter,
     )
     print("✓ All converters imported successfully")
     return (
@@ -46,11 +47,11 @@ def test_converters():
 def test_client_instantiation():
     """Test client instantiation without database."""
     from src.api import (
-        CompaniesClient,
-        PricesClient,
-        FinancialsClient,
         BalanceSheetsClient,
         CashFlowsClient,
+        CompaniesClient,
+        FinancialsClient,
+        PricesClient,
     )
 
     companies_client = CompaniesClient(db=None)
@@ -77,13 +78,12 @@ def test_client_instantiation():
 def test_converters_with_sample_data():
     """Test converters with sample API responses."""
     from src.api.converters import (
-        CompanyResponseConverter,
-        PricesResponseConverter,
-        FinancialsResponseConverter,
         BalanceSheetResponseConverter,
         CashFlowResponseConverter,
+        CompanyResponseConverter,
+        FinancialsResponseConverter,
+        PricesResponseConverter,
     )
-    import pandas as pd
 
     # Test CompanyResponseConverter
     company_data = [

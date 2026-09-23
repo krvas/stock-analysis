@@ -5,8 +5,13 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
-from src.models.table import statement_table_from_dataframe
-from src.models.table import ColumnSpec, LinkedGroupSpec, Table, TableSerializationError
+from src.models.table import (
+    ColumnSpec,
+    LinkedGroupSpec,
+    Table,
+    TableSerializationError,
+    statement_table_from_dataframe,
+)
 
 
 def test_table_serialize_statement_shape() -> None:

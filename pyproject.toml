@@ -29,3 +29,9 @@ include = ["src*"]
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]
+
+[tool.ruff.lint]
+# B008: FastAPI's idiomatic Query()/Depends() defaults are correct usage, not bugs.
+# PYI036/PYI034: stub-file (.pyi) typing conventions that don't apply to this
+# non-stub codebase.
+ignore = ["B008", "PYI036", "PYI034"]
