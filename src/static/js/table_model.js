@@ -100,6 +100,7 @@ export class TableModel {
         id: row.id,
         label: row.label,
         level: row.level,
+        is_total: Boolean(row.is_total),
         parent_id: row.parent_id ?? null,
         cells: { ...(row.cells || {}) },
       });
@@ -188,6 +189,7 @@ export class TableModel {
         id: row.id,
         label: row.label,
         level: row.level,
+        is_total: row.is_total,
         parent_id: row.parent_id,
         cells: { ...row.cells },
       })),

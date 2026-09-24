@@ -1,6 +1,7 @@
 import {
   renderLineItemFundFlowTable,
   renderLineItemPeriodsTable,
+  staticPeriodColumnIds,
 } from "./tables.js";
 
 const dataEl = document.getElementById("statement-data");
@@ -33,9 +34,9 @@ function getCurrentView() {
   return statementViews[viewName];
 }
 
-function updateComparePeriodOptions(periods) {
+function updateComparePeriodOptions(periodIds) {
   const select = document.getElementById("compare-period-select");
-  const previousPeriods = periods.slice(1);
+  const previousPeriods = periodIds.slice(1);
 
   select.innerHTML = "";
   previousPeriods.forEach((period) => {
@@ -91,25 +92,26 @@ function handleViewChange() {
     return;
   }
 
-  updateComparePeriodOptions(view.periods);
+  const periodIds = staticPeriodColumnIds(view.columns);
+  updateComparePeriodOptions(periodIds);
   updateControlVisibility();
 
   if (
     currentStatementType === "balance" &&
     displayMode === "fund-flow" &&
-    view.periods.length > 1 &&
+    periodIds.length > 1 &&
     comparePeriod
   ) {
     renderLineItemFundFlowTable(
       STATEMENT_TABLE_ID,
-      view.rows,
-      view.periods[0],
+      view,
+      periodIds[0],
       comparePeriod,
     );
     return;
   }
 
-  renderLineItemPeriodsTable(STATEMENT_TABLE_ID, view.rows, view.periods);
+  renderLineItemPeriodsTable(STATEMENT_TABLE_ID, view);
 }
 
 function handleStatementTypeChange(statementType) {
