@@ -9,6 +9,6 @@ document
   .forEach((dataEl) => {
     const tableId =
       dataEl.dataset.tableId || dataEl.id.replace(/-data$/, "");
-    const { rows, periods } = JSON.parse(dataEl.textContent);
-    renderLineItemPeriodsTable(tableId, rows, periods);
+    const tableData = JSON.parse(dataEl.textContent);
+    renderLineItemPeriodsTable(tableId, tableData);
   });
