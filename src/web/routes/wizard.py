@@ -145,8 +145,6 @@ async def wizard_subpage_post(
     page_slug: str,
     subpage_slug: str,
 ) -> dict[str, Any]:
-    from src.web.wizard_registry import get_subpage
-
     subpage = get_subpage(page_slug, subpage_slug)
     if subpage is None:
         raise HTTPException(status_code=404, detail="Unknown wizard sub-page")

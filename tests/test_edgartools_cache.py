@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from src.api.edgartools import cache as cache_mod
 from src.api.edgartools.cache import (
     _load_index,
     find_cached_cik,
@@ -145,8 +146,6 @@ def test_touch_evicts_oldest_company_directory(tmp_path: Path) -> None:
         views=_sample_bundle(),
         cache_dir=cache_dir,
     )
-    from src.api.edgartools import cache as cache_mod
-
     cache_mod._save_index(
         cache_dir,
         {"companies": {"1": {"ticker": "OLD", "last_accessed": older}}},
@@ -190,8 +189,6 @@ def test_refetch_bumps_company_to_most_recent(tmp_path: Path) -> None:
         touch_company_cache(cik=cik, ticker=ticker, cache_dir=cache_dir, max_companies=2)
         index = _load_index(cache_dir)
         index["companies"][str(cik)]["last_accessed"] = when.isoformat()
-        from src.api.edgartools import cache as cache_mod
-
         cache_mod._save_index(cache_dir, index)
 
     evicted = touch_company_cache(
