@@ -15,7 +15,7 @@ def test_validate_opex_to_capex_body_filters_unchecked_rows() -> None:
     rows = [
         {
             "id": "OperatingExpenses",
-            "cells": {"capitalize": True, "years": 5, "consolidated_ids": "a,b"},
+            "cells": {"capitalize": True, "years": 5},
         },
         {
             "id": "OtherExpenses",
@@ -29,7 +29,6 @@ def test_validate_opex_to_capex_body_filters_unchecked_rows() -> None:
         {
             "base_concept": "OperatingExpenses",
             "years": 5.0,
-            "consolidated_ids": "a,b",
         }
     ]
     assert base_concepts_to_delete == ["OtherExpenses"]
@@ -63,7 +62,7 @@ def test_validate_opex_to_capex_body_unchecked_row_goes_to_delete_list() -> None
     rows = [
         {
             "id": "OperatingExpenses",
-            "cells": {"capitalize": True, "years": 5, "consolidated_ids": None},
+            "cells": {"capitalize": True, "years": 5},
         },
         {
             "id": "ResearchAndDevelopmentExpense",

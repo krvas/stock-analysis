@@ -56,12 +56,10 @@ def _validate_opex_to_capex_body(
         if years is None:
             raise ValueError(f"rows[{index}].cells.years is required when capitalize is true")
 
-        cells = item.get("cells") or {}
         validated_rows.append(
             {
                 "base_concept": base_concept,
                 "years": float(years),
-                "consolidated_ids": cells.get("consolidated_ids"),
             }
         )
 
@@ -77,7 +75,6 @@ def opex_to_capex_post(ticker: str, body: dict[str, Any]) -> dict[str, Any]:
 
     records: list[dict[str, object]] = []
     for item in raw_rows:
-        consolidated_ids = item.get("consolidated_ids")
         records.append(
             {
                 "ticker": ticker,
@@ -87,11 +84,6 @@ def opex_to_capex_post(ticker: str, body: dict[str, Any]) -> dict[str, Any]:
                 "base_concept": item["base_concept"],
                 "base_concept_statement": "PL",
                 "value": item["years"],
-                "consolidated_ids": (
-                    None
-                    if consolidated_ids is None
-                    else str(consolidated_ids).strip() or None
-                ),
             }
         )
 
