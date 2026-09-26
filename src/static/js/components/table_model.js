@@ -83,11 +83,7 @@ export class TableModel {
   }
 
   getCell(rowId, colId) {
-    const row = this._rows.get(rowId);
-    if (!row) {
-      return undefined;
-    }
-    return row.cells[colId];
+    return this._rows.get(rowId)?.cells[colId];
   }
 
   setCell(rowId, colId, value) {
@@ -102,12 +98,7 @@ export class TableModel {
     row.cells[colId] = value;
     this._notify(rowId, colId, value);
 
-    const groupNames = this._colToGroups.get(colId);
-    if (!groupNames) {
-      return;
-    }
-
-    for (const groupName of groupNames) {
+    for (const groupName of this._colToGroups.get(colId) ?? []) {
       const group = this._linkedGroups.get(groupName);
       const handler = LINKED_GROUP_HANDLERS[group.type];
       if (!handler) {
