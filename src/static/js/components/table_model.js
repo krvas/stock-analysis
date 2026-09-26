@@ -102,10 +102,7 @@ export class TableModel {
     for (const groupName of this._colToGroups.get(colId) ?? []) {
       const group = this._linkedGroups.get(groupName);
       const handler = LINKED_GROUP_HANDLERS[group.type];
-      if (!handler) {
-        continue;
-      }
-      handler.apply(this, group, colId, rowId);
+      handler?.apply(this, group, colId, rowId);
     }
   }
 

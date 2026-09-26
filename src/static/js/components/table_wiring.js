@@ -91,7 +91,7 @@ function buildWizardSaveBody(form) {
     throw new Error(`Table model not found: ${tableId}`);
   }
 
-  return { ...model.serialize() };
+  return model.serialize();
 }
 
 function bindWizardSaveForms() {

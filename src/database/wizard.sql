@@ -9,7 +9,6 @@ CREATE TABLE IF NOT EXISTS adjustment_preferences (
     base_concept      VARCHAR NOT NULL,          -- statement line item the adjustment applies to
     base_concept_statement         VARCHAR NOT NULL,          -- 'BS' | 'CF' | 'PL'
     value              DOUBLE NOT NULL,           -- years (opex_to_capex) or % (maintenance_capex, assets_in_use)
-    consolidated_ids   VARCHAR,                   -- comma-joined CSV ids this preference satisfies (traceability)
     updated_at         TIMESTAMP NOT NULL,
 
     UNIQUE (ticker, exchange, adjustment_type, base_concept)

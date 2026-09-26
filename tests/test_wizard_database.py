@@ -33,7 +33,6 @@ def _sample_row(**overrides: object) -> dict[str, object]:
         "base_concept": "ResearchAndDevelopmentExpense",
         "base_concept_statement": "PL",
         "value": 3.0,
-        "consolidated_ids": "c1,c2",
     }
     row.update(overrides)
     return row

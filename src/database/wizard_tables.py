@@ -26,7 +26,6 @@ TABLE_COLUMNS: Final[dict[str, tuple[str, ...]]] = {
         "base_concept",
         "base_concept_statement",
         "value",
-        "consolidated_ids",
         "updated_at",
     ),
 }
