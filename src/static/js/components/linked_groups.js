@@ -2,6 +2,22 @@
  * Linked-group calculations for TableModel. No DOM.
  */
 
+/**
+ * value = base * (pct / 100), or null if either input is missing.
+ */
+function computeValueFromPct(base, pct) {
+  if (base === null || pct === null) return null;
+  return base * (pct / 100);
+}
+
+/**
+ * pct = (value / base) * 100, or null if either input is missing or base is 0.
+ */
+function computePctFromValue(base, value) {
+  if (base === null || value === null || base === 0) return null;
+  return (value / base) * 100;
+}
+
 export const LINKED_GROUP_HANDLERS = {
   pct_of_base: {
     /**
@@ -16,22 +32,12 @@ export const LINKED_GROUP_HANDLERS = {
       const value = model._coerceNumber(model.getCell(rowId, group.value_col));
 
       if (changedColId === group.pct_col) {
-        if (base === null || pct === null) {
-          model._setCellSilent(rowId, group.value_col, null);
-        } else {
-          model._setCellSilent(rowId, group.value_col, base * (pct / 100));
-        }
+        model._setCellSilent(rowId, group.value_col, computeValueFromPct(base, pct));
         return;
       }
 
       if (changedColId === group.value_col) {
-        if (base === null || value === null) {
-          model._setCellSilent(rowId, group.pct_col, null);
-        } else if (base === 0) {
-          model._setCellSilent(rowId, group.pct_col, null);
-        } else {
-          model._setCellSilent(rowId, group.pct_col, (value / base) * 100);
-        }
+        model._setCellSilent(rowId, group.pct_col, computePctFromValue(base, value));
         return;
       }
 
@@ -42,9 +48,9 @@ export const LINKED_GROUP_HANDLERS = {
           return;
         }
         if (pct !== null) {
-          model._setCellSilent(rowId, group.value_col, base * (pct / 100));
+          model._setCellSilent(rowId, group.value_col, computeValueFromPct(base, pct));
         } else if (value !== null && base !== 0) {
-          model._setCellSilent(rowId, group.pct_col, (value / base) * 100);
+          model._setCellSilent(rowId, group.pct_col, computePctFromValue(base, value));
         }
       }
     },
