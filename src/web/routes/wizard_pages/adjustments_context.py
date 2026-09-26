@@ -8,7 +8,7 @@ import pandas as pd
 
 from src.api.edgartools.source import PeriodType, get_statement_views
 from src.api.edgartools.standard_terms import OPERATING_EXPENSES
-from src.database import read_adjustment_preferences
+from src.database.wizard_manager import WizardDatabaseManager
 from src.models.table import ColumnSpec, Table, period_column_specs
 
 logger = logging.getLogger(__name__)
@@ -31,7 +31,8 @@ def _apply_saved_opex_to_capex_preferences(
     table: Table,
     ticker: str,
 ) -> None:
-    prefs = read_adjustment_preferences(ticker, DEFAULT_EXCHANGE)
+    with WizardDatabaseManager(read_only=True) as db:
+        prefs = db.read_adjustment_preferences(ticker, DEFAULT_EXCHANGE)
     if prefs.empty:
         return
 
