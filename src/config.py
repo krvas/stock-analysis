@@ -1,7 +1,16 @@
 """Central configuration: paths, retention, and database location."""
 
+from __future__ import annotations
+
+import logging
 import os
 from pathlib import Path
+
+from dotenv import load_dotenv
+
+logger = logging.getLogger(__name__)
+
+_dotenv_loaded = False
 
 # Project root is two levels above src/
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -14,9 +23,11 @@ DUCKDB_DIR = DATA_DIR / "duckdb"
 
 # Default DuckDB file path
 DEFAULT_DB_PATH = DUCKDB_DIR / "indian_stocks.duckdb"
+DEFAULT_WIZARD_DB_PATH = DUCKDB_DIR / "wizard.duckdb"
 
-# Schema SQL file
+# Schema SQL files
 SCHEMA_SQL_PATH = Path(__file__).resolve().parent / "database" / "schema.sql"
+WIZARD_SCHEMA_SQL_PATH = Path(__file__).resolve().parent / "database" / "wizard.sql"
 
 # Historical data retention target (years)
 HISTORY_YEARS = 10
@@ -29,10 +40,14 @@ EDGARTOOLS_COMPANY_CACHE_SIZE = max(
     1,
     int(os.environ.get("EDGARTOOLS_COMPANY_CACHE_SIZE", "10")),
 )
-# Refetch cached statements when the latest stored filing date is older than this.
-EDGARTOOLS_CACHE_MAX_AGE_MONTHS = max(
+# Refetch cached statements when the latest stored filing date is older than these.
+EDGARTOOLS_QUARTERLY_CACHE_MAX_AGE_MONTHS = max(
     1,
-    int(os.environ.get("EDGARTOOLS_CACHE_MAX_AGE_MONTHS", "3")),
+    int(os.environ.get("EDGARTOOLS_QUARTERLY_CACHE_MAX_AGE_MONTHS", "3")),
+)
+EDGARTOOLS_ANNUAL_CACHE_MAX_AGE_MONTHS = max(
+    1,
+    int(os.environ.get("EDGARTOOLS_ANNUAL_CACHE_MAX_AGE_MONTHS", "12")),
 )
 
 # Logging
@@ -48,3 +63,24 @@ RAW_SUBDIRS = {
     "cash_flows": RAW_DATA_DIR / "cash_flows",
     "corporate_actions": RAW_DATA_DIR / "corporate_actions",
 }
+
+
+def load_project_dotenv() -> None:
+    """Load ``.env`` from the project root once (no-op if already loaded)."""
+    global _dotenv_loaded
+    if _dotenv_loaded:
+        return
+    _dotenv_loaded = True
+
+    env_path = PROJECT_ROOT / ".env"
+    if not env_path.is_file():
+        return
+
+    try:
+        load_dotenv(env_path)
+    except (PermissionError, OSError) as exc:
+        logger.warning(
+            "Could not read %s (%s); using existing process environment",
+            env_path,
+            exc,
+        )

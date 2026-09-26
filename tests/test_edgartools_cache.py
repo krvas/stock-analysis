@@ -114,6 +114,25 @@ def test_is_period_bundle_stale_respects_three_month_threshold() -> None:
     assert is_period_bundle_stale(latest, reference=date(2024, 4, 2), max_age_months=3)
 
 
+def test_default_cache_age_differs_by_period() -> None:
+    latest = date(2024, 1, 1)
+    assert not is_period_bundle_stale(
+        latest,
+        period="annual",
+        reference=date(2024, 12, 1),
+    )
+    assert is_period_bundle_stale(
+        latest,
+        period="annual",
+        reference=date(2025, 1, 2),
+    )
+    assert is_period_bundle_stale(
+        latest,
+        period="quarterly",
+        reference=date(2024, 4, 2),
+    )
+
+
 def test_touch_evicts_oldest_company_directory(tmp_path: Path) -> None:
     cache_dir = tmp_path / "edgartools_cache"
     older = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()

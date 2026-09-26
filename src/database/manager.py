@@ -14,6 +14,8 @@ import pandas as pd
 from src.config import DEFAULT_DB_PATH, SCHEMA_SQL_PATH
 from src.database import tables as t
 
+DEFAULT_SCHEMA_SQL_PATH = SCHEMA_SQL_PATH
+
 logger = logging.getLogger(__name__)
 
 STAGING_PREFIX = "_staging_"
@@ -27,35 +29,23 @@ class UpsertResult:
     rows_written: int
 
 
-class DatabaseManager:
-    """Manage DuckDB connections and typed upserts for the core tables.
+class BaseDatabaseManager:
+    """DuckDB connection lifecycle and generic SQL helpers."""
 
-    Usage::
-
-        with DatabaseManager() as db:
-            db.initialize_schema()
-            db.upsert_dataframe(t.COMPANIES, companies_df)
-            db.upsert_dataframe(t.PRICES, prices_df)
-
-    Upserts use ``INSERT OR REPLACE`` on primary keys to avoid duplicate rows.
-    """
+    default_schema_path: Path = DEFAULT_SCHEMA_SQL_PATH
 
     def __init__(
         self,
-        db_path: Path | str | None = None,
+        db_path: Path | str,
         *,
         read_only: bool = False,
         auto_connect: bool = True,
     ) -> None:
-        self.db_path = Path(db_path or DEFAULT_DB_PATH).resolve()
+        self.db_path = Path(db_path).resolve()
         self.read_only = read_only
         self._connection: duckdb.DuckDBPyConnection | None = None
         if auto_connect:
             self.connect()
-
-    # -------------------------------------------------------------------------
-    # Connection lifecycle
-    # -------------------------------------------------------------------------
 
     def connect(self) -> duckdb.DuckDBPyConnection:
         """Open (or reuse) the DuckDB connection."""
@@ -81,23 +71,19 @@ class DatabaseManager:
             self._connection = None
             logger.debug("Closed DuckDB connection: %s", self.db_path)
 
-    def __enter__(self) -> DatabaseManager:
+    def __enter__(self) -> BaseDatabaseManager:
         self.connect()
         return self
 
     def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
         self.close()
 
-    # -------------------------------------------------------------------------
-    # Schema
-    # -------------------------------------------------------------------------
-
     def initialize_schema(self, schema_path: Path | None = None) -> None:
-        """Apply ``schema.sql`` CREATE TABLE statements."""
+        """Apply DDL from the manager's schema SQL file."""
         if self.read_only:
             raise RuntimeError("Cannot initialize schema on a read-only connection.")
 
-        path = (schema_path or SCHEMA_SQL_PATH).resolve()
+        path = (schema_path or self.default_schema_path).resolve()
         if not path.exists():
             raise FileNotFoundError(f"Schema file not found: {path}")
 
@@ -117,10 +103,6 @@ class DatabaseManager:
         ).fetchall()
         return [r[0] for r in rows]
 
-    # -------------------------------------------------------------------------
-    # Query helpers
-    # -------------------------------------------------------------------------
-
     def execute(self, sql: str, params: list[Any] | tuple[Any, ...] | None = None) -> None:
         """Run a SQL statement without returning rows."""
         if params:
@@ -133,6 +115,39 @@ class DatabaseManager:
         if params:
             return self.connection.execute(sql, params).df()
         return self.connection.execute(sql).df()
+
+
+class DatabaseManager(BaseDatabaseManager):
+    """Manage DuckDB connections and typed upserts for the core ingestion tables.
+
+    Usage::
+
+        with DatabaseManager() as db:
+            db.initialize_schema()
+            db.upsert_dataframe(t.COMPANIES, companies_df)
+            db.upsert_dataframe(t.PRICES, prices_df)
+
+    Upserts use ``INSERT OR REPLACE`` on primary keys to avoid duplicate rows.
+    """
+
+    default_schema_path: Path = SCHEMA_SQL_PATH
+
+    def __init__(
+        self,
+        db_path: Path | str | None = None,
+        *,
+        read_only: bool = False,
+        auto_connect: bool = True,
+    ) -> None:
+        super().__init__(
+            Path(db_path or DEFAULT_DB_PATH),
+            read_only=read_only,
+            auto_connect=auto_connect,
+        )
+
+    def __enter__(self) -> DatabaseManager:
+        self.connect()
+        return self
 
     def table_row_count(self, table: str) -> int:
         """Return row count for a table."""
@@ -338,7 +353,7 @@ class DatabaseManager:
         cols = [c for c in t.TABLE_COLUMNS[table] if c in df.columns]
         out = df[cols].copy()
 
-        now = _utc_now()
+        now = utc_now()
         if add_timestamps:
             if table == t.COMPANIES:
                 if "updated_at" not in out.columns:
@@ -360,14 +375,14 @@ class DatabaseManager:
     def _prepare_companies_for_upsert(self, df: pd.DataFrame) -> pd.DataFrame:
         """Resolve company ids and company-specific timestamps before upsert."""
         prepared = self.resolve_company_ids(df)
-        now = _utc_now()
+        now = utc_now()
         if "created_at" not in prepared.columns:
             prepared["created_at"] = now
         prepared["updated_at"] = now
         return prepared
 
 
-def _utc_now() -> datetime:
+def utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
