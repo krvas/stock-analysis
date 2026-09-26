@@ -3,7 +3,7 @@
 {% import "macros/wizard_form.html" as form_macro %}
 
 {% block subpage_content %}
-{% call form_macro.form(post_url, form_id='opex-to-capex-form', wizard_save='opex-to-capex', data_exchange=exchange, data_table_id='opex-to-capex-table') %}
+{% call form_macro.form(post_url, form_id='opex-to-capex-form', wizard_save='opex-to-capex', data_table_id='opex-to-capex-table') %}
 {{ table_macro.table('opex-to-capex-table', opex_table) }}
 {% endcall %}
 {% endblock %}

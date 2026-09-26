@@ -7,8 +7,8 @@ import pytest
 from src.web.routes.wizard_pages.adjustments_post import _validate_opex_to_capex_body
 
 
-def _body(rows: object, exchange: object = "NASDAQ") -> dict[str, object]:
-    return {"exchange": exchange, "rows": rows}
+def _body(rows: object) -> dict[str, object]:
+    return {"rows": rows}
 
 
 def test_validate_opex_to_capex_body_filters_unchecked_rows() -> None:
@@ -23,9 +23,8 @@ def test_validate_opex_to_capex_body_filters_unchecked_rows() -> None:
         },
     ]
 
-    exchange, validated_rows, base_concepts_to_delete = _validate_opex_to_capex_body(_body(rows))
+    validated_rows, base_concepts_to_delete = _validate_opex_to_capex_body(_body(rows))
 
-    assert exchange == "NASDAQ"
     assert validated_rows == [
         {
             "base_concept": "OperatingExpenses",
@@ -34,11 +33,6 @@ def test_validate_opex_to_capex_body_filters_unchecked_rows() -> None:
         }
     ]
     assert base_concepts_to_delete == ["OtherExpenses"]
-
-
-def test_validate_opex_to_capex_body_missing_exchange_raises() -> None:
-    with pytest.raises(ValueError):
-        _validate_opex_to_capex_body(_body(rows=[], exchange=""))
 
 
 def test_validate_opex_to_capex_body_checked_row_missing_years_raises() -> None:
@@ -77,9 +71,8 @@ def test_validate_opex_to_capex_body_unchecked_row_goes_to_delete_list() -> None
         },
     ]
 
-    exchange, validated_rows, base_concepts_to_delete = _validate_opex_to_capex_body(_body(rows))
+    validated_rows, base_concepts_to_delete = _validate_opex_to_capex_body(_body(rows))
 
-    assert exchange == "NASDAQ"
     assert [row["base_concept"] for row in validated_rows] == ["OperatingExpenses"]
     assert base_concepts_to_delete == ["ResearchAndDevelopmentExpense"]
 
@@ -92,8 +85,7 @@ def test_validate_opex_to_capex_body_unchecked_row_blank_id_skipped_from_delete(
         },
     ]
 
-    exchange, validated_rows, base_concepts_to_delete = _validate_opex_to_capex_body(_body(rows))
+    validated_rows, base_concepts_to_delete = _validate_opex_to_capex_body(_body(rows))
 
-    assert exchange == "NASDAQ"
     assert validated_rows == []
     assert base_concepts_to_delete == []

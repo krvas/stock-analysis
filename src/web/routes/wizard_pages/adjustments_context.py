@@ -15,6 +15,12 @@ logger = logging.getLogger(__name__)
 
 OPEX_TO_CAPEX_ADJUSTMENT_TYPE = "opex_to_capex"
 
+# Wizard HTTP/route layer only supports a single exchange for now; the
+# underlying DB layer (WizardDatabaseManager, adjustment_preferences) still
+# has a real exchange column/parameter, but nothing above it threads a value
+# through, so it's hardcoded here.
+DEFAULT_EXCHANGE = "NASDAQ"
+
 OPEX_TO_CAPEX_INPUT_COLUMNS: list[ColumnSpec] = [
     ColumnSpec(id="capitalize", label="Capitalize", kind="input", dtype="boolean"),
     ColumnSpec(id="years", label="Years", kind="input", dtype="number"),
@@ -24,9 +30,8 @@ OPEX_TO_CAPEX_INPUT_COLUMNS: list[ColumnSpec] = [
 def _apply_saved_opex_to_capex_preferences(
     table: Table,
     ticker: str,
-    exchange: str,
 ) -> None:
-    prefs = read_adjustment_preferences(ticker, exchange)
+    prefs = read_adjustment_preferences(ticker, DEFAULT_EXCHANGE)
     if prefs.empty:
         return
 
@@ -52,7 +57,6 @@ def _apply_saved_opex_to_capex_preferences(
 def opex_to_capex_context(
     ticker: str,
     period: PeriodType,
-    exchange: str,
 ) -> dict[str, object]:
     views = get_statement_views(ticker=ticker, statement_type="income", period=period, num_periods=2)
     df = views["detailed"]
@@ -66,5 +70,5 @@ def opex_to_capex_context(
         level_col="level",
         parent_id_col=None,
     )
-    _apply_saved_opex_to_capex_preferences(table, ticker, exchange)
-    return {"opex_table": table.serialize(), "exchange": exchange}
+    _apply_saved_opex_to_capex_preferences(table, ticker)
+    return {"opex_table": table.serialize()}

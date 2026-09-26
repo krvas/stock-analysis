@@ -10,6 +10,7 @@ import pandas as pd
 from src.database.wizard_manager import WizardDatabaseManager
 from src.models.table import Table, TableSerializationError
 from src.web.routes.wizard_pages.adjustments_context import (
+    DEFAULT_EXCHANGE,
     OPEX_TO_CAPEX_ADJUSTMENT_TYPE,
     OPEX_TO_CAPEX_INPUT_COLUMNS,
 )
@@ -19,19 +20,15 @@ logger = logging.getLogger(__name__)
 
 def _validate_opex_to_capex_body(
     body: dict[str, Any],
-) -> tuple[str, list[dict[str, Any]], list[str]]:
+) -> tuple[list[dict[str, Any]], list[str]]:
     """Validate the opex-to-capex save payload.
 
-    Returns ``(exchange, rows_to_upsert, base_concepts_to_delete)``. Every
-    posted row is either checked (upsert) or unchecked (delete) -- there is
-    no third case. An unchecked row with a missing/blank id is skipped from
-    the delete list rather than raising, since there is no meaningful key to
+    Returns ``(rows_to_upsert, base_concepts_to_delete)``. Every posted row
+    is either checked (upsert) or unchecked (delete) -- there is no third
+    case. An unchecked row with a missing/blank id is skipped from the
+    delete list rather than raising, since there is no meaningful key to
     delete without an id.
     """
-    exchange = body.get("exchange")
-    if not exchange or not str(exchange).strip():
-        raise ValueError("exchange is required")
-
     raw_rows = body.get("rows")
     if raw_rows is None:
         raise ValueError("rows is required")
@@ -68,7 +65,7 @@ def _validate_opex_to_capex_body(
             }
         )
 
-    return str(exchange).strip(), validated_rows, base_concepts_to_delete
+    return validated_rows, base_concepts_to_delete
 
 
 def opex_to_capex_post(ticker: str, body: dict[str, Any]) -> dict[str, Any]:
@@ -76,8 +73,7 @@ def opex_to_capex_post(ticker: str, body: dict[str, Any]) -> dict[str, Any]:
 
     Unchecked rows have their previously-saved preference (if any) deleted.
     """
-    exchange, raw_rows, base_concepts_to_delete = _validate_opex_to_capex_body(body)
-    exchange = str(exchange).strip()
+    raw_rows, base_concepts_to_delete = _validate_opex_to_capex_body(body)
 
     records: list[dict[str, object]] = []
     for item in raw_rows:
@@ -85,7 +81,7 @@ def opex_to_capex_post(ticker: str, body: dict[str, Any]) -> dict[str, Any]:
         records.append(
             {
                 "ticker": ticker,
-                "exchange": exchange,
+                "exchange": DEFAULT_EXCHANGE,
                 "statement": "BS",
                 "adjustment_type": OPEX_TO_CAPEX_ADJUSTMENT_TYPE,
                 "base_concept": item["base_concept"],
@@ -112,7 +108,7 @@ def opex_to_capex_post(ticker: str, body: dict[str, Any]) -> dict[str, Any]:
 
         if base_concepts_to_delete:
             delete_keys = [
-                (ticker, exchange, OPEX_TO_CAPEX_ADJUSTMENT_TYPE, base_concept)
+                (ticker, DEFAULT_EXCHANGE, OPEX_TO_CAPEX_ADJUSTMENT_TYPE, base_concept)
                 for base_concept in base_concepts_to_delete
             ]
             delete_result = db.delete_adjustment_preferences(delete_keys)

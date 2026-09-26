@@ -76,17 +76,12 @@ function hydrateWizardTables() {
 }
 
 /**
- * Generic wizard save-body builder: {exchange, columns, rows}, where
- * {columns, rows} is exactly what TableModel.serialize() returns (only the
- * input columns and their values). No subpage-specific field knowledge
- * belongs here — that lives in the backend route builder for the subpage
- * in question.
+ * Generic wizard save-body builder: exactly what TableModel.serialize()
+ * returns (only the input columns and their values). No subpage-specific
+ * field knowledge belongs here — that lives in the backend route builder
+ * for the subpage in question.
  */
 function buildWizardSaveBody(form) {
-  const exchange = form.dataset.exchange;
-  if (!exchange || !String(exchange).trim()) {
-    throw new Error("Missing data-exchange on form");
-  }
   const tableId = form.dataset.tableId;
   if (!tableId) {
     throw new Error("Missing data-table-id on form");
@@ -96,10 +91,7 @@ function buildWizardSaveBody(form) {
     throw new Error(`Table model not found: ${tableId}`);
   }
 
-  return {
-    exchange: String(exchange).trim(),
-    ...model.serialize(),
-  };
+  return { ...model.serialize() };
 }
 
 function bindWizardSaveForms() {
