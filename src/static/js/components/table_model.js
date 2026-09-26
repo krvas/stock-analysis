@@ -3,6 +3,7 @@
  */
 
 import { LINKED_GROUP_HANDLERS } from "./linked_groups.js";
+import { coerceNumber } from "../utils.js";
 
 export class TableModel {
   /**
@@ -124,14 +125,7 @@ export class TableModel {
   }
 
   _coerceNumber(value) {
-    if (value === null || value === undefined) {
-      return null;
-    }
-    if (typeof value === "number" && !Number.isNaN(value)) {
-      return value;
-    }
-    const parsed = Number(value);
-    return Number.isNaN(parsed) ? null : parsed;
+    return coerceNumber(value);
   }
 
   /**

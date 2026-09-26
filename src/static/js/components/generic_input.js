@@ -1,3 +1,5 @@
+import { coerceNumber } from "../utils.js";
+
 /**
  * Controller for a single table HTML input. This is the only object that
  * creates event handlers for that input. Subscribers receive the coerced value.
@@ -41,11 +43,7 @@ export class GenericInput {
       return Boolean(value);
     }
     if (this._type === "number") {
-      if (value == null || value === "") {
-        return null;
-      }
-      const n = Number(value);
-      return Number.isNaN(n) ? null : n;
+      return coerceNumber(value);
     }
     return value == null ? "" : String(value);
   }

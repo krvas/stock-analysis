@@ -39,6 +39,24 @@ export function formatNumber(value, unitKey) {
   return scaled.toLocaleString(undefined, { maximumFractionDigits: 0 });
 }
 
+/**
+ * Coerce an arbitrary value to a finite number or null.
+ *
+ * - null/undefined/"" -> null
+ * - a number -> itself, unless NaN (-> null)
+ * - anything else -> Number(value), or null if that isn't finite/parseable
+ */
+export function coerceNumber(value) {
+  if (value === null || value === undefined || value === "") {
+    return null;
+  }
+  if (typeof value === "number") {
+    return Number.isNaN(value) ? null : value;
+  }
+  const parsed = Number(value);
+  return Number.isNaN(parsed) ? null : parsed;
+}
+
 export function computeDifference(latest, previous) {
   if (
     latest === null ||
