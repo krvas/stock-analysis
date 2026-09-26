@@ -119,7 +119,7 @@ def test_table_set_cell_unknown_row_raises() -> None:
         table.set_cell("x", "missing", "value")
 
 
-def test_table_from_rows_happy_path() -> None:
+def test_table_from_rows() -> None:
     columns = [
         ColumnSpec(id="note", label="Note", kind="input", dtype="string"),
         ColumnSpec(id="amount", label="Amount", kind="input", dtype="number"),

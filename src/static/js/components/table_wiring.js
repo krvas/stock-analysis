@@ -59,19 +59,21 @@ function wireTableInputs(model, container) {
   });
 }
 
-document
-  .querySelectorAll('script[type="application/json"][data-line-item-table]')
-  .forEach((dataEl) => {
-    const tableId =
-      dataEl.dataset.tableId || dataEl.id.replace(/-data$/, "");
-    const tableData = JSON.parse(dataEl.textContent);
-    const model = TableModel.fromSerialized(tableData);
-    tableModels.set(tableId, model);
+function hydrateWizardTables() {
+  document
+    .querySelectorAll('script[type="application/json"][data-line-item-table]')
+    .forEach((dataEl) => {
+      const tableId =
+        dataEl.dataset.tableId || dataEl.id.replace(/-data$/, "");
+      const tableData = JSON.parse(dataEl.textContent);
+      const model = TableModel.fromSerialized(tableData);
+      tableModels.set(tableId, model);
 
-    const container = document.getElementById(tableId);
-    render_table(container, model);
-    wireTableInputs(model, container);
-  });
+      const container = document.getElementById(tableId);
+      render_table(container, model);
+      wireTableInputs(model, container);
+    });
+}
 
 /**
  * Generic wizard save-body builder: {exchange, columns, rows}, where
@@ -132,4 +134,9 @@ function bindWizardSaveForms() {
   });
 }
 
-bindWizardSaveForms();
+function main() {
+  hydrateWizardTables();
+  bindWizardSaveForms();
+}
+
+main();

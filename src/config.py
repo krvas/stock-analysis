@@ -6,6 +6,8 @@ import logging
 import os
 from pathlib import Path
 
+from dotenv import load_dotenv
+
 logger = logging.getLogger(__name__)
 
 _dotenv_loaded = False
@@ -75,8 +77,6 @@ def load_project_dotenv() -> None:
         return
 
     try:
-        from dotenv import load_dotenv
-
         load_dotenv(env_path)
     except (PermissionError, OSError) as exc:
         logger.warning(

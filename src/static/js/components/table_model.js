@@ -70,6 +70,7 @@ export class TableModel {
 
   /**
    * @param {(rowId: string, colId: string, value: *) => void} callback
+   * @returns {() => void} Unsubscribes this callback.
    */
   subscribe(callback) {
     this._listeners.push(callback);

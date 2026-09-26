@@ -353,7 +353,7 @@ class DatabaseManager(BaseDatabaseManager):
         cols = [c for c in t.TABLE_COLUMNS[table] if c in df.columns]
         out = df[cols].copy()
 
-        now = _utc_now()
+        now = utc_now()
         if add_timestamps:
             if table == t.COMPANIES:
                 if "updated_at" not in out.columns:
@@ -375,14 +375,14 @@ class DatabaseManager(BaseDatabaseManager):
     def _prepare_companies_for_upsert(self, df: pd.DataFrame) -> pd.DataFrame:
         """Resolve company ids and company-specific timestamps before upsert."""
         prepared = self.resolve_company_ids(df)
-        now = _utc_now()
+        now = utc_now()
         if "created_at" not in prepared.columns:
             prepared["created_at"] = now
         prepared["updated_at"] = now
         return prepared
 
 
-def _utc_now() -> datetime:
+def utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 

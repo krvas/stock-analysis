@@ -89,7 +89,7 @@ def opex_to_capex_post(ticker: str, body: dict[str, Any]) -> dict[str, Any]:
                 "statement": "BS",
                 "adjustment_type": OPEX_TO_CAPEX_ADJUSTMENT_TYPE,
                 "base_concept": item["base_concept"],
-                "base_concept_statement":  "PL",
+                "base_concept_statement": "PL",
                 "value": item["years"],
                 "consolidated_ids": (
                     None

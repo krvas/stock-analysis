@@ -72,6 +72,8 @@ tests/                     pytest; no HTTP/route tests
 - New `fetch()` only in `api_client.js`.
 - Naming: `snake_case` / `PascalCase` / `_private`; `from __future__ import
   annotations`; typed; `Literal` for enums. Tests: `tests/test_*.py`, `def test_*`.
+  A leading underscore means internal to that module only, never imported
+  elsewhere — a helper another module needs to import must not have one.
 - CLIs: `python -m src.<pkg>.<mod>`.
 - Logging: `logger = logging.getLogger(__name__)` per module; no printing;
   CLIs call `logging.basicConfig`.
@@ -177,7 +179,10 @@ serialize() → {
   `input.subscribe` → `model.setCell`; `model.subscribe` → `input.set`.
   Must not read `input.value` / `input.checked`. Save posts
   `model.serialize()`. Currently just `adjustments/opex-to-capex` (see §4),
-  not every wizard sub-page.
+  not every wizard sub-page. Convention: frontend module files that run
+  wizard-page side effects wrap all their top-level execution in a single
+  `main()` (or similarly named) function invoked once at the bottom, rather
+  than having multiple bare top-level statements.
 - **Statements** (`statement_view.js`): calls `render_table` with the nested
   statement view object or a fund-flow-shaped plain object (latest, previous,
   change columns) built client-side; `staticPeriodColumnIds` is local to

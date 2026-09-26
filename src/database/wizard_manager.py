@@ -15,7 +15,7 @@ from src.database.manager import (
     STAGING_PREFIX,
     BaseDatabaseManager,
     UpsertResult,
-    _utc_now,
+    utc_now,
 )
 
 logger = logging.getLogger(__name__)
@@ -162,7 +162,7 @@ class WizardDatabaseManager(BaseDatabaseManager):
         if "exchange" in out.columns:
             out["exchange"] = out["exchange"].astype(str).str.upper()
 
-        now = _utc_now()
+        now = utc_now()
         if "updated_at" not in out.columns:
             out["updated_at"] = now
         else:
