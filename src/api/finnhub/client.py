@@ -15,7 +15,6 @@ import os
 from typing import Any, Final
 
 import pandas as pd
-from dotenv import load_dotenv
 
 from src.api.base_client import BaseAPIClient
 from src.utils.url_cache import URLCache
@@ -146,7 +145,6 @@ class FinnhubClient(BaseAPIClient):
         timeout: float = 60.0,
     ) -> None:
         super().__init__(base_url, timeout)
-        load_dotenv()
         self.api_key = api_key or os.environ.get("FINNHUB_API_KEY")
         if not self.api_key:
             raise ValueError("FINNHUB_API_KEY is required (env var or constructor argument)")

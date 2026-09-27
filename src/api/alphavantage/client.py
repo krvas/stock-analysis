@@ -7,7 +7,6 @@ import os
 from typing import Any, Final
 
 import pandas as pd
-from dotenv import load_dotenv
 
 from src.api.alphavantage.parsing import (
     DEFAULT_CURRENCY,
@@ -90,7 +89,6 @@ class AlphaVantageClient(BaseAPIClient):
         timeout: float = 60.0,
     ) -> None:
         super().__init__(base_url, timeout)
-        load_dotenv()
         self.api_key = api_key or os.environ.get("ALPHAVANTAGE_API_KEY")
         if not self.api_key:
             raise ValueError("ALPHAVANTAGE_API_KEY is required (env var or constructor argument)")

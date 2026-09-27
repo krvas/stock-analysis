@@ -13,6 +13,8 @@ from typing import Any, TypeVar
 
 import pandas as pd
 
+from src.config import load_project_dotenv
+
 from .base_request_client import APIClientError, BaseRequestClient
 
 # Re-exported for `src.api.base_client.APIClientError` (used by src/api/__init__.py
@@ -29,6 +31,17 @@ class BaseAPIClient(BaseRequestClient, ABC):
     HTTP, retry, and JSON parsing behavior is implemented in
     `BaseRequestClient`.
     """
+
+    def __init__(
+        self,
+        base_url: str,
+        timeout: float = 60.0,
+        max_retries: int = 3,
+        backoff_factor: float = 2.0,
+        backoff_max: float = 60.0,
+    ) -> None:
+        load_project_dotenv()
+        super().__init__(base_url, timeout, max_retries, backoff_factor, backoff_max)
 
     @abstractmethod
     def fetch_company(self, name: str, **kwargs: Any) -> pd.DataFrame:
