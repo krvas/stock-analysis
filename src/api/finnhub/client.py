@@ -37,18 +37,29 @@ FINANCIALS_FIELD_MAP: Final[dict[str, tuple[str, ...]]] = {
     "tax_expense": ("IncomeTaxExpense", "Income tax expense"),
     "net_profit": ("NetIncomeLoss", "Net income", "Net income (loss)"),
     "eps_basic": ("BasicEarningsPerShare", "Basic EPS", "Basic earnings per share"),
-    "eps_diluted": ("DilutedEarningsPerShare", "Diluted EPS", "Diluted earnings per share"),
+    "eps_diluted": (
+        "DilutedEarningsPerShare",
+        "Diluted EPS",
+        "Diluted earnings per share",
+    ),
 }
 
 BALANCE_FIELD_MAP: Final[dict[str, tuple[str, ...]]] = {
     "total_assets": ("AssetsTotal", "Total assets", "TotalAssets"),
     "current_assets": ("AssetsCurrent", "Total current assets", "CurrentAssets"),
     "non_current_assets": ("NonCurrentAssets",),
-    "cash_and_equivalents": ("CashAndCashEquivalentsAtCarryingValue", "Cash and cash equivalents"),
+    "cash_and_equivalents": (
+        "CashAndCashEquivalentsAtCarryingValue",
+        "Cash and cash equivalents",
+    ),
     "inventory": ("InventoryNet", "Inventories", "Inventory"),
     "receivables": ("AccountsReceivableNetCurrent", "Accounts receivable, net"),
     "total_liabilities": ("LiabilitiesTotal", "Total liabilities", "TotalLiabilities"),
-    "current_liabilities": ("LiabilitiesCurrent", "Total current liabilities", "CurrentLiabilities"),
+    "current_liabilities": (
+        "LiabilitiesCurrent",
+        "Total current liabilities",
+        "CurrentLiabilities",
+    ),
     "non_current_liabilities": ("NonCurrentLiabilities",),
     "total_debt": ("DebtTotal", "Total debt", "ShortLongTermDebtTotal"),
     "short_term_debt": ("ShortTermDebt", "Short-term debt"),
@@ -58,9 +69,21 @@ BALANCE_FIELD_MAP: Final[dict[str, tuple[str, ...]]] = {
 }
 
 CASH_FLOW_FIELD_MAP: Final[dict[str, tuple[str, ...]]] = {
-    "operating_cash_flow": ("CashFlowsFromUsedInOperatingActivities", "Operating cash flow", "OperatingCashFlow"),
-    "investing_cash_flow": ("CashFlowsFromUsedInInvestingActivities", "Investing cash flow", "InvestingCashFlow"),
-    "financing_cash_flow": ("CashFlowsFromUsedInFinancingActivities", "Financing cash flow", "FinancingCashFlow"),
+    "operating_cash_flow": (
+        "CashFlowsFromUsedInOperatingActivities",
+        "Operating cash flow",
+        "OperatingCashFlow",
+    ),
+    "investing_cash_flow": (
+        "CashFlowsFromUsedInInvestingActivities",
+        "Investing cash flow",
+        "InvestingCashFlow",
+    ),
+    "financing_cash_flow": (
+        "CashFlowsFromUsedInFinancingActivities",
+        "Financing cash flow",
+        "FinancingCashFlow",
+    ),
     "net_cash_flow": ("NetCashFlow", "Net change in cash", "NetChangeInCash"),
     "capex": ("CapitalExpenditures", "Capex"),
 }
@@ -147,7 +170,9 @@ class FinnhubClient(BaseAPIClient):
         super().__init__(base_url, timeout)
         self.api_key = api_key or os.environ.get("FINNHUB_API_KEY")
         if not self.api_key:
-            raise ValueError("FINNHUB_API_KEY is required (env var or constructor argument)")
+            raise ValueError(
+                "FINNHUB_API_KEY is required (env var or constructor argument)"
+            )
         self._cache: URLCache = URLCache(directory="data/raw/finnhub", format="json")
 
     def _request_error(self, message: str) -> Exception:
@@ -175,7 +200,7 @@ class FinnhubClient(BaseAPIClient):
         slash required). `params` will be merged with the required token.
         """
         path = endpoint.lstrip("/")
-        key = f'{path.split("/")[-1].replace("-", "_")}_{params.get("symbol", "")}'
+        key = f"{path.split('/')[-1].replace('-', '_')}_{params.get('symbol', '')}"
         if use_cache:
             cached = self._cache.get(key)
             if cached is not None:
@@ -211,7 +236,9 @@ class FinnhubClient(BaseAPIClient):
             return None
 
     @staticmethod
-    def _match_entry(entries: list[dict[str, Any]], candidates: tuple[str, ...]) -> float | None:
+    def _match_entry(
+        entries: list[dict[str, Any]], candidates: tuple[str, ...]
+    ) -> float | None:
         for entry in entries:
             if not isinstance(entry, dict):
                 continue
@@ -248,7 +275,9 @@ class FinnhubClient(BaseAPIClient):
                 "period_end_date": self._coerce_date(item.get("endDate")),
                 "period_type": period_type,
                 "fiscal_year": item.get("year"),
-                "fiscal_quarter": item.get("quarter") if period_type == "quarterly" else None,
+                "fiscal_quarter": item.get("quarter")
+                if period_type == "quarterly"
+                else None,
                 "currency": self._infer_currency(entries),
                 "source": SOURCE,
             }
@@ -274,20 +303,26 @@ class FinnhubClient(BaseAPIClient):
         """Return company profile (one-row DataFrame) for `name` (symbol)."""
         use_cache = bool(kwargs.get("use_cache", True))
         symbol = name.strip().upper()
-        payload = self._fetch_endpoint("stock/profile2", {"symbol": symbol}, use_cache=use_cache)
+        payload = self._fetch_endpoint(
+            "stock/profile2", {"symbol": symbol}, use_cache=use_cache
+        )
 
         if not payload or not payload.get("name"):
             raise FinnhubError(f"Empty profile response for symbol={symbol}")
 
-        return pd.DataFrame([{
-            "symbol": payload.get("ticker") or symbol,
-            "company_name": payload.get("name") or None,
-            "exchange": payload.get("exchange") or "NASDAQ",
-            "country": payload.get("country") or None,
-            "industry": payload.get("finnhubIndustry") or None,
-            "shares_outstanding": payload.get("shareOutstanding"),
-            "source": SOURCE,
-        }])
+        return pd.DataFrame(
+            [
+                {
+                    "symbol": payload.get("ticker") or symbol,
+                    "company_name": payload.get("name") or None,
+                    "exchange": payload.get("exchange") or "NASDAQ",
+                    "country": payload.get("country") or None,
+                    "industry": payload.get("finnhubIndustry") or None,
+                    "shares_outstanding": payload.get("shareOutstanding"),
+                    "source": SOURCE,
+                }
+            ]
+        )
 
     def fetch_prices(self, name: str, **kwargs: Any) -> pd.DataFrame:
         """Return a simple price snapshot as a one-row DataFrame using `/quote`.
@@ -306,17 +341,23 @@ class FinnhubClient(BaseAPIClient):
         ts = payload.get("t")
         trade_time = pd.to_datetime(int(ts), unit="s") if ts else None
 
-        return pd.DataFrame([{
-            "trade_date": trade_time,
-            "open": payload.get("o"),
-            "high": payload.get("h"),
-            "low": payload.get("l"),
-            "close": payload.get("c"),
-            "volume": None,
-            "source": SOURCE,
-        }])
+        return pd.DataFrame(
+            [
+                {
+                    "trade_date": trade_time,
+                    "open": payload.get("o"),
+                    "high": payload.get("h"),
+                    "low": payload.get("l"),
+                    "close": payload.get("c"),
+                    "volume": None,
+                    "source": SOURCE,
+                }
+            ]
+        )
 
-    def _fetch_all_financials(self, symbol: str, use_cache: bool) -> list[tuple[dict[str, Any], str]]:
+    def _fetch_all_financials(
+        self, symbol: str, use_cache: bool
+    ) -> list[tuple[dict[str, Any], str]]:
         return [
             (
                 self._fetch_endpoint(
@@ -372,7 +413,11 @@ class FinnhubClient(BaseAPIClient):
         for row in rows:
             total_assets = row.get("total_assets")
             current_assets = row.get("current_assets")
-            if row.get("non_current_assets") is None and total_assets is not None and current_assets is not None:
+            if (
+                row.get("non_current_assets") is None
+                and total_assets is not None
+                and current_assets is not None
+            ):
                 row["non_current_assets"] = total_assets - current_assets
 
             total_liabilities = row.get("total_liabilities")

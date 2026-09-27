@@ -48,7 +48,11 @@ class IndianAPIError(Exception):
     """Raised when the Indian API returns an error payload or HTTP failure."""
 
 
-def resolve_api_name(registry_manager: RegistryManager, symbol_or_name: str, company_name_hint: str | None = None) -> str:
+def resolve_api_name(
+    registry_manager: RegistryManager,
+    symbol_or_name: str,
+    company_name_hint: str | None = None,
+) -> str:
     """Map NSE symbol or ambiguous name to a /stock?name= query string."""
     key = symbol_or_name.strip().upper()
     lookup = registry_manager.get_api_name_by_symbol()
@@ -71,7 +75,9 @@ class IndianAPIClient(BaseAPIClient):
         super().__init__(base_url, timeout)
         self.api_key = api_key or os.environ.get("INDIAN_API_KEY")
         if not self.api_key:
-            raise ValueError("INDIAN_API_KEY is required (env var or constructor argument)")
+            raise ValueError(
+                "INDIAN_API_KEY is required (env var or constructor argument)"
+            )
         self._cache: URLCache = URLCache(directory="data/raw/indianapi", format="json")
         self.registry_manager = RegistryManager()
 
@@ -101,7 +107,9 @@ class IndianAPIClient(BaseAPIClient):
             return cached_data
         data = self._request("/stock", {"name": name})
         if not isinstance(data, dict):
-            raise IndianAPIError(f"Unexpected /stock response type: {type(data).__name__}")
+            raise IndianAPIError(
+                f"Unexpected /stock response type: {type(data).__name__}"
+            )
         if use_cache:
             self._cache.set(f"stock_{name}", data)
         return data
@@ -136,20 +144,24 @@ class IndianAPIClient(BaseAPIClient):
             if raw_diluted is not None:
                 shares_diluted = int(raw_diluted)
 
-        return pd.DataFrame([{
-            "symbol": symbol,
-            "exchange": exchange,
-            "country": "India",
-            "isin": profile.get("isInId"),
-            "company_name": payload.get("companyName") or resolved,
-            "sector": profile.get("mgSector"),
-            "industry": payload.get("industry") or profile.get("mgIndustry"),
-            "shares_outstanding": shares_outstanding,
-            "shares_diluted": shares_diluted,
-            "listing_date": None,
-            "is_active": True,
-            "source": SOURCE,
-        }])
+        return pd.DataFrame(
+            [
+                {
+                    "symbol": symbol,
+                    "exchange": exchange,
+                    "country": "India",
+                    "isin": profile.get("isInId"),
+                    "company_name": payload.get("companyName") or resolved,
+                    "sector": profile.get("mgSector"),
+                    "industry": payload.get("industry") or profile.get("mgIndustry"),
+                    "shares_outstanding": shares_outstanding,
+                    "shares_diluted": shares_diluted,
+                    "listing_date": None,
+                    "is_active": True,
+                    "source": SOURCE,
+                }
+            ]
+        )
 
     def _iter_statement_periods(self, name: str) -> list[dict[str, Any]]:
         resolved = resolve_api_name(self.registry_manager, name)
@@ -167,7 +179,10 @@ class IndianAPIClient(BaseAPIClient):
         for period in self._iter_statement_periods(name):
             sfm = period.get("stockFinancialMap") or {}
             inc = rows_to_dict(sfm.get("INC"))
-            row = {**period_metadata(period), **map_fields(inc, self.registry_manager.get_income_statement_keys())}
+            row = {
+                **period_metadata(period),
+                **map_fields(inc, self.registry_manager.get_income_statement_keys()),
+            }
             row["source"] = SOURCE
             rows.append(row)
         return pd.DataFrame(rows)
@@ -178,7 +193,10 @@ class IndianAPIClient(BaseAPIClient):
         for period in self._iter_statement_periods(name):
             sfm = period.get("stockFinancialMap") or {}
             bal = rows_to_dict(sfm.get("BAL"))
-            row = {**period_metadata(period), **map_fields(bal, self.registry_manager.get_balance_sheet_keys())}
+            row = {
+                **period_metadata(period),
+                **map_fields(bal, self.registry_manager.get_balance_sheet_keys()),
+            }
 
             total_assets = row.get("total_assets")
             current_assets = row.get("current_assets")
@@ -200,7 +218,10 @@ class IndianAPIClient(BaseAPIClient):
         for period in self._iter_statement_periods(name):
             sfm = period.get("stockFinancialMap") or {}
             cas = rows_to_dict(sfm.get("CAS"))
-            row = {**period_metadata(period), **map_fields(cas, self.registry_manager.get_cash_flow_keys())}
+            row = {
+                **period_metadata(period),
+                **map_fields(cas, self.registry_manager.get_cash_flow_keys()),
+            }
 
             ocf = row.get("operating_cash_flow")
             capex = row.get("capex")
@@ -221,7 +242,11 @@ class IndianAPIClient(BaseAPIClient):
     ) -> pd.DataFrame:
         """Return daily close + volume rows aligned with ``prices`` schema (minus ``company_id``)."""
         resolved = resolve_api_name(self.registry_manager, name)
-        cached_data = self._cache.get(f"historical_{resolved}_{period}_{filter_}") if use_cache else None
+        cached_data = (
+            self._cache.get(f"historical_{resolved}_{period}_{filter_}")
+            if use_cache
+            else None
+        )
         if cached_data is not None:
             data = cached_data
         else:
@@ -239,7 +264,16 @@ class IndianAPIClient(BaseAPIClient):
         vol_ds = next((d for d in datasets if d.get("metric") == "Volume"), None)
         if not price_ds:
             return pd.DataFrame(
-                columns=["trade_date", "open", "high", "low", "close", "volume", "adj_close", "source"]
+                columns=[
+                    "trade_date",
+                    "open",
+                    "high",
+                    "low",
+                    "close",
+                    "volume",
+                    "adj_close",
+                    "source",
+                ]
             )
 
         vol_by_date: dict[str, int | None] = {}
@@ -267,10 +301,14 @@ class IndianAPIClient(BaseAPIClient):
             )
         return pd.DataFrame(rows)
 
-    def fetch_corporate_actions(self, name: str, use_cache: bool = True) -> pd.DataFrame:
+    def fetch_corporate_actions(
+        self, name: str, use_cache: bool = True
+    ) -> pd.DataFrame:
         """Parse corporate actions into a ``corporate_actions``-shaped DataFrame."""
         resolved = resolve_api_name(self.registry_manager, name)
-        cached_data = self._cache.get(f"corporate_actions_{resolved}") if use_cache else None
+        cached_data = (
+            self._cache.get(f"corporate_actions_{resolved}") if use_cache else None
+        )
         if cached_data is not None:
             data = cached_data
         else:
@@ -282,7 +320,9 @@ class IndianAPIClient(BaseAPIClient):
 
         rows: list[dict[str, Any]] = []
 
-        def append_rows(section: str, action_type: str, items: list[Any] | None) -> None:
+        def append_rows(
+            section: str, action_type: str, items: list[Any] | None
+        ) -> None:
             if not items:
                 return
             for item in items:
@@ -295,7 +335,9 @@ class IndianAPIClient(BaseAPIClient):
                     "action_date": action_date,
                     "action_type": action_type,
                     "ex_date": action_date,
-                    "record_date": parse_action_date(str(item[1])) if len(item) > 1 else None,
+                    "record_date": parse_action_date(str(item[1]))
+                    if len(item) > 1
+                    else None,
                     "payment_date": None,
                     "currency": DEFAULT_CURRENCY,
                     "amount": None,
@@ -319,6 +361,10 @@ class IndianAPIClient(BaseAPIClient):
             ("bonus", "bonus"),
         ):
             wrapper = data.get(section) or {}
-            append_rows(section, action_type, wrapper.get("data") if isinstance(wrapper, dict) else None)
+            append_rows(
+                section,
+                action_type,
+                wrapper.get("data") if isinstance(wrapper, dict) else None,
+            )
 
         return pd.DataFrame(rows)

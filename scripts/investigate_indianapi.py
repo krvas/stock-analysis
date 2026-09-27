@@ -1,4 +1,5 @@
 """One-off probe of Indian API return shapes. Not part of the package."""
+
 from __future__ import annotations
 
 import json
@@ -139,7 +140,11 @@ def analyze_financials(financials: Any) -> dict[str, Any]:
     for period in financials[:5]:
         if not isinstance(period, dict):
             continue
-        meta = {k: v for k, v in period.items() if k not in ("INC", "BAL", "CAS", "financials")}
+        meta = {
+            k: v
+            for k, v in period.items()
+            if k not in ("INC", "BAL", "CAS", "financials")
+        }
         period_meta_samples.append({k: (type_name(v), v) for k, v in meta.items()})
 
         for stmt_key in ("INC", "BAL", "CAS"):
@@ -213,7 +218,9 @@ def analyze_stock_response(data: dict[str, Any]) -> dict[str, Any]:
         "companyName": data.get("companyName"),
         "industry": data.get("industry"),
         "top_level_keys": sorted(data.keys()),
-        "companyProfile_keys": sorted(profile.keys()) if isinstance(profile, dict) else [],
+        "companyProfile_keys": sorted(profile.keys())
+        if isinstance(profile, dict)
+        else [],
         "companyProfile_sample": {
             k: profile.get(k)
             for k in [
@@ -277,7 +284,9 @@ def analyze_historical(data: Any) -> dict[str, Any]:
                 "value_count": len(values),
                 "first_value": sample,
                 "last_value": values[-1] if values else None,
-                "first_value_types": [type_name(x) for x in sample] if isinstance(sample, list) else None,
+                "first_value_types": [type_name(x) for x in sample]
+                if isinstance(sample, list)
+                else None,
             }
         )
     return out
@@ -295,7 +304,9 @@ def analyze_corporate_actions(data: Any) -> dict[str, Any]:
         out["count"] = len(data)
         out["sample"] = data[:5]
         if data:
-            out["item_keys"] = sorted(data[0].keys()) if isinstance(data[0], dict) else None
+            out["item_keys"] = (
+                sorted(data[0].keys()) if isinstance(data[0], dict) else None
+            )
     return out
 
 
@@ -313,7 +324,9 @@ def main() -> None:
         status, data = api_get("/stock", {"name": name})
         report["tickers"][name] = {
             "http_status": status,
-            "analysis": analyze_stock_response(data if isinstance(data, dict) else {"error": data}),
+            "analysis": analyze_stock_response(
+                data if isinstance(data, dict) else {"error": data}
+            ),
         }
 
     for exact, variants in NAME_VARIANTS.items():
@@ -353,7 +366,13 @@ def main() -> None:
 
     # Cross-ticker line item union
     unions: dict[str, set[str]] = defaultdict(set)
-    bank_names = {"HDFC Bank", "ICICI Bank", "State Bank of India", "Bajaj Finance", "SBI Life"}
+    bank_names = {
+        "HDFC Bank",
+        "ICICI Bank",
+        "State Bank of India",
+        "Bajaj Finance",
+        "SBI Life",
+    }
     industrial_names = {"Tata Steel", "Hindustan Unilever", "Tata Motors", "Sun Pharma"}
 
     bank_keys: dict[str, set[str]] = defaultdict(set)
@@ -371,8 +390,7 @@ def main() -> None:
 
     report["cross_ticker_line_keys"] = {k: sorted(v) for k, v in unions.items()}
     report["bank_only_keys"] = {
-        stmt: sorted(bank_keys[stmt] - industrial_keys[stmt])
-        for stmt in bank_keys
+        stmt: sorted(bank_keys[stmt] - industrial_keys[stmt]) for stmt in bank_keys
     }
     report["industrial_only_keys"] = {
         stmt: sorted(industrial_keys[stmt] - bank_keys[stmt])

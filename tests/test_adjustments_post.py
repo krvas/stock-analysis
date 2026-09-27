@@ -76,7 +76,9 @@ def test_validate_opex_to_capex_body_unchecked_row_goes_to_delete_list() -> None
     assert base_concepts_to_delete == ["ResearchAndDevelopmentExpense"]
 
 
-def test_validate_opex_to_capex_body_unchecked_row_blank_id_skipped_from_delete() -> None:
+def test_validate_opex_to_capex_body_unchecked_row_blank_id_skipped_from_delete() -> (
+    None
+):
     rows = [
         {
             "id": "",

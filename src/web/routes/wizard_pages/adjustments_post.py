@@ -54,7 +54,9 @@ def _validate_opex_to_capex_body(
 
         years = table.get_cell(row_id, "years")
         if years is None:
-            raise ValueError(f"rows[{index}].cells.years is required when capitalize is true")
+            raise ValueError(
+                f"rows[{index}].cells.years is required when capitalize is true"
+            )
 
         validated_rows.append(
             {
@@ -113,5 +115,3 @@ def opex_to_capex_post(ticker: str, body: dict[str, Any]) -> dict[str, Any]:
         rows_deleted,
     )
     return {"ok": True, "rows_written": rows_written, "rows_deleted": rows_deleted}
-
-

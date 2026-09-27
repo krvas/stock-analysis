@@ -56,7 +56,9 @@ def test_save_and_load_period_bundle(tmp_path: Path) -> None:
     assert set(loaded) == {"income", "balance", "cashflow"}
     for statement_type in loaded:
         assert set(loaded[statement_type]) == {"summary", "standard", "detailed"}
-        assert loaded[statement_type]["summary"].equals(bundle[statement_type]["summary"])
+        assert loaded[statement_type]["summary"].equals(
+            bundle[statement_type]["summary"]
+        )
 
 
 def test_load_returns_none_when_any_view_missing(tmp_path: Path) -> None:
@@ -68,8 +70,16 @@ def test_load_returns_none_when_any_view_missing(tmp_path: Path) -> None:
         latest_filing_date=date(2024, 11, 1),
         views={
             "income": {"summary": _sample_frame()},
-            "balance": {"summary": _sample_frame("Assets"), "standard": _sample_frame("Assets"), "detailed": _sample_frame("Assets")},
-            "cashflow": {"summary": _sample_frame("Cash"), "standard": _sample_frame("Cash"), "detailed": _sample_frame("Cash")},
+            "balance": {
+                "summary": _sample_frame("Assets"),
+                "standard": _sample_frame("Assets"),
+                "detailed": _sample_frame("Assets"),
+            },
+            "cashflow": {
+                "summary": _sample_frame("Cash"),
+                "standard": _sample_frame("Cash"),
+                "detailed": _sample_frame("Cash"),
+            },
         },
         cache_dir=cache_dir,
     )
@@ -111,7 +121,9 @@ def test_stale_bundle_is_deleted_on_load(tmp_path: Path) -> None:
 
 def test_is_period_bundle_stale_respects_three_month_threshold() -> None:
     latest = date(2024, 1, 1)
-    assert not is_period_bundle_stale(latest, reference=date(2024, 4, 1), max_age_months=3)
+    assert not is_period_bundle_stale(
+        latest, reference=date(2024, 4, 1), max_age_months=3
+    )
     assert is_period_bundle_stale(latest, reference=date(2024, 4, 2), max_age_months=3)
 
 
@@ -186,7 +198,9 @@ def test_refetch_bumps_company_to_most_recent(tmp_path: Path) -> None:
             views=_sample_bundle(),
             cache_dir=cache_dir,
         )
-        touch_company_cache(cik=cik, ticker=ticker, cache_dir=cache_dir, max_companies=2)
+        touch_company_cache(
+            cik=cik, ticker=ticker, cache_dir=cache_dir, max_companies=2
+        )
         index = _load_index(cache_dir)
         index["companies"][str(cik)]["last_accessed"] = when.isoformat()
         cache_mod._save_index(cache_dir, index)
@@ -205,7 +219,9 @@ def test_refetch_bumps_company_to_most_recent(tmp_path: Path) -> None:
 
 def test_find_cached_cik_by_ticker(tmp_path: Path) -> None:
     cache_dir = tmp_path / "edgartools_cache"
-    touch_company_cache(cik=320193, ticker="AAPL", cache_dir=cache_dir, max_companies=10)
+    touch_company_cache(
+        cik=320193, ticker="AAPL", cache_dir=cache_dir, max_companies=10
+    )
 
     assert find_cached_cik(cache_dir, "aapl") == "320193"
     assert find_cached_cik(cache_dir, "MSFT") is None

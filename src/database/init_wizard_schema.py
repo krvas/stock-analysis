@@ -53,7 +53,9 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    logging.basicConfig(
+        level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s"
+    )
     path = initialize_wizard_schema(args.db_path, args.schema_path)
     print(f"Wizard schema initialized: {path}")
 

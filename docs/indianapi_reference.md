@@ -469,6 +469,7 @@ Recommend **discard at wrapper boundary** unless a future table is added:
 ```python
 SKIP_KEYS = {"periodType", "periodLength"}
 
+
 def parse_amount(value: str | None, key: str) -> float | None:
     if key in SKIP_KEYS:
         return None
@@ -526,6 +527,7 @@ API_NAME_BY_SYMBOL = {
     # ...
 }
 
+
 def resolve_api_name(symbol: str, company_name_hint: str | None = None) -> str:
     if symbol in API_NAME_BY_SYMBOL:
         return API_NAME_BY_SYMBOL[symbol]
@@ -537,10 +539,14 @@ def resolve_api_name(symbol: str, company_name_hint: str | None = None) -> str:
 ```python
 # Match datasets by metric name
 price_ds = next(d for d in resp["datasets"] if d["metric"] == "Price")
-vol_ds   = next(d for d in resp["datasets"] if d["metric"] == "Volume")
+vol_ds = next(d for d in resp["datasets"] if d["metric"] == "Volume")
 vol_by_date = {row[0]: row[1] for row in vol_ds["values"]}
 for date_str, close_str in price_ds["values"]:
-    yield {"trade_date": date_str, "close": float(close_str), "volume": vol_by_date.get(date_str)}
+    yield {
+        "trade_date": date_str,
+        "close": float(close_str),
+        "volume": vol_by_date.get(date_str),
+    }
 ```
 
 ### 6. Corporate action date parse

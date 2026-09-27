@@ -25,7 +25,11 @@ SAMPLE_PERIOD = {
             {"key": "TotalRevenue", "value": "54969.49", "displayName": "Revenue"},
             {"key": "NetIncome", "value": "-100.50", "displayName": "Net Income"},
             {"key": "periodType", "value": "Months", "displayName": "period Type"},
-            {"key": "DilutedEPSExcludingExtraOrdItems", "value": "31.13", "displayName": "EPS"},
+            {
+                "key": "DilutedEPSExcludingExtraOrdItems",
+                "value": "31.13",
+                "displayName": "EPS",
+            },
         ],
         "BAL": [
             {"key": "TotalAssets", "value": "1000.00", "displayName": "Assets"},
@@ -34,7 +38,11 @@ SAMPLE_PERIOD = {
             {"key": "TotalCurrentLiabilities", "value": "200.00", "displayName": "CL"},
         ],
         "CAS": [
-            {"key": "CashfromOperatingActivities", "value": "500.00", "displayName": "OCF"},
+            {
+                "key": "CashfromOperatingActivities",
+                "value": "500.00",
+                "displayName": "OCF",
+            },
             {"key": "CapitalExpenditures", "value": "-50.00", "displayName": "CapEx"},
         ],
     },
@@ -58,6 +66,7 @@ SAMPLE_STOCK = {
 def _reset_counter() -> None:
     reset_request_count()
 
+
 class FakeResponse:
     def __init__(self, payload: dict):
         self.payload = payload
@@ -70,6 +79,7 @@ class FakeResponse:
 
     def __exit__(self, *args):
         return False
+
 
 class TestIndianAPIClient:
     def test_fetch_company_and_financials_from_mock(self) -> None:
@@ -115,7 +125,10 @@ class TestIndianAPIClient:
                 },
                 {
                     "metric": "Volume",
-                    "values": [["2025-06-30", 1000, {"delivery": 50}], ["2025-07-01", 2000, {}]],
+                    "values": [
+                        ["2025-06-30", 1000, {"delivery": 50}],
+                        ["2025-07-01", 2000, {}],
+                    ],
                 },
             ]
         }
@@ -182,4 +195,3 @@ class TestIndianAPIClient:
             pytest.raises(ValueError, match="INDIAN_API_KEY"),
         ):
             IndianAPIClient()
-

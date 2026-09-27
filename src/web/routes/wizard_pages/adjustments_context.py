@@ -42,7 +42,9 @@ def _apply_saved_opex_to_capex_preferences(
 
     for _, pref in saved.iterrows():
         base_concept = pref["base_concept"]
-        if base_concept is None or (isinstance(base_concept, float) and pd.isna(base_concept)):
+        if base_concept is None or (
+            isinstance(base_concept, float) and pd.isna(base_concept)
+        ):
             continue
         row_id = table.find_row_id(str(base_concept))
         if row_id is None:
@@ -59,7 +61,9 @@ def opex_to_capex_context(
     ticker: str,
     period: PeriodType,
 ) -> dict[str, object]:
-    views = get_statement_views(ticker=ticker, statement_type="income", period=period, num_periods=2)
+    views = get_statement_views(
+        ticker=ticker, statement_type="income", period=period, num_periods=2
+    )
     df = views["detailed"]
     opex = df[df["standard_concept"].isin(OPERATING_EXPENSES)]
     columns = period_column_specs(opex) + OPEX_TO_CAPEX_INPUT_COLUMNS

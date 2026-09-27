@@ -14,10 +14,14 @@ def sample_payload() -> dict:
         return json.load(handle)
 
 
-def test_finnhub_statement_parsers_return_schema_aligned_dataframes(sample_payload: dict) -> None:
+def test_finnhub_statement_parsers_return_schema_aligned_dataframes(
+    sample_payload: dict,
+) -> None:
     client = FinnhubClient(api_key="test-key")
 
-    def fake_fetch_endpoint(endpoint: str, params: dict | None = None, *, use_cache: bool = True):
+    def fake_fetch_endpoint(
+        endpoint: str, params: dict | None = None, *, use_cache: bool = True
+    ):
         if endpoint != "stock/financials-reported":
             raise AssertionError(f"Unexpected endpoint: {endpoint}")
         freq = params.get("freq") if params else None
@@ -82,7 +86,9 @@ def test_finnhub_statement_parsers_return_schema_aligned_dataframes(sample_paylo
         "source",
     ]
     assert balance_sheets.iloc[0]["cash_and_equivalents"] == pytest.approx(5585000000.0)
-    assert balance_sheets.iloc[0]["non_current_assets"] == pytest.approx(28628000000 - 28628000000)
+    assert balance_sheets.iloc[0]["non_current_assets"] == pytest.approx(
+        28628000000 - 28628000000
+    )
 
     assert isinstance(cash_flows, pd.DataFrame)
     assert list(cash_flows.columns) == [

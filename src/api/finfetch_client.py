@@ -6,7 +6,6 @@ from database import DatabaseManager
 
 
 class FinfetchClient(BaseAPIClient):
-
     def fetch(self, ticker: str) -> pd.DataFrame:
         """Fetch financial data for a given ticker using finfetch.
 

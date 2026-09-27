@@ -71,7 +71,8 @@ def load_company_to_db(
 
         # ensure exchange present if provided; if column missing or value is null, set it
         if exchange is not None and (
-            "exchange" not in comp_df.columns or pd.isna(comp_df.iloc[0].get("exchange", None))
+            "exchange" not in comp_df.columns
+            or pd.isna(comp_df.iloc[0].get("exchange", None))
         ):
             comp_df.loc[:, "exchange"] = exchange
 
@@ -82,9 +83,9 @@ def load_company_to_db(
     symbol = None
     exch = exchange
     try:
-        if 'comp_df' in locals() and 'symbol' in comp_df.columns:
-            symbol = comp_df.iloc[0].get('symbol')
-            exch = comp_df.iloc[0].get('exchange', exch)
+        if "comp_df" in locals() and "symbol" in comp_df.columns:
+            symbol = comp_df.iloc[0].get("symbol")
+            exch = comp_df.iloc[0].get("exchange", exch)
     except Exception:
         logger.debug("Could not resolve symbol/exchange from comp_df", exc_info=True)
 
@@ -114,13 +115,13 @@ def load_company_to_db(
 
 
 def load_to_table(
-        client: BaseAPIClient,
-        db: DatabaseManager,
-        table_name: str,
-        name: str,
-        company_id: str | None,
-        fetch_kwargs: dict[str, Any] | None = None
-    ) -> None:
+    client: BaseAPIClient,
+    db: DatabaseManager,
+    table_name: str,
+    name: str,
+    company_id: str | None,
+    fetch_kwargs: dict[str, Any] | None = None,
+) -> None:
 
     function = {
         t.COMPANIES: client.fetch_company,
@@ -135,6 +136,6 @@ def load_to_table(
         raise ValueError(f"Unsupported table name: {table_name}")
 
     df = function(name, **(fetch_kwargs or {}))
-    if company_id is not None and 'company_id' not in df.columns:
-        df['company_id'] = company_id
+    if company_id is not None and "company_id" not in df.columns:
+        df["company_id"] = company_id
     db.upsert_dataframe(table_name, df)

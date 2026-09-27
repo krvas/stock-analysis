@@ -67,11 +67,13 @@ def main() -> None:
         "--api",
         default="indianapi",
         choices=["indianapi", "alphavantage", "finnhub"],
-        help="Which API to fetch the stock data from"
+        help="Which API to fetch the stock data from",
     )
 
     args = parser.parse_args()
-    logging.basicConfig(level=args.log_level, format="%(levelname)s: %(name)s: %(message)s")
+    logging.basicConfig(
+        level=args.log_level, format="%(levelname)s: %(name)s: %(message)s"
+    )
 
     load_from_names(args.names, args.api)
 

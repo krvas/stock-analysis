@@ -176,7 +176,9 @@ def test_table_get_cell_unknown_column_raises() -> None:
 def test_table_from_rows_serialize_raises() -> None:
     columns = [ColumnSpec(id="note", label="Note", kind="input", dtype="string")]
     table = Table.from_rows([{"id": "r1", "cells": {"note": "x"}}], columns)
-    with pytest.raises(TableSerializationError, match="partial Table cannot be serialized"):
+    with pytest.raises(
+        TableSerializationError, match="partial Table cannot be serialized"
+    ):
         table.serialize()
 
 

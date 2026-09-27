@@ -222,7 +222,9 @@ class TestAlphaVantageClient:
         assert bal.iloc[0]["total_assets"] == pytest.approx(137175000000)
         assert len(cas) == 1
         assert cas.iloc[0]["free_cash_flow"] == pytest.approx(13445000000 - 1685000000)
-        assert cas.iloc[0]["net_cash_flow"] == pytest.approx(13445000000 - 4937000000 - 7079000000)
+        assert cas.iloc[0]["net_cash_flow"] == pytest.approx(
+            13445000000 - 4937000000 - 7079000000
+        )
 
     def test_fetch_prices(self) -> None:
         client = AlphaVantageClient(api_key="test-key")

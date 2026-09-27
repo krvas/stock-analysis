@@ -38,7 +38,9 @@ def _sample_row(**overrides: object) -> dict[str, object]:
     return row
 
 
-def test_initialize_wizard_schema_creates_table(wizard_db: WizardDatabaseManager) -> None:
+def test_initialize_wizard_schema_creates_table(
+    wizard_db: WizardDatabaseManager,
+) -> None:
     assert wizard_db.list_tables() == [wt.ADJUSTMENT_PREFERENCES]
 
 
@@ -68,7 +70,9 @@ def test_upsert_updates_on_unique_key(wizard_db_path: Path) -> None:
 
 def test_upsert_ignores_external_adjustment_id(wizard_db_path: Path) -> None:
     with WizardDatabaseManager(wizard_db_path) as db:
-        db.upsert_adjustment_preferences(pd.DataFrame([_sample_row(adjustment_id="999")]))
+        db.upsert_adjustment_preferences(
+            pd.DataFrame([_sample_row(adjustment_id="999")])
+        )
         loaded = db.read_adjustment_preferences("AAPL", "NASDAQ")
     assert loaded.iloc[0]["adjustment_id"] == "0"
 

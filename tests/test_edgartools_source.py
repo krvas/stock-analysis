@@ -11,18 +11,52 @@ import pytest
 from src.api.edgartools.source import get_statement_views
 
 STATEMENT_CASES = [
-    ("income", "annual", "income_statement", {"end_date": "2024-09-28", "period_type": "duration"}),
-    ("income", "quarterly", "income_statement", {"end_date": "2024-06-29", "period_type": "duration"}),
-    ("balance", "annual", "balance_sheet", {"date": "2024-09-28", "period_type": "instant"}),
-    ("balance", "quarterly", "balance_sheet", {"date": "2024-06-29", "period_type": "instant"}),
-    ("cashflow", "annual", "cash_flow_statement", {"end_date": "2024-09-28", "period_type": "duration"}),
-    ("cashflow", "quarterly", "cash_flow_statement", {"end_date": "2024-06-29", "period_type": "duration"}),
+    (
+        "income",
+        "annual",
+        "income_statement",
+        {"end_date": "2024-09-28", "period_type": "duration"},
+    ),
+    (
+        "income",
+        "quarterly",
+        "income_statement",
+        {"end_date": "2024-06-29", "period_type": "duration"},
+    ),
+    (
+        "balance",
+        "annual",
+        "balance_sheet",
+        {"date": "2024-09-28", "period_type": "instant"},
+    ),
+    (
+        "balance",
+        "quarterly",
+        "balance_sheet",
+        {"date": "2024-06-29", "period_type": "instant"},
+    ),
+    (
+        "cashflow",
+        "annual",
+        "cash_flow_statement",
+        {"end_date": "2024-09-28", "period_type": "duration"},
+    ),
+    (
+        "cashflow",
+        "quarterly",
+        "cash_flow_statement",
+        {"end_date": "2024-06-29", "period_type": "duration"},
+    ),
 ]
 
 
 def _period_column_name(period_meta: dict) -> str:
     period_date = period_meta.get("end_date") or period_meta["date"]
-    suffix = " (Q)" if period_meta.get("period_type") == "duration" and "06" in str(period_date) else " (FY)"
+    suffix = (
+        " (Q)"
+        if period_meta.get("period_type") == "duration" and "06" in str(period_date)
+        else " (FY)"
+    )
     return f"{period_date}{suffix}"
 
 
@@ -112,7 +146,9 @@ def test_get_statement_views_all_statement_and_period_types(
         assert "level" in frame.columns
 
     expected_form = "10-K" if period == "annual" else "10-Q"
-    mock_company.get_filings.assert_called_once_with(form=expected_form, amendments=False)
+    mock_company.get_filings.assert_called_once_with(
+        form=expected_form, amendments=False
+    )
     mock_save_bundle.assert_called_once()
     save_kwargs = mock_save_bundle.call_args.kwargs
     assert save_kwargs["latest_filing_date"] == date(2024, 11, 1)

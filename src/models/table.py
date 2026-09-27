@@ -188,7 +188,10 @@ class Table:
             )
 
         resolved_is_total_col = is_total_col
-        if resolved_is_total_col is not None and resolved_is_total_col not in df.columns:
+        if (
+            resolved_is_total_col is not None
+            and resolved_is_total_col not in df.columns
+        ):
             resolved_is_total_col = None
 
         self._df = df

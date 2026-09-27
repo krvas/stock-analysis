@@ -5,6 +5,7 @@ low-level URL requests, retries, headers, and JSON parsing. Higher-level
 API clients that expose domain-specific methods should subclass
 `BaseAPIClient` in `base_client.py`.
 """
+
 from __future__ import annotations
 
 import json
@@ -74,13 +75,21 @@ class BaseRequestClient:
     def _before_request(self, path: str, params: dict[str, str]) -> None:
         logger.info("%s GET %s params=%s", self.client_name, path, params)
 
-    def _request(self, path: str, params: dict[str, str] | None = None, *, headers: dict[str, str] | None = None) -> Any:
+    def _request(
+        self,
+        path: str,
+        params: dict[str, str] | None = None,
+        *,
+        headers: dict[str, str] | None = None,
+    ) -> Any:
         params = params or {}
         qs = urllib.parse.urlencode(params)
         url = f"{self.base_url}{path}"
         if qs:
             url = f"{url}?{qs}"
-        req = urllib.request.Request(url, headers=headers if headers is not None else self._headers())
+        req = urllib.request.Request(
+            url, headers=headers if headers is not None else self._headers()
+        )
         self._before_request(path, params)
         try:
             with urllib.request.urlopen(req, timeout=self.timeout) as resp:

@@ -18,7 +18,9 @@ from src.database.manager import DatabaseManager
 logger = logging.getLogger(__name__)
 
 
-def initialize_schema(db_path: Path | None = None, schema_path: Path | None = None) -> Path:
+def initialize_schema(
+    db_path: Path | None = None, schema_path: Path | None = None
+) -> Path:
     """Create database file and apply all CREATE TABLE / VIEW statements.
 
     Args:
@@ -45,7 +47,9 @@ def initialize_schema(db_path: Path | None = None, schema_path: Path | None = No
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Initialize DuckDB schema for Indian stocks.")
+    parser = argparse.ArgumentParser(
+        description="Initialize DuckDB schema for Indian stocks."
+    )
     parser.add_argument(
         "--db-path",
         type=Path,
@@ -60,7 +64,9 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    logging.basicConfig(
+        level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s"
+    )
     path = initialize_schema(args.db_path, args.schema_path)
     print(f"Schema initialized: {path}")
 

@@ -149,7 +149,9 @@ async def wizard_subpage_post(
     if subpage is None:
         raise HTTPException(status_code=404, detail="Unknown wizard sub-page")
     if subpage.post_handler is None:
-        raise HTTPException(status_code=404, detail="POST not supported for this sub-page")
+        raise HTTPException(
+            status_code=404, detail="POST not supported for this sub-page"
+        )
 
     symbol = _normalize_ticker(ticker)
     if not symbol:
@@ -158,9 +160,13 @@ async def wizard_subpage_post(
     try:
         body = await request.json()
     except Exception as exc:
-        raise HTTPException(status_code=400, detail="Request body must be JSON") from exc
+        raise HTTPException(
+            status_code=400, detail="Request body must be JSON"
+        ) from exc
     if not isinstance(body, dict):
-        raise HTTPException(status_code=400, detail="Request body must be a JSON object")
+        raise HTTPException(
+            status_code=400, detail="Request body must be a JSON object"
+        )
 
     try:
         return subpage.post_handler(symbol, body)

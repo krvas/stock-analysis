@@ -80,7 +80,7 @@ import pandas as pd
 with DatabaseManager() as db:
     db.initialize_schema()
     db.upsert_dataframe("companies", companies_df)  # auto-assigns company_id
-    db.upsert_dataframe("prices", prices_df)        # INSERT OR REPLACE on PK
+    db.upsert_dataframe("prices", prices_df)  # INSERT OR REPLACE on PK
     db.load_parquet("prices", "data/processed/reliance_prices.parquet")
     latest = db.max_trade_date(company_id=1)  # incremental price updates
 ```

@@ -10,7 +10,10 @@ from src.models.table import statement_table_from_dataframe
 
 
 def _serialize_views(views: dict[str, pd.DataFrame]) -> dict[str, Any]:
-    return {name: statement_table_from_dataframe(df).serialize() for name, df in views.items()}
+    return {
+        name: statement_table_from_dataframe(df).serialize()
+        for name, df in views.items()
+    }
 
 
 def build_statement_payload(

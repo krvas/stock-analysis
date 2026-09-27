@@ -19,6 +19,7 @@ def main(name: str):
     bs = Client.fetch_balance_sheets(name)
     print(bs)
 
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--name", required=True)
