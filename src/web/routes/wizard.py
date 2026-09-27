@@ -7,15 +7,15 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
-from starlette.responses import Response
 from jinja2 import TemplateNotFound
+from starlette.responses import Response
 
 from src.web.templating import templates
 from src.web.wizard_registry import (
     GROUP_LABELS,
+    WIZARD_PAGES,
     Page,
     SubPage,
-    WIZARD_PAGES,
     first_subpage,
     get_page,
     get_subpage,
@@ -145,13 +145,13 @@ async def wizard_subpage_post(
     page_slug: str,
     subpage_slug: str,
 ) -> dict[str, Any]:
-    from src.web.wizard_registry import get_subpage
-
     subpage = get_subpage(page_slug, subpage_slug)
     if subpage is None:
         raise HTTPException(status_code=404, detail="Unknown wizard sub-page")
     if subpage.post_handler is None:
-        raise HTTPException(status_code=404, detail="POST not supported for this sub-page")
+        raise HTTPException(
+            status_code=404, detail="POST not supported for this sub-page"
+        )
 
     symbol = _normalize_ticker(ticker)
     if not symbol:
@@ -160,9 +160,13 @@ async def wizard_subpage_post(
     try:
         body = await request.json()
     except Exception as exc:
-        raise HTTPException(status_code=400, detail="Request body must be JSON") from exc
+        raise HTTPException(
+            status_code=400, detail="Request body must be JSON"
+        ) from exc
     if not isinstance(body, dict):
-        raise HTTPException(status_code=400, detail="Request body must be a JSON object")
+        raise HTTPException(
+            status_code=400, detail="Request body must be a JSON object"
+        )
 
     try:
         return subpage.post_handler(symbol, body)

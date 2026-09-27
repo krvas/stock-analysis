@@ -2,9 +2,7 @@
 Included just in case there was some issue in refactoring these dictionaries to JSON files. These are now deprecated and should not be used in the codebase.
 """
 
-
 from typing import Final
-
 
 API_NAME_BY_SYMBOL: Final[dict[str, str]] = {
     "TCS": "TCS",

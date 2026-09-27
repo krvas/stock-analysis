@@ -1,13 +1,14 @@
-
-
 import json
 import os
 from typing import Final
 
-REPO_DIR: Final[str] = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+REPO_DIR: Final[str] = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+)
+
 
 class URLCache:
-    def __init__(self, directory: str, format:str = "json"):
+    def __init__(self, directory: str, format: str = "json"):
         self.directory = os.path.join(REPO_DIR, directory)
         self.format = format
 

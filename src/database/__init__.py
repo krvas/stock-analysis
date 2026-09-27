@@ -8,8 +8,8 @@ from src.database.wizard_manager import WizardDatabaseManager
 __all__ = [
     "BaseDatabaseManager",
     "DatabaseManager",
-    "WizardDatabaseManager",
     "UpsertResult",
+    "WizardDatabaseManager",
     "initialize_schema",
     "initialize_wizard_schema",
 ]

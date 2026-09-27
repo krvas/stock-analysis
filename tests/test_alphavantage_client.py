@@ -11,7 +11,6 @@ import pytest
 from src.api.alphavantage.client import AlphaVantageClient, AlphaVantageError
 from src.api.alphavantage.parsing import parse_split_factor
 
-
 SAMPLE_OVERVIEW = {
     "Symbol": "IBM",
     "Name": "International Business Machines",
@@ -115,20 +114,14 @@ SAMPLE_PRICES = {
             "2. high": "162.0000",
             "3. low": "159.0000",
             "4. close": "161.0000",
-            "5. adjusted close": "160.5000",
-            "6. volume": "1000000",
-            "7. dividend amount": "0.0000",
-            "8. split coefficient": "1.0",
+            "5. volume": "1000000",
         },
         "2024-01-02": {
             "1. open": "158.0000",
             "2. high": "159.5000",
             "3. low": "157.0000",
             "4. close": "159.0000",
-            "5. adjusted close": "158.5000",
-            "6. volume": "900000",
-            "7. dividend amount": "0.0000",
-            "8. split coefficient": "1.0",
+            "5. volume": "900000",
         },
     },
 }
@@ -168,7 +161,7 @@ class FakeResponse:
         return False
 
 
-def _dispatch(req, timeout=60):  # noqa: ARG001
+def _dispatch(req, timeout=60):
     url = req.full_url
     if "function=OVERVIEW" in url:
         return FakeResponse(SAMPLE_OVERVIEW)
@@ -180,7 +173,7 @@ def _dispatch(req, timeout=60):  # noqa: ARG001
         return FakeResponse(SAMPLE_BALANCE)
     if "function=CASH_FLOW" in url:
         return FakeResponse(SAMPLE_CASH_FLOW)
-    if "function=TIME_SERIES_DAILY_ADJUSTED" in url:
+    if "function=TIME_SERIES_DAILY" in url:
         return FakeResponse(SAMPLE_PRICES)
     if "function=DIVIDENDS" in url:
         return FakeResponse(SAMPLE_DIVIDENDS)
@@ -223,7 +216,9 @@ class TestAlphaVantageClient:
         assert bal.iloc[0]["total_assets"] == pytest.approx(137175000000)
         assert len(cas) == 1
         assert cas.iloc[0]["free_cash_flow"] == pytest.approx(13445000000 - 1685000000)
-        assert cas.iloc[0]["net_cash_flow"] == pytest.approx(13445000000 - 4937000000 - 7079000000)
+        assert cas.iloc[0]["net_cash_flow"] == pytest.approx(
+            13445000000 - 4937000000 - 7079000000
+        )
 
     def test_fetch_prices(self) -> None:
         client = AlphaVantageClient(api_key="test-key")
@@ -232,7 +227,7 @@ class TestAlphaVantageClient:
         assert len(prices) == 2
         assert prices.iloc[0]["trade_date"] == pd.Timestamp("2024-01-02").date()
         assert prices.iloc[1]["close"] == pytest.approx(161.0)
-        assert prices.iloc[1]["adj_close"] == pytest.approx(160.5)
+        assert prices.iloc[1]["volume"] == 1000000
 
     def test_fetch_corporate_actions(self) -> None:
         client = AlphaVantageClient(api_key="test-key")
@@ -248,18 +243,22 @@ class TestAlphaVantageClient:
     def test_error_payload_raises(self) -> None:
         client = AlphaVantageClient(api_key="test-key")
 
-        def bad_urlopen(req, timeout=60):  # noqa: ARG001
+        def bad_urlopen(req, timeout=60):
             return FakeResponse({"Note": "API call frequency exceeded"})
 
-        with patch("urllib.request.urlopen", bad_urlopen):
-            with pytest.raises(AlphaVantageError, match="API call frequency"):
-                client._fetch_function("OVERVIEW", "IBM", use_cache=False)
+        with (
+            patch("urllib.request.urlopen", bad_urlopen),
+            pytest.raises(AlphaVantageError, match="API call frequency"),
+        ):
+            client._fetch_function("OVERVIEW", "IBM", use_cache=False)
 
     def test_missing_api_key_raises(self) -> None:
-        with patch.dict("os.environ", {"ALPHAVANTAGE_API_KEY": ""}, clear=False):
-            with patch("src.api.alphavantage.client.load_dotenv"):
-                with pytest.raises(ValueError, match="ALPHAVANTAGE_API_KEY"):
-                    AlphaVantageClient(api_key=None)
+        with (
+            patch.dict("os.environ", {"ALPHAVANTAGE_API_KEY": ""}, clear=False),
+            patch("src.api.base_client.load_project_dotenv"),
+            pytest.raises(ValueError, match="ALPHAVANTAGE_API_KEY"),
+        ):
+            AlphaVantageClient(api_key=None)
 
     def test_parse_split_factor(self) -> None:
         assert parse_split_factor("4/1") == (1, 4)

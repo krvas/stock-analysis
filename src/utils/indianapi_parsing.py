@@ -82,7 +82,10 @@ def parse_action_date(value: str | None) -> date | None:
     value = value.strip()
     for fmt in ("%d-%m-%Y", "%Y-%m-%d"):
         try:
-            return datetime.strptime(value, fmt).date()
+            # Source values are plain calendar dates with no timezone concept
+            # (IndianAPI corporate-action payloads); forcing tz-awareness here
+            # would misrepresent the data rather than fix a real bug.
+            return datetime.strptime(value, fmt).date()  # noqa: DTZ007
         except ValueError:
             continue
     logger.debug("Unparseable corporate action date: %r", value)

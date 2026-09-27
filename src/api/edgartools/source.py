@@ -19,7 +19,11 @@ from src.api.edgartools.cache import (
     save_period_bundle,
     touch_company_cache,
 )
-from src.config import EDGARTOOLS_CACHE_DIR, EDGARTOOLS_COMPANY_CACHE_SIZE, load_project_dotenv
+from src.config import (
+    EDGARTOOLS_CACHE_DIR,
+    EDGARTOOLS_COMPANY_CACHE_SIZE,
+    load_project_dotenv,
+)
 
 StatementType = Literal["income", "balance", "cashflow"]
 PeriodType = Literal["annual", "quarterly"]
@@ -70,6 +74,7 @@ def _configure_edgartools_cache() -> None:
     os.environ["EDGAR_LOCAL_DATA_DIR"] = str(EDGARTOOLS_CACHE_DIR)
     os.environ["EDGAR_ALLOW_NETWORK_FALLBACK"] = "True"
 
+
 def _period_columns(df: pd.DataFrame) -> list[str]:
     return [col for col in df.columns if col not in _METADATA_COLUMNS]
 
@@ -103,10 +108,10 @@ def _build_view_dataframe(
 ) -> pd.DataFrame:
     """Build a multi-period DataFrame with per-filing view filtering.
 
-  XBRLS stitched ``to_dataframe()`` does not apply summary/standard/detailed
-  filtering (summary and standard both map to include_dimensions=False, and the
-  stitcher drops dimensional rows). We still use XBRLS for filing selection and
-  period alignment, then call ``to_dataframe(view=...)`` on each underlying XBRL.
+    XBRLS stitched ``to_dataframe()`` does not apply summary/standard/detailed
+    filtering (summary and standard both map to include_dimensions=False, and the
+    stitcher drops dimensional rows). We still use XBRLS for filing selection and
+    period alignment, then call ``to_dataframe(view=...)`` on each underlying XBRL.
     """
     xbrl_type = _STATEMENT_XBRL_TYPES[statement_type]
     statement_getter_name = _STATEMENT_METHODS[statement_type]
@@ -146,7 +151,9 @@ def _build_view_dataframe(
 
             if period_column is not None:
                 value = row.get(period_column)
-                rows_by_key[key]["values"][period_label] = None if pd.isna(value) else value
+                rows_by_key[key]["values"][period_label] = (
+                    None if pd.isna(value) else value
+                )
 
     data = {
         "label": [rows_by_key[key]["label"] for key in row_order],
@@ -156,7 +163,9 @@ def _build_view_dataframe(
         "is_total": [rows_by_key[key]["is_total"] for key in row_order],
     }
     for period_label in period_labels:
-        data[period_label] = [rows_by_key[key]["values"].get(period_label) for key in row_order]
+        data[period_label] = [
+            rows_by_key[key]["values"].get(period_label) for key in row_order
+        ]
 
     return pd.DataFrame(data)
 

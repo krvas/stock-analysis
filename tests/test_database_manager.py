@@ -7,8 +7,8 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from src.database.manager import DatabaseManager
 from src.database import tables as t
+from src.database.manager import DatabaseManager
 
 
 @pytest.fixture
@@ -46,7 +46,11 @@ def test_upsert_companies_assigns_ids(db: DatabaseManager) -> None:
 
 
 def test_upsert_companies_no_duplicate(db: DatabaseManager) -> None:
-    row = {"symbol": "TCS", "exchange": "NSE", "company_name": "Tata Consultancy Services"}
+    row = {
+        "symbol": "TCS",
+        "exchange": "NSE",
+        "company_name": "Tata Consultancy Services",
+    }
     db.upsert_dataframe(t.COMPANIES, pd.DataFrame([row]))
     db.upsert_dataframe(t.COMPANIES, pd.DataFrame([{**row, "sector": "IT"}]))
     assert db.table_row_count(t.COMPANIES) == 1
@@ -58,7 +62,9 @@ def test_upsert_companies_no_duplicate(db: DatabaseManager) -> None:
 def test_upsert_prices(db: DatabaseManager) -> None:
     db.upsert_dataframe(
         t.COMPANIES,
-        pd.DataFrame([{"symbol": "INFY", "exchange": "NSE", "company_name": "Infosys Ltd"}])
+        pd.DataFrame(
+            [{"symbol": "INFY", "exchange": "NSE", "company_name": "Infosys Ltd"}]
+        ),
     )
     company_id = db.get_company_id("INFY", "NSE")
     assert company_id is not None
@@ -102,14 +108,16 @@ def test_upsert_prices(db: DatabaseManager) -> None:
 def test_max_trade_date(db: DatabaseManager) -> None:
     db.upsert_dataframe(
         t.COMPANIES,
-        pd.DataFrame([{"symbol": "HDFCBANK", "exchange": "NSE", "company_name": "HDFC Bank"}])
+        pd.DataFrame(
+            [{"symbol": "HDFCBANK", "exchange": "NSE", "company_name": "HDFC Bank"}]
+        ),
     )
     cid = db.get_company_id("HDFCBANK", "NSE")
     db.upsert_dataframe(
         t.PRICES,
         pd.DataFrame(
             [{"company_id": cid, "trade_date": "2023-06-01", "close": 1500.0}]
-        )
+        ),
     )
     assert db.max_trade_date(cid) == pd.Timestamp("2023-06-01")
 
@@ -121,7 +129,13 @@ def test_context_manager_closes(db_path: Path) -> None:
     with DatabaseManager(db_path) as db:
         assert len(db.list_tables()) == len(t.ALL_TABLES)
 
+
 def test_load_parquet(db: DatabaseManager) -> None:
     db.load_parquet(t.COMPANIES, "tests/data/companies.parquet")
     assert db.table_row_count(t.COMPANIES) == 1
-    assert db.query("SELECT company_name FROM companies WHERE symbol = 'RELIANCE'").iloc[0]["company_name"] == "Reliance Industries Ltd"
+    assert (
+        db.query("SELECT company_name FROM companies WHERE symbol = 'RELIANCE'").iloc[
+            0
+        ]["company_name"]
+        == "Reliance Industries Ltd"
+    )

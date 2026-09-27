@@ -1,58 +1,26 @@
-#!/usr/bin/env python
 """Quick test of API client imports and instantiation."""
 
 import sys
 
-def test_imports():
-    """Test that all API clients can be imported."""
-    from src.api import (
-        CompaniesClient,
-        PricesClient,
-        FinancialsClient,
-        BalanceSheetsClient,
-        CashFlowsClient,
-        BaseAPIClient,
-    )
-    print("✓ All API clients imported successfully")
-    return (
-        CompaniesClient,
-        PricesClient,
-        FinancialsClient,
-        BalanceSheetsClient,
-        CashFlowsClient,
-        BaseAPIClient,
-    )
+from src.api.converters import (
+    BalanceSheetResponseConverter,
+    CashFlowResponseConverter,
+    CompanyResponseConverter,
+    FinancialsResponseConverter,
+    PricesResponseConverter,
+)
 
-
-def test_converters():
-    """Test that all converters can be imported."""
-    from src.api.converters import (
-        CompanyResponseConverter,
-        PricesResponseConverter,
-        FinancialsResponseConverter,
-        BalanceSheetResponseConverter,
-        CashFlowResponseConverter,
-    )
-    print("✓ All converters imported successfully")
-    return (
-        CompanyResponseConverter,
-        PricesResponseConverter,
-        FinancialsResponseConverter,
-        BalanceSheetResponseConverter,
-        CashFlowResponseConverter,
-    )
+from src.api import (
+    BalanceSheetsClient,
+    CashFlowsClient,
+    CompaniesClient,
+    FinancialsClient,
+    PricesClient,
+)
 
 
 def test_client_instantiation():
     """Test client instantiation without database."""
-    from src.api import (
-        CompaniesClient,
-        PricesClient,
-        FinancialsClient,
-        BalanceSheetsClient,
-        CashFlowsClient,
-    )
-
     companies_client = CompaniesClient(db=None)
     assert companies_client.client_name == "CompaniesClient"
     print(f"✓ CompaniesClient created: {companies_client.client_name}")
@@ -76,15 +44,6 @@ def test_client_instantiation():
 
 def test_converters_with_sample_data():
     """Test converters with sample API responses."""
-    from src.api.converters import (
-        CompanyResponseConverter,
-        PricesResponseConverter,
-        FinancialsResponseConverter,
-        BalanceSheetResponseConverter,
-        CashFlowResponseConverter,
-    )
-    import pandas as pd
-
     # Test CompanyResponseConverter
     company_data = [
         {
@@ -166,13 +125,11 @@ if __name__ == "__main__":
     print("Testing API wrapper classes...\n")
 
     try:
-        test_imports()
-        test_converters()
         test_client_instantiation()
         test_converters_with_sample_data()
         print("\n✅ All tests passed!")
         sys.exit(0)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - top-level script guard to report any failure and exit non-zero
         print(f"\n❌ Test failed: {e}")
         import traceback
 

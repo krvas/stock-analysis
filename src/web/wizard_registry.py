@@ -8,8 +8,9 @@ accept user saves declare a ``post_handler``; requests go to
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable, Final, Literal
+from typing import Any, Final, Literal
 
 from src.web.routes.wizard_pages import adjustments_context, adjustments_post
 
@@ -30,12 +31,11 @@ GROUP_ORDER: Final[tuple[PageGroup, ...]] = (
 )
 
 SubPageContextBuilder = Callable[[str, str], dict[str, Any]]
-default_context_builder: Final[SubPageContextBuilder] = (
-    lambda ticker, period: {}
-)
+default_context_builder: Final[SubPageContextBuilder] = lambda ticker, period: {}
 
 SubPagePostHandler = Callable[[str, dict[str, Any]], dict[str, Any]]
 default_post_handler: Final[SubPagePostHandler | None] = None
+
 
 @dataclass(frozen=True)
 class SubPage:
@@ -71,7 +71,9 @@ WIZARD_PAGES: list[Page] = [
         order=2,
         group="business",
         subpages=[
-            SubPage(slug="look-through-earnings", title="Look-through Earnings", order=1),
+            SubPage(
+                slug="look-through-earnings", title="Look-through Earnings", order=1
+            ),
             SubPage(
                 slug="opex-to-capex",
                 title="Capitalizing Opex",

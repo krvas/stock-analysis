@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -53,7 +53,9 @@ class BaseDatabaseManager:
             return self._connection
 
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        logger.debug("Connecting to DuckDB: %s (read_only=%s)", self.db_path, self.read_only)
+        logger.debug(
+            "Connecting to DuckDB: %s (read_only=%s)", self.db_path, self.read_only
+        )
         self._connection = duckdb.connect(str(self.db_path), read_only=self.read_only)
         return self._connection
 
@@ -103,14 +105,18 @@ class BaseDatabaseManager:
         ).fetchall()
         return [r[0] for r in rows]
 
-    def execute(self, sql: str, params: list[Any] | tuple[Any, ...] | None = None) -> None:
+    def execute(
+        self, sql: str, params: list[Any] | tuple[Any, ...] | None = None
+    ) -> None:
         """Run a SQL statement without returning rows."""
         if params:
             self.connection.execute(sql, params)
         else:
             self.connection.execute(sql)
 
-    def query(self, sql: str, params: list[Any] | tuple[Any, ...] | None = None) -> pd.DataFrame:
+    def query(
+        self, sql: str, params: list[Any] | tuple[Any, ...] | None = None
+    ) -> pd.DataFrame:
         """Run SQL and return a pandas DataFrame."""
         if params:
             return self.connection.execute(sql, params).df()
@@ -175,7 +181,9 @@ class DatabaseManager(BaseDatabaseManager):
 
     def next_company_id(self) -> int:
         """Return the next available ``company_id``."""
-        df = self.query("SELECT COALESCE(MAX(company_id), 0) + 1 AS next_id FROM companies")
+        df = self.query(
+            "SELECT COALESCE(MAX(company_id), 0) + 1 AS next_id FROM companies"
+        )
         return int(df.iloc[0]["next_id"])
 
     def resolve_company_ids(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -190,7 +198,9 @@ class DatabaseManager(BaseDatabaseManager):
         required = {"symbol", "exchange"}
         missing = required - set(df.columns)
         if missing:
-            raise ValueError(f"DataFrame missing columns for company resolution: {missing}")
+            raise ValueError(
+                f"DataFrame missing columns for company resolution: {missing}"
+            )
 
         out = df.copy()
         if "company_id" not in out.columns:
@@ -205,12 +215,16 @@ class DatabaseManager(BaseDatabaseManager):
                 suffixes=("", "_existing"),
             )
             # Prefer explicit id, then lookup, then allocate later
-            out["company_id"] = merged["company_id"].combine_first(merged["company_id_existing"])
+            out["company_id"] = merged["company_id"].combine_first(
+                merged["company_id_existing"]
+            )
 
         needs_id = out["company_id"].isna()
         if needs_id.any():
             next_id = self.next_company_id()
-            out.loc[needs_id, "company_id"] = range(next_id, next_id + int(needs_id.sum()))
+            out.loc[needs_id, "company_id"] = range(
+                next_id, next_id + int(needs_id.sum())
+            )
 
         out["company_id"] = out["company_id"].astype(int)
         return out
@@ -256,11 +270,15 @@ class DatabaseManager(BaseDatabaseManager):
             prepared = self._prepare_companies_for_upsert(prepared)
             add_timestamps = False
 
-        prepared = self._prepare_dataframe(table, prepared, add_timestamps=add_timestamps)
+        prepared = self._prepare_dataframe(
+            table, prepared, add_timestamps=add_timestamps
+        )
         pk_cols = t.PRIMARY_KEYS[table]
         missing_pk = [c for c in pk_cols if c not in prepared.columns]
         if missing_pk:
-            raise ValueError(f"{table} upsert missing primary key columns: {missing_pk}")
+            raise ValueError(
+                f"{table} upsert missing primary key columns: {missing_pk}"
+            )
 
         staging = f"{STAGING_PREFIX}{table}"
         sql = _build_upsert_sql(table, staging)
@@ -358,7 +376,10 @@ class DatabaseManager(BaseDatabaseManager):
             if table == t.COMPANIES:
                 if "updated_at" not in out.columns:
                     out["updated_at"] = now
-            elif "ingested_at" in t.TABLE_COLUMNS[table] and "ingested_at" not in out.columns:
+            elif (
+                "ingested_at" in t.TABLE_COLUMNS[table]
+                and "ingested_at" not in out.columns
+            ):
                 out["ingested_at"] = now
 
         # Add any remaining allowed columns not in df as NA, then apply schema defaults.
@@ -383,7 +404,7 @@ class DatabaseManager(BaseDatabaseManager):
 
 
 def utc_now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _build_upsert_sql(table: str, staging: str) -> str:

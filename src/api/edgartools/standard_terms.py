@@ -1,4 +1,3 @@
-
 OPERATING_EXPENSES = [
     "ResearchAndDevelopmentExpenses",
     "SellingGeneralAndAdminExpenses",
@@ -6,5 +5,5 @@ OPERATING_EXPENSES = [
     "OtherOperatingExpense",
     "RestructuringExpenseBenefit",
     "CostsSubtotal",
-    "OperatingIncomeLoss"
+    "OperatingIncomeLoss",
 ]

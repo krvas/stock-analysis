@@ -26,7 +26,11 @@ SAMPLE_PERIOD = {
             {"key": "TotalRevenue", "value": "54969.49", "displayName": "Revenue"},
             {"key": "NetIncome", "value": "-100.50", "displayName": "Net Income"},
             {"key": "periodType", "value": "Months", "displayName": "period Type"},
-            {"key": "DilutedEPSExcludingExtraOrdItems", "value": "31.13", "displayName": "EPS"},
+            {
+                "key": "DilutedEPSExcludingExtraOrdItems",
+                "value": "31.13",
+                "displayName": "EPS",
+            },
         ],
     },
 }

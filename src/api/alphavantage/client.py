@@ -7,7 +7,6 @@ import os
 from typing import Any, Final
 
 import pandas as pd
-from dotenv import load_dotenv
 
 from src.api.alphavantage.parsing import (
     DEFAULT_CURRENCY,
@@ -90,11 +89,14 @@ class AlphaVantageClient(BaseAPIClient):
         timeout: float = 60.0,
     ) -> None:
         super().__init__(base_url, timeout)
-        load_dotenv()
         self.api_key = api_key or os.environ.get("ALPHAVANTAGE_API_KEY")
         if not self.api_key:
-            raise ValueError("ALPHAVANTAGE_API_KEY is required (env var or constructor argument)")
-        self._cache: URLCache = URLCache(directory="data/raw/alphavantage", format="json")
+            raise ValueError(
+                "ALPHAVANTAGE_API_KEY is required (env var or constructor argument)"
+            )
+        self._cache: URLCache = URLCache(
+            directory="data/raw/alphavantage", format="json"
+        )
 
     def _request_error(self, message: str) -> Exception:
         return AlphaVantageError(message)
@@ -177,16 +179,18 @@ class AlphaVantageClient(BaseAPIClient):
                 rows.append(row)
         return rows
 
-    def _eps_by_date(self, symbol: str, *, use_cache: bool = True) -> dict[str, float | None]:
+    def _eps_by_date(
+        self, symbol: str, *, use_cache: bool = True
+    ) -> dict[Any, float | None]:
         payload = self._fetch_function("EARNINGS", symbol, use_cache=use_cache)
-        eps: dict[str, float | None] = {}
+        eps: dict[Any, float | None] = {}
         for section in ("annualEarnings", "quarterlyEarnings"):
             for item in payload.get(section) or []:
                 if not isinstance(item, dict):
                     continue
-                ending = item.get("fiscalDateEnding")
-                if ending:
-                    eps[str(ending)] = parse_number(item.get("reportedEPS"))
+                ending = parse_date(item.get("fiscalDateEnding"))
+                if ending is not None:
+                    eps[ending] = parse_number(item.get("reportedEPS"))
         return eps
 
     def fetch_company(self, name: str, **kwargs: Any) -> pd.DataFrame:
@@ -198,20 +202,24 @@ class AlphaVantageClient(BaseAPIClient):
         if not payload or not payload.get("Symbol"):
             raise AlphaVantageError(f"Empty OVERVIEW response for symbol={symbol}")
 
-        return pd.DataFrame([{
-            "symbol": str(payload.get("Symbol") or symbol),
-            "exchange": payload.get("Exchange"),
-            "country": payload.get("Country"),
-            "isin": None,
-            "company_name": payload.get("Name") or symbol,
-            "sector": payload.get("Sector"),
-            "industry": payload.get("Industry"),
-            "shares_outstanding": parse_int(payload.get("SharesOutstanding")),
-            "shares_diluted": None,
-            "listing_date": None,
-            "is_active": True,
-            "source": SOURCE,
-        }])
+        return pd.DataFrame(
+            [
+                {
+                    "symbol": str(payload.get("Symbol") or symbol),
+                    "exchange": payload.get("Exchange"),
+                    "country": payload.get("Country"),
+                    "isin": None,
+                    "company_name": payload.get("Name") or symbol,
+                    "sector": payload.get("Sector"),
+                    "industry": payload.get("Industry"),
+                    "shares_outstanding": parse_int(payload.get("SharesOutstanding")),
+                    "shares_diluted": None,
+                    "listing_date": None,
+                    "is_active": True,
+                    "source": SOURCE,
+                }
+            ]
+        )
 
     def fetch_financials(self, name: str, **kwargs: Any) -> pd.DataFrame:
         """Parse income statement periods into a ``financials``-shaped DataFrame."""
@@ -220,6 +228,15 @@ class AlphaVantageClient(BaseAPIClient):
         payload = self._fetch_function("INCOME_STATEMENT", symbol, use_cache=use_cache)
 
         rows = self._iter_statement_rows(payload, INCOME_FIELD_MAP)
+        eps_by_date = self._eps_by_date(symbol, use_cache=use_cache)
+        for row in rows:
+            reported_eps = eps_by_date.get(row.get("period_end_date"))
+            if reported_eps is None:
+                continue
+            if row.get("eps_basic") is None:
+                row["eps_basic"] = reported_eps
+            if row.get("eps_diluted") is None:
+                row["eps_diluted"] = reported_eps
         return pd.DataFrame(rows)
 
     def fetch_balance_sheets(self, name: str, **kwargs: Any) -> pd.DataFrame:
@@ -232,7 +249,11 @@ class AlphaVantageClient(BaseAPIClient):
         for row in rows:
             total_assets = row.get("total_assets")
             current_assets = row.get("current_assets")
-            if row.get("non_current_assets") is None and total_assets is not None and current_assets is not None:
+            if (
+                row.get("non_current_assets") is None
+                and total_assets is not None
+                and current_assets is not None
+            ):
                 row["non_current_assets"] = total_assets - current_assets
 
             total_liabilities = row.get("total_liabilities")
@@ -298,19 +319,30 @@ class AlphaVantageClient(BaseAPIClient):
             close = parse_number(bar.get("4. close"))
             if close is None:
                 continue
-            rows.append({
-                "trade_date": trade_date,
-                "open": parse_number(bar.get("1. open")),
-                "high": parse_number(bar.get("2. high")),
-                "low": parse_number(bar.get("3. low")),
-                "close": close,
-                "volume": parse_int(bar.get("5. volume")),
-                "source": SOURCE,
-            })
+            rows.append(
+                {
+                    "trade_date": trade_date,
+                    "open": parse_number(bar.get("1. open")),
+                    "high": parse_number(bar.get("2. high")),
+                    "low": parse_number(bar.get("3. low")),
+                    "close": close,
+                    "volume": parse_int(bar.get("5. volume")),
+                    "source": SOURCE,
+                }
+            )
 
         if not rows:
             return pd.DataFrame(
-                columns=["trade_date", "open", "high", "low", "close", "volume", "adj_close", "source"]
+                columns=[
+                    "trade_date",
+                    "open",
+                    "high",
+                    "low",
+                    "close",
+                    "volume",
+                    "adj_close",
+                    "source",
+                ]
             )
         return pd.DataFrame(rows).sort_values("trade_date").reset_index(drop=True)
 
@@ -320,7 +352,9 @@ class AlphaVantageClient(BaseAPIClient):
         currency = str(kwargs.get("currency", DEFAULT_CURRENCY))
         symbol = name.strip().upper()
 
-        dividends_payload = self._fetch_function("DIVIDENDS", symbol, use_cache=use_cache)
+        dividends_payload = self._fetch_function(
+            "DIVIDENDS", symbol, use_cache=use_cache
+        )
         splits_payload = self._fetch_function("SPLITS", symbol, use_cache=use_cache)
 
         rows: list[dict[str, Any]] = []
@@ -331,19 +365,21 @@ class AlphaVantageClient(BaseAPIClient):
             action_date = parse_date(item.get("ex_dividend_date"))
             if action_date is None:
                 continue
-            rows.append({
-                "action_date": action_date,
-                "action_type": "dividend",
-                "ex_date": action_date,
-                "record_date": parse_date(item.get("record_date")),
-                "payment_date": parse_date(item.get("payment_date")),
-                "currency": currency,
-                "amount": parse_number(item.get("amount")),
-                "ratio_from": None,
-                "ratio_to": None,
-                "description": None,
-                "source": SOURCE,
-            })
+            rows.append(
+                {
+                    "action_date": action_date,
+                    "action_type": "dividend",
+                    "ex_date": action_date,
+                    "record_date": parse_date(item.get("record_date")),
+                    "payment_date": parse_date(item.get("payment_date")),
+                    "currency": currency,
+                    "amount": parse_number(item.get("amount")),
+                    "ratio_from": None,
+                    "ratio_to": None,
+                    "description": None,
+                    "source": SOURCE,
+                }
+            )
 
         for item in splits_payload.get("data") or []:
             if not isinstance(item, dict):
@@ -352,19 +388,23 @@ class AlphaVantageClient(BaseAPIClient):
             if action_date is None:
                 continue
             ratio_from, ratio_to = parse_split_factor(item.get("split_factor"))
-            rows.append({
-                "action_date": action_date,
-                "action_type": "split",
-                "ex_date": action_date,
-                "record_date": None,
-                "payment_date": None,
-                "currency": currency,
-                "amount": None,
-                "ratio_from": ratio_from,
-                "ratio_to": ratio_to,
-                "description": str(item.get("split_factor")) if item.get("split_factor") else None,
-                "source": SOURCE,
-            })
+            rows.append(
+                {
+                    "action_date": action_date,
+                    "action_type": "split",
+                    "ex_date": action_date,
+                    "record_date": None,
+                    "payment_date": None,
+                    "currency": currency,
+                    "amount": None,
+                    "ratio_from": ratio_from,
+                    "ratio_to": ratio_to,
+                    "description": str(item.get("split_factor"))
+                    if item.get("split_factor")
+                    else None,
+                    "source": SOURCE,
+                }
+            )
 
         if not rows:
             return pd.DataFrame(
@@ -382,4 +422,8 @@ class AlphaVantageClient(BaseAPIClient):
                     "source",
                 ]
             )
-        return pd.DataFrame(rows).sort_values(["action_date", "action_type"]).reset_index(drop=True)
+        return (
+            pd.DataFrame(rows)
+            .sort_values(["action_date", "action_type"])
+            .reset_index(drop=True)
+        )

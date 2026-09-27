@@ -1,9 +1,10 @@
 """One-off probe of yfinance return shapes for NSE tickers. Not part of the package."""
+
 from __future__ import annotations
 
 import json
 from collections import defaultdict
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pandas as pd
@@ -45,7 +46,9 @@ def summarize_df(df: pd.DataFrame | None, name: str) -> dict:
         "shape": list(df.shape),
         "index_dtype": str(df.index.dtype),
         "index_sample": [str(x) for x in df.index[:5]],
-        "columns_dtype": str(df.columns.dtype) if hasattr(df.columns, "dtype") else "object",
+        "columns_dtype": str(df.columns.dtype)
+        if hasattr(df.columns, "dtype")
+        else "object",
         "column_sample": [str(c) for c in df.columns[:8]],
         "row_labels": list(df.index.astype(str)),
         "all_row_labels": list(df.index.astype(str)),
@@ -57,13 +60,19 @@ def summarize_df(df: pd.DataFrame | None, name: str) -> dict:
         sample = {}
         for idx in df.index[:3]:
             val = df.loc[idx, col0]
-            sample[str(idx)] = None if pd.isna(val) else float(val) if isinstance(val, (int, float)) else str(val)
+            sample[str(idx)] = (
+                None
+                if pd.isna(val)
+                else float(val)
+                if isinstance(val, (int, float))
+                else str(val)
+            )
         out["value_sample_col0"] = sample
     return out
 
 
 def main() -> None:
-    end = datetime.now()
+    end = datetime.now(UTC)
     start = end - timedelta(days=30)
     report: dict[str, Any] = {"yfinance_version": yf.__version__, "tickers": {}}
 
@@ -114,7 +123,9 @@ def main() -> None:
         entry["history"] = summarize_df(hist, "history")
         if hist is not None and not hist.empty:
             entry["history"]["columns"] = list(hist.columns)
-            entry["history"]["dtypes_all"] = {c: str(hist[c].dtype) for c in hist.columns}
+            entry["history"]["dtypes_all"] = {
+                c: str(hist[c].dtype) for c in hist.columns
+            }
             entry["history"]["head"] = {
                 str(k): {c: (None if pd.isna(v) else float(v)) for c, v in row.items()}
                 for k, row in hist.head(2).iterrows()
@@ -129,7 +140,10 @@ def main() -> None:
                     "len": len(obj),
                     "dtype": str(obj.dtype),
                     "index_dtype": str(obj.index.dtype),
-                    "sample": {str(k): (None if pd.isna(v) else float(v)) for k, v in obj.tail(3).items()},
+                    "sample": {
+                        str(k): (None if pd.isna(v) else float(v))
+                        for k, v in obj.tail(3).items()
+                    },
                 }
             elif isinstance(obj, pd.DataFrame):
                 entry[attr] = summarize_df(obj, attr)
@@ -138,7 +152,7 @@ def main() -> None:
 
     # cross-ticker row label union for financial statements
     unions: dict[str, set[str]] = defaultdict(set)
-    for sym, data in report["tickers"].items():
+    for data in report["tickers"].values():
         for attr in [
             "financials",
             "quarterly_financials",
@@ -154,7 +168,7 @@ def main() -> None:
 
     # info key union
     info_keys: set[str] = set()
-    for sym, data in report["tickers"].items():
+    for data in report["tickers"].values():
         info_keys.update(data["info"]["fields"].keys())
     report["all_info_keys"] = sorted(info_keys)
 

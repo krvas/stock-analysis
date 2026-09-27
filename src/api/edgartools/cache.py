@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 import logging
 import shutil
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Literal
 
@@ -37,7 +37,7 @@ _VIEWS: tuple[ViewName, ...] = ("summary", "standard", "detailed")
 
 
 def _utc_now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def _index_path(cache_dir: Path) -> Path:
@@ -131,7 +131,7 @@ def is_period_bundle_stale(
     max_age_months: int | None = None,
 ) -> bool:
     """Return True when ``latest_filing_date`` is more than ``max_age_months`` old."""
-    reference = reference or date.today()
+    reference = reference or datetime.now(UTC).date()
     if max_age_months is None:
         max_age_months = (
             EDGARTOOLS_ANNUAL_CACHE_MAX_AGE_MONTHS
@@ -185,7 +185,9 @@ def load_period_bundle(
         latest_filing_date = _parse_iso_date(meta["latest_filing_date"])
     except (OSError, json.JSONDecodeError, KeyError, ValueError):
         logger.warning("Invalid period bundle metadata at %s; deleting", meta_path)
-        delete_period_bundle(cik=cik, period=period, num_periods=num_periods, cache_dir=cache_dir)
+        delete_period_bundle(
+            cik=cik, period=period, num_periods=num_periods, cache_dir=cache_dir
+        )
         return None
 
     if is_period_bundle_stale(latest_filing_date, period=period, reference=reference):
@@ -196,7 +198,9 @@ def load_period_bundle(
             num_periods,
             latest_filing_date,
         )
-        delete_period_bundle(cik=cik, period=period, num_periods=num_periods, cache_dir=cache_dir)
+        delete_period_bundle(
+            cik=cik, period=period, num_periods=num_periods, cache_dir=cache_dir
+        )
         return None
 
     bundle: PeriodBundle = {}
@@ -248,7 +252,9 @@ def save_period_bundle(
             if frame is None:
                 continue
             frame.to_parquet(
-                _bundle_view_path(cache_dir, cik, period, num_periods, statement_type, view)
+                _bundle_view_path(
+                    cache_dir, cik, period, num_periods, statement_type, view
+                )
             )
 
 
@@ -259,7 +265,9 @@ def _evict_company(cache_dir: Path, index: dict[str, dict], cik_key: str) -> Non
         try:
             shutil.rmtree(company_dir)
         except OSError as exc:
-            logger.warning("Failed to delete cached company dir %s: %s", company_dir, exc)
+            logger.warning(
+                "Failed to delete cached company dir %s: %s", company_dir, exc
+            )
     if entry:
         logger.info(
             "Evicted edgartools cache for CIK %s (%s)",
@@ -277,7 +285,11 @@ def touch_company_cache(
 ) -> list[str]:
     """Record a company fetch and evict older companies beyond ``max_companies``."""
     cache_dir = Path(cache_dir) if cache_dir is not None else EDGARTOOLS_CACHE_DIR
-    limit = EDGARTOOLS_COMPANY_CACHE_SIZE if max_companies is None else max(1, max_companies)
+    limit = (
+        EDGARTOOLS_COMPANY_CACHE_SIZE
+        if max_companies is None
+        else max(1, max_companies)
+    )
 
     cik_key = _cik_key(cik)
     index = _load_index(cache_dir)

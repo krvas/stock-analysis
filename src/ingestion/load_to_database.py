@@ -12,19 +12,20 @@ the financials table has just been fetched? How do we connect the company_id?
 - 
 """
 
-from typing import Any, Iterable, List
 import logging
+from collections.abc import Iterable
+from typing import Any
 
 import pandas as pd
 
 from src.api.base_client import BaseAPIClient
-from src.database.manager import DatabaseManager
 from src.database import tables as t
+from src.database.manager import DatabaseManager
 
 logger = logging.getLogger(__name__)
 
 
-DEFAULT_TABLE_ORDER: List[str] = [
+DEFAULT_TABLE_ORDER: list[str] = [
     t.COMPANIES,
     t.FINANCIALS,
     t.BALANCE_SHEETS,
@@ -68,11 +69,12 @@ def load_company_to_db(
             logger.exception("Failed to fetch company: %s", name)
             raise
 
-        # ensure exchange present if provided
-        if exchange is not None:
-            # If column missing or value is null, set it
-            if "exchange" not in comp_df.columns or pd.isna(comp_df.iloc[0].get("exchange", None)):
-                comp_df.loc[:, "exchange"] = exchange
+        # ensure exchange present if provided; if column missing or value is null, set it
+        if exchange is not None and (
+            "exchange" not in comp_df.columns
+            or pd.isna(comp_df.iloc[0].get("exchange", None))
+        ):
+            comp_df.loc[:, "exchange"] = exchange
 
         db.upsert_dataframe(t.COMPANIES, comp_df)
 
@@ -81,11 +83,11 @@ def load_company_to_db(
     symbol = None
     exch = exchange
     try:
-        if 'comp_df' in locals() and 'symbol' in comp_df.columns:
-            symbol = comp_df.iloc[0].get('symbol')
-            exch = comp_df.iloc[0].get('exchange', exch)
+        if "comp_df" in locals() and "symbol" in comp_df.columns:
+            symbol = comp_df.iloc[0].get("symbol")
+            exch = comp_df.iloc[0].get("exchange", exch)
     except Exception:
-        pass
+        logger.debug("Could not resolve symbol/exchange from comp_df", exc_info=True)
 
     company_id = None
     if symbol is not None and exch is not None:
@@ -113,13 +115,13 @@ def load_company_to_db(
 
 
 def load_to_table(
-        client: BaseAPIClient,
-        db: DatabaseManager,
-        table_name: str,
-        name: str,
-        company_id: str | None,
-        fetch_kwargs: dict[str, Any] | None = None
-    ) -> None:
+    client: BaseAPIClient,
+    db: DatabaseManager,
+    table_name: str,
+    name: str,
+    company_id: str | None,
+    fetch_kwargs: dict[str, Any] | None = None,
+) -> None:
 
     function = {
         t.COMPANIES: client.fetch_company,
@@ -134,6 +136,6 @@ def load_to_table(
         raise ValueError(f"Unsupported table name: {table_name}")
 
     df = function(name, **(fetch_kwargs or {}))
-    if company_id is not None and 'company_id' not in df.columns:
-        df['company_id'] = company_id
+    if company_id is not None and "company_id" not in df.columns:
+        df["company_id"] = company_id
     db.upsert_dataframe(table_name, df)

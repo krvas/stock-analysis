@@ -98,7 +98,9 @@ class WizardDatabaseManager(BaseDatabaseManager):
     ) -> pd.DataFrame:
         """Return all adjustment preferences for a ticker on an exchange."""
         if wt.ADJUSTMENT_PREFERENCES not in self.list_tables():
-            return pd.DataFrame(columns=list(wt.TABLE_COLUMNS[wt.ADJUSTMENT_PREFERENCES]))
+            return pd.DataFrame(
+                columns=list(wt.TABLE_COLUMNS[wt.ADJUSTMENT_PREFERENCES])
+            )
         return self.query(
             """
             SELECT *
@@ -134,8 +136,17 @@ class WizardDatabaseManager(BaseDatabaseManager):
         conditions = []
         params: list[str] = []
         for ticker, exchange, adjustment_type, base_concept in keys:
-            conditions.append("(ticker = ? AND exchange = ? AND adjustment_type = ? AND base_concept = ?)")
-            params.extend([str(ticker).upper(), str(exchange).upper(), adjustment_type, base_concept])
+            conditions.append(
+                "(ticker = ? AND exchange = ? AND adjustment_type = ? AND base_concept = ?)"
+            )
+            params.extend(
+                [
+                    str(ticker).upper(),
+                    str(exchange).upper(),
+                    adjustment_type,
+                    base_concept,
+                ]
+            )
 
         sql = f"DELETE FROM {table} WHERE {' OR '.join(conditions)}"
         con = self.connection

@@ -1,11 +1,11 @@
 import finfetch as ff
 import pandas as pd
-
 from base_client import BaseAPIClient
+
 from database import DatabaseManager
 
-class FinfetchClient(BaseAPIClient):
 
+class FinfetchClient(BaseAPIClient):
     def fetch(self, ticker: str) -> pd.DataFrame:
         """Fetch financial data for a given ticker using finfetch.
 
@@ -15,6 +15,3 @@ class FinfetchClient(BaseAPIClient):
             db.initialize_schema()
             stock = ff.Ticker(ticker)
             db.upsert_dataframe("balance_sheets", stock.balance_sheet)
-            stock.balance_sheet
-
-        

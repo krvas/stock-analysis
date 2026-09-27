@@ -8,7 +8,11 @@ from unittest.mock import patch
 import pandas as pd
 import pytest
 
-from src.api.indianapi.client import IndianAPIClient, IndianAPIError, reset_request_count
+from src.api.indianapi.client import (
+    IndianAPIClient,
+    IndianAPIError,
+    reset_request_count,
+)
 
 SAMPLE_PERIOD = {
     "EndDate": "2025-03-31",
@@ -21,7 +25,11 @@ SAMPLE_PERIOD = {
             {"key": "TotalRevenue", "value": "54969.49", "displayName": "Revenue"},
             {"key": "NetIncome", "value": "-100.50", "displayName": "Net Income"},
             {"key": "periodType", "value": "Months", "displayName": "period Type"},
-            {"key": "DilutedEPSExcludingExtraOrdItems", "value": "31.13", "displayName": "EPS"},
+            {
+                "key": "DilutedEPSExcludingExtraOrdItems",
+                "value": "31.13",
+                "displayName": "EPS",
+            },
         ],
         "BAL": [
             {"key": "TotalAssets", "value": "1000.00", "displayName": "Assets"},
@@ -30,7 +38,11 @@ SAMPLE_PERIOD = {
             {"key": "TotalCurrentLiabilities", "value": "200.00", "displayName": "CL"},
         ],
         "CAS": [
-            {"key": "CashfromOperatingActivities", "value": "500.00", "displayName": "OCF"},
+            {
+                "key": "CashfromOperatingActivities",
+                "value": "500.00",
+                "displayName": "OCF",
+            },
             {"key": "CapitalExpenditures", "value": "-50.00", "displayName": "CapEx"},
         ],
     },
@@ -54,6 +66,7 @@ SAMPLE_STOCK = {
 def _reset_counter() -> None:
     reset_request_count()
 
+
 class FakeResponse:
     def __init__(self, payload: dict):
         self.payload = payload
@@ -67,11 +80,12 @@ class FakeResponse:
     def __exit__(self, *args):
         return False
 
+
 class TestIndianAPIClient:
     def test_fetch_company_and_financials_from_mock(self) -> None:
         client = IndianAPIClient(api_key="test-key")
 
-        def fake_urlopen(req, timeout=60):  # noqa: ARG001
+        def fake_urlopen(req, timeout=60):
             url = req.full_url
             payload: dict
             if "/stock?" in url:
@@ -83,10 +97,10 @@ class TestIndianAPIClient:
 
         with patch("urllib.request.urlopen", fake_urlopen):
             company = client.fetch_company("TATASTEEL")
-            assert company["symbol"] == "TATASTEEL"
-            assert company["exchange"] == "NSE"
-            assert company["isin"] == "INE081A01020"
-            assert company["source"] == "indianapi"
+            assert company.iloc[0]["symbol"] == "TATASTEEL"
+            assert company.iloc[0]["exchange"] == "NSE"
+            assert company.iloc[0]["isin"] == "INE081A01020"
+            assert company.iloc[0]["source"] == "indianapi"
 
             fin = client.fetch_financials("TATASTEEL")
             assert len(fin) == 1
@@ -111,12 +125,15 @@ class TestIndianAPIClient:
                 },
                 {
                     "metric": "Volume",
-                    "values": [["2025-06-30", 1000, {"delivery": 50}], ["2025-07-01", 2000, {}]],
+                    "values": [
+                        ["2025-06-30", 1000, {"delivery": 50}],
+                        ["2025-07-01", 2000, {}],
+                    ],
                 },
             ]
         }
 
-        def fake_urlopen(req, timeout=60):  # noqa: ARG001
+        def fake_urlopen(req, timeout=60):
             return FakeResponse(historical)
 
         with patch("urllib.request.urlopen", fake_urlopen):
@@ -148,7 +165,7 @@ class TestIndianAPIClient:
             "splits": {"data": []},
         }
 
-        def fake_urlopen(req, timeout=60):  # noqa: ARG001
+        def fake_urlopen(req, timeout=60):
             return FakeResponse(payload)
 
         with patch("urllib.request.urlopen", fake_urlopen):
@@ -163,15 +180,18 @@ class TestIndianAPIClient:
     def test_stock_error_raises(self) -> None:
         client = IndianAPIClient(api_key="test-key")
 
-        def fake_urlopen(req, timeout=60):  # noqa: ARG001
+        def fake_urlopen(req, timeout=60):
             return FakeResponse({"error": "Stock not found"})
 
-        with patch("urllib.request.urlopen", fake_urlopen):
-            with pytest.raises(IndianAPIError, match="Stock not found"):
-                client.fetch_company("Missing Co")
+        with (
+            patch("urllib.request.urlopen", fake_urlopen),
+            pytest.raises(IndianAPIError, match="Stock not found"),
+        ):
+            client.fetch_company("Missing Co")
 
     def test_missing_api_key_raises(self) -> None:
-        with patch.dict("os.environ", {}, clear=True):
-            with pytest.raises(ValueError, match="INDIAN_API_KEY"):
-                IndianAPIClient()
-
+        with (
+            patch.dict("os.environ", {}, clear=True),
+            pytest.raises(ValueError, match="INDIAN_API_KEY"),
+        ):
+            IndianAPIClient()

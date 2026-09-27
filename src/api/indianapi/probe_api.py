@@ -2,13 +2,12 @@
 Runs the IndianAPI client against the real API to verify that it can fetch data and parse it into the expected schema.
 """
 
-import os
 import argparse
+import os
+
 from dotenv import load_dotenv
 
-
 from src.api.indianapi.client import IndianAPIClient
-
 
 
 def main(name: str):
@@ -19,6 +18,7 @@ def main(name: str):
     Client = IndianAPIClient(api_key=api_key)
     bs = Client.fetch_balance_sheets(name)
     print(bs)
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

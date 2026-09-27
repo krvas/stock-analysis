@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import argparse
 import logging
-from typing import Sequence
+from collections.abc import Sequence
 
-from src.api import IndianAPIClient, AlphaVantageClient, FinnhubClient
+from src.api import AlphaVantageClient, FinnhubClient, IndianAPIClient
 from src.config import DEFAULT_DB_PATH, SCHEMA_SQL_PATH
 from src.database.manager import DatabaseManager
 from src.ingestion.load_to_database import DEFAULT_TABLE_ORDER, load_company_to_db
@@ -67,11 +67,13 @@ def main() -> None:
         "--api",
         default="indianapi",
         choices=["indianapi", "alphavantage", "finnhub"],
-        help="Which API to fetch the stock data from"
+        help="Which API to fetch the stock data from",
     )
 
     args = parser.parse_args()
-    logging.basicConfig(level=args.log_level, format="%(levelname)s: %(name)s: %(message)s")
+    logging.basicConfig(
+        level=args.log_level, format="%(levelname)s: %(name)s: %(message)s"
+    )
 
     load_from_names(args.names, args.api)
 
