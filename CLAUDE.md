@@ -5,6 +5,12 @@ what's implemented vs. not. Read it before editing anything you haven't
 touched before. This file adds *behavioral* rules on top of it: how to decide
 what belongs where, so scope violations don't happen in the first place.
 
+## Lint and format before every commit
+
+Before creating any git commit, run `.venv/bin/ruff check .` and
+`.venv/bin/ruff format --check .` from the repo root, and fix whatever they
+report. Don't commit code that fails either check.
+
 ## The failure mode this file exists to prevent
 
 A prior change hardcoded subpage-specific logic (a dict keyed by the literal

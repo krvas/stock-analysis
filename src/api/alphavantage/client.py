@@ -181,16 +181,16 @@ class AlphaVantageClient(BaseAPIClient):
 
     def _eps_by_date(
         self, symbol: str, *, use_cache: bool = True
-    ) -> dict[str, float | None]:
+    ) -> dict[Any, float | None]:
         payload = self._fetch_function("EARNINGS", symbol, use_cache=use_cache)
-        eps: dict[str, float | None] = {}
+        eps: dict[Any, float | None] = {}
         for section in ("annualEarnings", "quarterlyEarnings"):
             for item in payload.get(section) or []:
                 if not isinstance(item, dict):
                     continue
-                ending = item.get("fiscalDateEnding")
-                if ending:
-                    eps[str(ending)] = parse_number(item.get("reportedEPS"))
+                ending = parse_date(item.get("fiscalDateEnding"))
+                if ending is not None:
+                    eps[ending] = parse_number(item.get("reportedEPS"))
         return eps
 
     def fetch_company(self, name: str, **kwargs: Any) -> pd.DataFrame:
@@ -228,6 +228,15 @@ class AlphaVantageClient(BaseAPIClient):
         payload = self._fetch_function("INCOME_STATEMENT", symbol, use_cache=use_cache)
 
         rows = self._iter_statement_rows(payload, INCOME_FIELD_MAP)
+        eps_by_date = self._eps_by_date(symbol, use_cache=use_cache)
+        for row in rows:
+            reported_eps = eps_by_date.get(row.get("period_end_date"))
+            if reported_eps is None:
+                continue
+            if row.get("eps_basic") is None:
+                row["eps_basic"] = reported_eps
+            if row.get("eps_diluted") is None:
+                row["eps_diluted"] = reported_eps
         return pd.DataFrame(rows)
 
     def fetch_balance_sheets(self, name: str, **kwargs: Any) -> pd.DataFrame:

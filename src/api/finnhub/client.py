@@ -71,16 +71,19 @@ BALANCE_FIELD_MAP: Final[dict[str, tuple[str, ...]]] = {
 CASH_FLOW_FIELD_MAP: Final[dict[str, tuple[str, ...]]] = {
     "operating_cash_flow": (
         "CashFlowsFromUsedInOperatingActivities",
+        "NetCashProvidedByUsedInOperatingActivities",
         "Operating cash flow",
         "OperatingCashFlow",
     ),
     "investing_cash_flow": (
         "CashFlowsFromUsedInInvestingActivities",
+        "NetCashProvidedByUsedInInvestingActivities",
         "Investing cash flow",
         "InvestingCashFlow",
     ),
     "financing_cash_flow": (
         "CashFlowsFromUsedInFinancingActivities",
+        "NetCashProvidedByUsedInFinancingActivities",
         "Financing cash flow",
         "FinancingCashFlow",
     ),

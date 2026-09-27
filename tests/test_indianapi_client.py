@@ -97,10 +97,10 @@ class TestIndianAPIClient:
 
         with patch("urllib.request.urlopen", fake_urlopen):
             company = client.fetch_company("TATASTEEL")
-            assert company["symbol"] == "TATASTEEL"
-            assert company["exchange"] == "NSE"
-            assert company["isin"] == "INE081A01020"
-            assert company["source"] == "indianapi"
+            assert company.iloc[0]["symbol"] == "TATASTEEL"
+            assert company.iloc[0]["exchange"] == "NSE"
+            assert company.iloc[0]["isin"] == "INE081A01020"
+            assert company.iloc[0]["source"] == "indianapi"
 
             fin = client.fetch_financials("TATASTEEL")
             assert len(fin) == 1
