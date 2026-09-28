@@ -16,7 +16,7 @@ persisted. Reported data and adjustment prefs stay fully decoupled.
 | Fact | Evidence |
 | --- | --- |
 | summary ⊆ standard ⊆ detailed, row-wise | 27/27 cached (CIK × period × statement) bundles, keyed `(concept, label)` |
-| Tier is derivable from `to_dataframe` columns | edgartools 5.47 `Statement` filtering: summary drops every `dimension` row; standard drops rows where `is_breakdown`; detailed keeps all |
+| Tier is derivable from the detailed frame plus one stored flag | edgartools 5.47 `Statement` filtering: summary drops every `dimension` row; detailed keeps all; standard drops rows where `is_breakdown` **and** dimensional rows whose member is not in the statement's presentation linkbase (`XBRL._get_valid_dimensional_members`, a filter detailed skips; e.g. AAPL iPhone/Mac/iPad on income). The cache stores that as `in_standard`; it matches `to_dataframe(view="standard")` row-for-row on 417 AAPL/MU/SNDK (filing, statement) pairs |
 | `standard_concept` is not unique in detailed views | up to 12 dupes (income), 36 (cashflow). The opex table's `row_id_col="standard_concept"` can collide |
 | Row sets depend on `num_periods` | AAPL annual_2 detailed income = 59 rows vs annual_10 = 113 |
 | Calc linkbase reproduces reported totals **on raw signs** | AAPL & MSFT latest 10-K, all 3 statements: every monetary parent == Σ(weight × child) with `to_dataframe(presentation=False)`; with the default `presentation=True`, all 3 CF subtotals fail. The only miss is the diluted share count (non-monetary, child not presented) |
@@ -100,6 +100,7 @@ edgartools ──(cache build, once)──► parquet: 3 Statement frames per (c
   - `dimension_key` (derived edgartools metadata: every `axis=member` QName pair
     of a dimensional row, from `get_raw_data()`'s `dimension_metadata`;
     `to_dataframe` only exposes the primary pair)
+  - `in_standard` (edgartools' standard-view membership, see §5)
 - No per-statement subclasses. `statement_type` is an attribute.
 - Methods:
   - `find(concept=… | standard_concept=…)`
@@ -123,15 +124,22 @@ edgartools ──(cache build, once)──► parquet: 3 Statement frames per (c
 
 ```
 summary  : dimension is False
-standard : dimension is False or is_breakdown is False
+standard : in_standard
 detailed : all rows
 ```
+
+`in_standard` is an added column computed at cache build from each filing's
+detailed frame: `not dimension or (not is_breakdown and every axis/member passes
+edgartools' presentation-linkbase member filter)`. It cannot be derived from
+`dimension`/`is_breakdown` alone. Like other metadata it comes from the newest
+filing the row appears in; rows without it (e.g. inserted rows) default to
+`not dimension or not is_breakdown`.
 
 This is a pure function over retained columns. The name `level` stays reserved for
 indent depth, and the filter parameter is `view`, matching edgartools. Filtering
 hides rows, not value, so totals still include hidden children. Adjustment-inserted
 rows are non-dimensional, so they appear in every view unless an adjustment marks
-otherwise. Tier filtering can stay client-side (ship `dimension`/`is_breakdown` per
+otherwise. Tier filtering can stay client-side (ship `dimension`/`in_standard` per
 row) like today's toggle.
 
 ## 6. Totals: recompute along the calc linkbase (updated recommendation)
