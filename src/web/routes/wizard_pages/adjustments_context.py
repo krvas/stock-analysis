@@ -6,7 +6,7 @@ import logging
 
 import pandas as pd
 
-from src.api.edgartools.source import PeriodType, get_statement_views
+from src.api.edgartools.source import PeriodType, load_statement_set
 from src.api.edgartools.standard_terms import OPERATING_EXPENSES
 from src.database.wizard_manager import WizardDatabaseManager
 from src.models.table import ColumnSpec, Table, period_column_specs
@@ -61,10 +61,8 @@ def opex_to_capex_context(
     ticker: str,
     period: PeriodType,
 ) -> dict[str, object]:
-    views = get_statement_views(
-        ticker=ticker, statement_type="income", period=period, num_periods=2
-    )
-    df = views["detailed"]
+    income = load_statement_set(ticker, period).income
+    df = income.project("detailed", income.periods[:2])
     opex = df[df["standard_concept"].isin(OPERATING_EXPENSES)]
     columns = period_column_specs(opex) + OPEX_TO_CAPEX_INPUT_COLUMNS
     table = Table(

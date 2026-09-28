@@ -7,6 +7,8 @@ from typing import Any, Literal
 
 import pandas as pd
 
+from src.models.statement import STATEMENT_METADATA_COLUMNS
+
 ColumnKind = Literal["static", "input", "link"]
 ColumnDtype = Literal["number", "string", "boolean"]
 LinkedGroupType = Literal["pct_of_base"]
@@ -14,16 +16,22 @@ NumberFormat = Literal["financial", "percent", "integer"]
 
 _NUMBER_FORMATS: frozenset[str] = frozenset({"financial", "percent", "integer"})
 
-STATEMENT_VIEW_METADATA_COLUMNS: frozenset[str] = frozenset(
-    {
-        "label",
-        "concept",
-        "standard_concept",
-        "preferred_sign",
-        "level",
-        "is_total",
-        "is_abstract",
-    }
+# Non-period columns of a statement view frame. Includes every column a
+# :class:`~src.models.statement.Statement` frame / projection carries (e.g.
+# ``row_id``, ``dimension``, ``tags``) so none is mistaken for a period.
+STATEMENT_VIEW_METADATA_COLUMNS: frozenset[str] = (
+    frozenset(
+        {
+            "label",
+            "concept",
+            "standard_concept",
+            "preferred_sign",
+            "level",
+            "is_total",
+            "is_abstract",
+        }
+    )
+    | STATEMENT_METADATA_COLUMNS
 )
 
 
