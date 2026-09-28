@@ -81,7 +81,11 @@ def test_payload_view_filtering_and_display_signs() -> None:
 
     assert [r["id"] for r in income["summary"]["rows"]] == ["Revenue", "RnD"]
     assert [r["id"] for r in income["standard"]["rows"]] == ["Revenue", "RnD"]
-    assert [r["id"] for r in income["detailed"]["rows"]] == ["Revenue", "RnD", "Rev"]
+    assert [r["id"] for r in income["detailed"]["rows"]] == [
+        "Revenue",
+        "RnD",
+        "Rev|Axis=IphoneMember",
+    ]
 
     rows = _rows_by_id(income["summary"])
     assert rows["RnD"]["cells"] == {P1: -5.0, P2: -4.0, P3: -3.0}
@@ -112,3 +116,27 @@ def test_opex_to_capex_context_uses_detailed_projection() -> None:
     rows = table["rows"]
     assert [row["id"] for row in rows] == ["ResearchAndDevelopmentExpenses"]
     assert rows[0]["cells"] == {P1: -5.0, P2: -4.0, "capitalize": None, "years": None}
+
+
+def test_opex_to_capex_prefill_matches_standard_concept_keys() -> None:
+    prefs = pd.DataFrame(
+        {
+            "adjustment_type": ["opex_to_capex", "opex_to_capex"],
+            "base_concept": ["ResearchAndDevelopmentExpenses", "NotInTable"],
+            "value": [5, 3],
+        }
+    )
+    with (
+        patch.object(
+            adjustments_context, "load_statement_set", return_value=_statement_set()
+        ),
+        patch.object(adjustments_context, "WizardDatabaseManager") as mock_db,
+    ):
+        db = mock_db.return_value.__enter__.return_value
+        db.read_adjustment_preferences.return_value = prefs
+        context = adjustments_context.opex_to_capex_context("AAPL", "annual")
+
+    (row,) = context["opex_table"]["rows"]
+    assert row["id"] == "ResearchAndDevelopmentExpenses"
+    assert row["cells"]["capitalize"] is True
+    assert row["cells"]["years"] == 5.0
