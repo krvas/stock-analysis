@@ -3,89 +3,224 @@
 from __future__ import annotations
 
 from datetime import date
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
+import numpy as np
 import pandas as pd
 import pytest
 
-from src.api.edgartools.source import get_statement_views
+from src.api.edgartools import source as source_mod
+from src.api.edgartools.source import (
+    _build_statement_dataframe,
+    get_all_statement_views,
+    get_statement_views,
+    load_statement_set,
+)
+from src.config import MAX_CACHE_QUARTERS, MAX_CACHE_YEARS
+from src.models.statement import EDGARTOOLS_METADATA_COLUMNS, Statement, StatementSet
+
+_GETTERS = {
+    "income": "income_statement",
+    "balance": "balance_sheet",
+    "cashflow": "cash_flow_statement",
+}
+
+
+def _filing_df(period_column: str, rows: list[dict]) -> pd.DataFrame:
+    """A per-filing edgartools detailed frame: metadata + two period columns."""
+    records = []
+    for row in rows:
+        record = {
+            "concept": row["concept"],
+            "label": row.get("label", row["concept"]),
+            "standard_concept": row.get("standard_concept"),
+            period_column: row.get("value"),
+            "2000-01-01 (FY)": 1.0,  # another period in the filing; never used
+            "level": row.get("level", 1),
+            "abstract": row.get("abstract", False),
+            "dimension": row.get("dimension", False),
+            "is_breakdown": row.get("is_breakdown", False),
+            "dimension_axis": row.get("dimension_axis"),
+            "dimension_member": row.get("dimension_member"),
+            "dimension_member_label": None,
+            "dimension_label": None,
+            "balance": row.get("balance"),
+            "weight": row.get("weight", np.nan),
+            "preferred_sign": row.get("preferred_sign", np.nan),
+            "parent_concept": row.get("parent_concept"),
+            "parent_abstract_concept": None,
+            "unit": "usd",
+            "point_in_time": False,
+        }
+        records.append(record)
+    return pd.DataFrame(records)
+
+
+def _mock_xbrl(frames_by_statement: dict[str, pd.DataFrame]) -> MagicMock:
+    xbrl = MagicMock()
+    for statement_type, getter in _GETTERS.items():
+        statement = MagicMock()
+        statement.to_dataframe.return_value = frames_by_statement.get(
+            statement_type, pd.DataFrame()
+        )
+        getattr(xbrl.statements, getter).return_value = statement
+    return xbrl
+
+
+def _to_dataframe_mock(xbrl: MagicMock, statement_type: str) -> MagicMock:
+    return getattr(xbrl.statements, _GETTERS[statement_type]).return_value.to_dataframe
+
+
+# --- _build_statement_dataframe ---------------------------------------------
+
+
+@patch("src.api.edgartools.source.determine_optimal_periods")
+def test_build_one_raw_frame_with_newest_metadata(mock_periods: MagicMock) -> None:
+    newest = _mock_xbrl(
+        {
+            "cashflow": _filing_df(
+                "2024-09-28 (FY)",
+                [
+                    {"concept": "Cash", "label": "Cash, beginning", "value": 10.0},
+                    {
+                        "concept": "Capex",
+                        "label": "Payments for PP&E",
+                        "value": 5.0,
+                        "preferred_sign": -1.0,
+                        "balance": "credit",
+                    },
+                    {
+                        "concept": "Rev",
+                        "label": "iPhone",
+                        "value": 7.0,
+                        "dimension": True,
+                        "is_breakdown": True,
+                        "dimension_axis": "Axis",
+                        "dimension_member": "IphoneMember",
+                    },
+                    {"concept": "Cash", "label": "Cash, ending", "value": 20.0},
+                ],
+            )
+        }
+    )
+    older = _mock_xbrl(
+        {
+            "cashflow": _filing_df(
+                "2023-09-30 (FY)",
+                [
+                    {"concept": "Cash", "label": "Cash at start", "value": 8.0},
+                    {
+                        "concept": "Capex",
+                        "label": "Old capex label",
+                        "value": 4.0,
+                        "balance": "debit",
+                    },
+                    {"concept": "OldOnly", "label": "Discontinued", "value": 3.0},
+                    {"concept": "Cash", "label": "Cash at end", "value": 10.0},
+                ],
+            )
+        }
+    )
+    xbrls = MagicMock()
+    xbrls.xbrl_list = [newest, older]
+    mock_periods.return_value = [
+        {"xbrl_index": 0, "end_date": "2024-09-28", "period_type": "duration"},
+        {"xbrl_index": 1, "end_date": "2023-09-30", "period_type": "duration"},
+    ]
+
+    df = _build_statement_dataframe(xbrls, "cashflow", max_periods=16)
+
+    mock_periods.assert_called_once_with(
+        xbrls.xbrl_list, "CashFlowStatement", max_periods=16
+    )
+    for xbrl in (newest, older):
+        xbrl.statements.cash_flow_statement.assert_called_once_with(view="detailed")
+        assert _to_dataframe_mock(xbrl, "cashflow").call_args_list == [
+            call(view="detailed", presentation=False)
+        ]
+        # Other statements are not touched while building cashflow.
+        _to_dataframe_mock(xbrl, "income").assert_not_called()
+
+    assert list(df.columns) == [
+        "row_id",
+        *EDGARTOOLS_METADATA_COLUMNS,
+        "2024-09-28",
+        "2023-09-30",
+    ]
+    assert df["row_id"].tolist() == [
+        "Cash",
+        "Capex",
+        "Rev|Axis=IphoneMember",
+        "Cash#2",
+        "OldOnly",
+    ]
+    by_id = df.set_index("row_id")
+    # Metadata from the newest filing the row appears in.
+    assert by_id.loc["Capex", "label"] == "Payments for PP&E"
+    assert by_id.loc["Capex", "balance"] == "credit"
+    assert by_id.loc["Capex", "preferred_sign"] == -1.0
+    assert by_id.loc["Cash#2", "label"] == "Cash, ending"
+    assert by_id.loc["OldOnly", "label"] == "Discontinued"
+    assert bool(by_id.loc["Rev|Axis=IphoneMember", "is_breakdown"])
+    # Raw signs, occurrence-matched values across filings.
+    assert by_id.loc["Capex"].loc[["2024-09-28", "2023-09-30"]].tolist() == [5.0, 4.0]
+    assert by_id.loc["Cash"].loc[["2024-09-28", "2023-09-30"]].tolist() == [10.0, 8.0]
+    assert by_id.loc["Cash#2"].loc[["2024-09-28", "2023-09-30"]].tolist() == [
+        20.0,
+        10.0,
+    ]
+    assert pd.isna(by_id.loc["OldOnly", "2024-09-28"])
+
+    statement = Statement(df, "cashflow")
+    assert statement.periods == ["2024-09-28", "2023-09-30"]
+
+
+@patch("src.api.edgartools.source.determine_optimal_periods")
+def test_build_empty_when_no_periods(mock_periods: MagicMock) -> None:
+    mock_periods.return_value = []
+    df = _build_statement_dataframe(MagicMock(), "income", max_periods=16)
+    statement = Statement(df, "income")
+    assert statement.periods == []
+    assert statement.project("summary").empty
+
+
+# --- load_statement_set / legacy wrappers -----------------------------------
+
+
+def _patch_fetch(
+    mock_company_cls: MagicMock,
+    mock_xbrls_cls: MagicMock,
+    mock_periods: MagicMock,
+    xbrl: MagicMock,
+    period_meta: dict,
+) -> MagicMock:
+    xbrls = MagicMock()
+    xbrls.xbrl_list = [xbrl]
+    mock_xbrls_cls.from_filings.return_value = xbrls
+    company = MagicMock()
+    company.cik = 320193
+    filings = MagicMock()
+    filings.end_date = "2024-11-01"
+    company.get_filings.return_value.head.return_value = filings
+    mock_company_cls.return_value = company
+    mock_periods.return_value = [{"xbrl_index": 0, **period_meta}]
+    return company
+
 
 STATEMENT_CASES = [
-    (
-        "income",
-        "annual",
-        "income_statement",
-        {"end_date": "2024-09-28", "period_type": "duration"},
-    ),
-    (
-        "income",
-        "quarterly",
-        "income_statement",
-        {"end_date": "2024-06-29", "period_type": "duration"},
-    ),
-    (
-        "balance",
-        "annual",
-        "balance_sheet",
-        {"date": "2024-09-28", "period_type": "instant"},
-    ),
-    (
-        "balance",
-        "quarterly",
-        "balance_sheet",
-        {"date": "2024-06-29", "period_type": "instant"},
-    ),
-    (
-        "cashflow",
-        "annual",
-        "cash_flow_statement",
-        {"end_date": "2024-09-28", "period_type": "duration"},
-    ),
-    (
-        "cashflow",
-        "quarterly",
-        "cash_flow_statement",
-        {"end_date": "2024-06-29", "period_type": "duration"},
-    ),
+    ("income", "annual", {"end_date": "2024-09-28", "period_type": "duration"}),
+    ("income", "quarterly", {"end_date": "2024-06-29", "period_type": "duration"}),
+    ("balance", "annual", {"date": "2024-09-28", "period_type": "instant"}),
+    ("balance", "quarterly", {"date": "2024-06-29", "period_type": "instant"}),
+    ("cashflow", "annual", {"end_date": "2024-09-28", "period_type": "duration"}),
+    ("cashflow", "quarterly", {"end_date": "2024-06-29", "period_type": "duration"}),
 ]
 
 
-def _period_column_name(period_meta: dict) -> str:
-    period_date = period_meta.get("end_date") or period_meta["date"]
-    suffix = (
-        " (Q)"
-        if period_meta.get("period_type") == "duration" and "06" in str(period_date)
-        else " (FY)"
-    )
-    return f"{period_date}{suffix}"
-
-
-def _make_filing_df(period_meta: dict) -> pd.DataFrame:
-    column = _period_column_name(period_meta)
-    return pd.DataFrame(
-        {
-            "label": ["Total assets", "Total liabilities"],
-            "concept": ["Assets", "Liabilities"],
-            "standard_concept": ["Assets", "Liabilities"],
-            column: [100.0, 40.0],
-            "level": [0, 0],
-            "abstract": [False, False],
-        }
-    )
-
-
-def _make_period_meta(period_meta: dict) -> dict:
-    return {
-        "xbrl_index": 0,
-        "period_key": "test_period",
-        **period_meta,
-    }
-
-
 @pytest.mark.parametrize(
-    ("statement_type", "period", "getter_name", "period_meta"),
+    ("statement_type", "period", "period_meta"),
     STATEMENT_CASES,
-    ids=[f"{st}-{p}" for st, p, _, _ in STATEMENT_CASES],
+    ids=[f"{st}-{p}" for st, p, _ in STATEMENT_CASES],
 )
 @patch.dict("os.environ", {"EDGAR_IDENTITY": "ScreenerApp/1.0 test@example.com"})
 @patch("src.api.edgartools.source.touch_company_cache")
@@ -95,102 +230,78 @@ def _make_period_meta(period_meta: dict) -> dict:
 @patch("src.api.edgartools.source.determine_optimal_periods")
 @patch("src.api.edgartools.source.XBRLS")
 @patch("src.api.edgartools.source.Company")
-def test_get_statement_views_all_statement_and_period_types(
+def test_load_statement_set_fetches_builds_and_saves(
     mock_company_cls: MagicMock,
     mock_xbrls_cls: MagicMock,
-    mock_determine_periods: MagicMock,
+    mock_periods: MagicMock,
     mock_find_cached_cik: MagicMock,
     mock_load_bundle: MagicMock,
     mock_save_bundle: MagicMock,
     mock_touch_cache: MagicMock,
     statement_type: str,
     period: str,
-    getter_name: str,
     period_meta: dict,
 ) -> None:
     mock_find_cached_cik.return_value = None
     mock_load_bundle.return_value = None
+    period_date = period_meta.get("end_date") or period_meta["date"]
+    rows = [
+        {"concept": "Assets", "label": "Total assets", "value": 100.0},
+        {"concept": "Liabilities", "label": "Total liabilities", "value": 40.0},
+    ]
+    xbrl = _mock_xbrl({st: _filing_df(f"{period_date} (FY)", rows) for st in _GETTERS})
+    company = _patch_fetch(
+        mock_company_cls, mock_xbrls_cls, mock_periods, xbrl, period_meta
+    )
 
-    filing_df = _make_filing_df(period_meta)
-    mock_statement = MagicMock()
-    mock_statement.to_dataframe.return_value = filing_df
+    statement_set = load_statement_set("AAPL", period)
 
-    mock_statements = MagicMock()
-    for getter in ("income_statement", "balance_sheet", "cash_flow_statement"):
-        getattr(mock_statements, getter).return_value = mock_statement
-
-    mock_xbrl = MagicMock()
-    mock_xbrl.statements = mock_statements
-
-    mock_xbrls = MagicMock()
-    mock_xbrls.xbrl_list = [mock_xbrl]
-    mock_xbrls_cls.from_filings.return_value = mock_xbrls
-
-    mock_company = MagicMock()
-    mock_company.cik = 320193
-    mock_filings = MagicMock()
-    mock_filings.end_date = "2024-11-01"
-    mock_company.get_filings.return_value.head.return_value = mock_filings
-    mock_company_cls.return_value = mock_company
-
-    mock_determine_periods.return_value = [_make_period_meta(period_meta)]
-
-    views = get_statement_views("AAPL", statement_type, period, num_periods=1)
-
-    assert set(views) == {"summary", "standard", "detailed"}
-    expected_period = str(period_meta.get("end_date") or period_meta["date"])
-    for name, frame in views.items():
-        assert isinstance(frame, pd.DataFrame), name
-        assert not frame.empty, name
-        assert expected_period in frame.columns, name
-        assert "level" in frame.columns
+    assert isinstance(statement_set, StatementSet)
+    assert statement_set.periods == (period_date,)
+    frame = statement_set.get(statement_type).frame
+    assert frame["row_id"].tolist() == ["Assets", "Liabilities"]
+    assert frame["is_total"].tolist() == [True, True]
+    assert "unit" not in frame.columns and "point_in_time" not in frame.columns
 
     expected_form = "10-K" if period == "annual" else "10-Q"
-    mock_company.get_filings.assert_called_once_with(
-        form=expected_form, amendments=False
-    )
+    expected_cap = MAX_CACHE_YEARS if period == "annual" else MAX_CACHE_QUARTERS
+    company.get_filings.assert_called_once_with(form=expected_form, amendments=False)
+    company.get_filings.return_value.head.assert_called_once_with(expected_cap)
+    assert all(c.kwargs["max_periods"] == expected_cap for c in mock_periods.mock_calls)
+    for st in _GETTERS:
+        _to_dataframe_mock(xbrl, st).assert_called_once_with(
+            view="detailed", presentation=False
+        )
+
     mock_save_bundle.assert_called_once()
     save_kwargs = mock_save_bundle.call_args.kwargs
+    assert save_kwargs["cik"] == 320193
+    assert save_kwargs["period"] == period
     assert save_kwargs["latest_filing_date"] == date(2024, 11, 1)
-    assert set(save_kwargs["views"]) == {"income", "balance", "cashflow"}
+    assert set(save_kwargs["frames"]) == {"income", "balance", "cashflow"}
+    assert tuple(save_kwargs["periods"]) == (period_date,)
     mock_touch_cache.assert_called_once()
-    assert getattr(mock_statements, getter_name).call_count == 3
-    assert mock_statement.to_dataframe.call_count == 9
 
 
-@patch.dict("os.environ", {"EDGAR_IDENTITY": "ScreenerApp/1.0 test@example.com"})
-@patch("src.api.edgartools.source.touch_company_cache")
-@patch("src.api.edgartools.source.load_period_bundle")
-@patch("src.api.edgartools.source.find_cached_cik")
-@patch("src.api.edgartools.source.Company")
-def test_get_statement_views_returns_cached_without_sec_fetch(
-    mock_company_cls: MagicMock,
-    mock_find_cached_cik: MagicMock,
-    mock_load_bundle: MagicMock,
-    mock_touch_cache: MagicMock,
-) -> None:
-    cached_views = {
-        "summary": pd.DataFrame({"label": ["Revenue"], "2024-09-28": [100.0]}),
-        "standard": pd.DataFrame({"label": ["Revenue"], "2024-09-28": [100.0]}),
-        "detailed": pd.DataFrame({"label": ["Revenue"], "2024-09-28": [100.0]}),
-    }
-    mock_find_cached_cik.return_value = "320193"
-    mock_load_bundle.return_value = {
-        "income": cached_views,
-        "balance": cached_views,
-        "cashflow": cached_views,
-    }
-
-    views = get_statement_views("AAPL", "income", "annual", num_periods=10)
-
-    assert views is cached_views
-    mock_company_cls.assert_not_called()
-    mock_touch_cache.assert_called_once_with(
-        cik="320193",
-        ticker="AAPL",
-        cache_dir=mock_touch_cache.call_args.kwargs["cache_dir"],
-        max_companies=mock_touch_cache.call_args.kwargs["max_companies"],
+def _cached_bundle() -> dict[str, pd.DataFrame]:
+    raw = pd.DataFrame(
+        {
+            "concept": ["Revenue", "Capex", "Rev"],
+            "label": ["Revenue", "Capex", "iPhone"],
+            "standard_concept": ["Revenue", "Capex", "Revenue"],
+            "level": [0, 0, 1],
+            "abstract": [False, False, False],
+            "dimension": [False, False, True],
+            "is_breakdown": [False, False, True],
+            "dimension_axis": [None, None, "Axis"],
+            "dimension_member": [None, None, "IphoneMember"],
+            "preferred_sign": [np.nan, -1.0, np.nan],
+            "2024-09-28": [100.0, 5.0, 60.0],
+            "2023-09-30": [90.0, 4.0, 50.0],
+            "2022-09-24": [80.0, 3.0, 40.0],
+        }
     )
+    return {st: Statement(raw, st).frame for st in ("income", "balance", "cashflow")}
 
 
 @patch.dict("os.environ", {"EDGAR_IDENTITY": "ScreenerApp/1.0 test@example.com"})
@@ -199,27 +310,56 @@ def test_get_statement_views_returns_cached_without_sec_fetch(
 @patch("src.api.edgartools.source.load_period_bundle")
 @patch("src.api.edgartools.source.find_cached_cik")
 @patch("src.api.edgartools.source.Company")
-def test_get_statement_views_reuses_bundle_for_other_statement_type(
+def test_load_statement_set_returns_cached_without_sec_fetch(
     mock_company_cls: MagicMock,
     mock_find_cached_cik: MagicMock,
     mock_load_bundle: MagicMock,
     mock_save_bundle: MagicMock,
     mock_touch_cache: MagicMock,
 ) -> None:
-    balance_views = {
-        "summary": pd.DataFrame({"label": ["Assets"], "2024-09-28": [100.0]}),
-        "standard": pd.DataFrame({"label": ["Assets"], "2024-09-28": [100.0]}),
-        "detailed": pd.DataFrame({"label": ["Assets"], "2024-09-28": [100.0]}),
-    }
     mock_find_cached_cik.return_value = "320193"
-    mock_load_bundle.return_value = {
-        "income": balance_views,
-        "balance": balance_views,
-        "cashflow": balance_views,
-    }
+    mock_load_bundle.return_value = _cached_bundle()
 
-    views = get_statement_views("AAPL", "balance", "annual", num_periods=10)
+    statement_set = load_statement_set("AAPL", "annual")
 
-    assert views is balance_views
+    assert statement_set.periods == ("2024-09-28", "2023-09-30", "2022-09-24")
+    mock_load_bundle.assert_called_once_with(
+        cik="320193",
+        period="annual",
+        cache_dir=mock_load_bundle.call_args.kwargs["cache_dir"],
+    )
     mock_company_cls.assert_not_called()
     mock_save_bundle.assert_not_called()
+    mock_touch_cache.assert_called_once_with(
+        cik="320193",
+        ticker="AAPL",
+        cache_dir=mock_touch_cache.call_args.kwargs["cache_dir"],
+        max_companies=mock_touch_cache.call_args.kwargs["max_companies"],
+    )
+
+
+def test_legacy_wrappers_slice_periods_and_apply_preferred_sign() -> None:
+    bundle = _cached_bundle()
+    statement_set = source_mod._statement_set(bundle)
+    with patch.object(source_mod, "load_statement_set", return_value=statement_set):
+        all_views = get_all_statement_views("AAPL", "annual", num_periods=2)
+        income_views = get_statement_views("AAPL", "income", "annual", num_periods=2)
+
+    assert set(all_views) == {"income", "balance", "cashflow"}
+    for views in (*all_views.values(), income_views):
+        assert set(views) == {"summary", "standard", "detailed"}
+        for frame in views.values():
+            assert "row_id" not in frame.columns
+            assert [c for c in frame.columns if c.startswith("20")] == [
+                "2024-09-28",
+                "2023-09-30",
+            ]
+
+    summary = income_views["summary"].set_index("concept")
+    assert list(summary.index) == ["Revenue", "Capex"]
+    assert summary.loc["Capex", "2024-09-28"] == -5.0  # preferred_sign applied
+    assert summary.loc["Revenue", "2024-09-28"] == 100.0
+    assert list(income_views["standard"]["concept"]) == ["Revenue", "Capex"]
+    assert list(income_views["detailed"]["concept"]) == ["Revenue", "Capex", "Rev"]
+    # Cache keeps raw signs.
+    assert bundle["income"].set_index("concept").loc["Capex", "2024-09-28"] == 5.0

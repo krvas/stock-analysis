@@ -1,9 +1,15 @@
-"""Fetch multi-period financial statement views from edgartools."""
+"""Fetch multi-period financial statements from edgartools.
+
+:func:`load_statement_set` is the entry point: it returns a
+:class:`~src.models.statement.StatementSet` holding one raw detailed frame per
+statement, built from up to ``MAX_CACHE_YEARS`` of filings and cached per
+``(cik, period)``. Views and period windows are projections of that set.
+"""
 
 from __future__ import annotations
 
+import logging
 import os
-import re
 from datetime import date
 from typing import Literal
 
@@ -22,14 +28,32 @@ from src.api.edgartools.cache import (
 from src.config import (
     EDGARTOOLS_CACHE_DIR,
     EDGARTOOLS_COMPANY_CACHE_SIZE,
+    MAX_CACHE_QUARTERS,
+    MAX_CACHE_YEARS,
     load_project_dotenv,
 )
+from src.models.statement import (
+    EDGARTOOLS_METADATA_COLUMNS,
+    STATEMENT_METADATA_COLUMNS,
+    STATEMENT_TYPES,
+    STATEMENT_VIEWS,
+    Statement,
+    StatementSet,
+    StatementType,
+    get_row_id,
+)
 
-StatementType = Literal["income", "balance", "cashflow"]
+logger = logging.getLogger(__name__)
+
 PeriodType = Literal["annual", "quarterly"]
 
-_STATEMENT_TYPES: tuple[StatementType, ...] = ("income", "balance", "cashflow")
-_VIEWS = ("summary", "standard", "detailed")
+__all__ = [
+    "PeriodType",
+    "StatementType",
+    "get_all_statement_views",
+    "get_statement_views",
+    "load_statement_set",
+]
 
 _STATEMENT_METHODS: dict[StatementType, str] = {
     "income": "income_statement",
@@ -48,24 +72,16 @@ _FORM_BY_PERIOD: dict[PeriodType, str] = {
     "quarterly": "10-Q",
 }
 
-_METADATA_COLUMNS = {
-    "concept",
-    "label",
-    "standard_concept",
-    "level",
-    "abstract",
-    "dimension",
-    "is_breakdown",
-    "dimension_axis",
-    "dimension_member",
-    "dimension_member_label",
-    "dimension_label",
-    "balance",
-    "weight",
-    "preferred_sign",
-    "parent_concept",
-    "parent_abstract_concept",
+# Max filings (and periods) cached per bundle.
+_MAX_PERIODS_BY_PERIOD: dict[PeriodType, int] = {
+    "annual": MAX_CACHE_YEARS,
+    "quarterly": MAX_CACHE_QUARTERS,
 }
+
+# Non-metadata, non-period columns edgartools can emit (only when requested via
+# include_unit / include_point_in_time); never treat them as periods.
+_EDGARTOOLS_EXTRA_COLUMNS = frozenset({"unit", "point_in_time"})
+_NON_PERIOD_COLUMNS = STATEMENT_METADATA_COLUMNS | _EDGARTOOLS_EXTRA_COLUMNS
 
 
 def _configure_edgartools_cache() -> None:
@@ -76,7 +92,7 @@ def _configure_edgartools_cache() -> None:
 
 
 def _period_columns(df: pd.DataFrame) -> list[str]:
-    return [col for col in df.columns if col not in _METADATA_COLUMNS]
+    return [col for col in df.columns if col not in _NON_PERIOD_COLUMNS]
 
 
 def _period_date(meta: dict) -> object:
@@ -87,86 +103,109 @@ def _period_date(meta: dict) -> object:
 def _column_for_period_date(df: pd.DataFrame, period_date) -> str | None:
     date_str = str(period_date)
     for column in _period_columns(df):
-        if column.startswith(date_str):
+        if str(column).startswith(date_str):
             return column
     return None
 
 
-def _row_key(row: pd.Series) -> tuple:
-    return (row.get("concept"), row.get("label"))
+def _empty_statement_frame() -> pd.DataFrame:
+    return pd.DataFrame(columns=["row_id", *EDGARTOOLS_METADATA_COLUMNS])
 
 
-def _is_total_row(label: object) -> bool:
-    return bool(re.search(r"\btotal\b", str(label), re.IGNORECASE))
+def _filing_frame(xbrl, statement_type: StatementType) -> pd.DataFrame | None:
+    """One raw (``presentation=False``) detailed frame for one filing."""
+    getter = getattr(xbrl.statements, _STATEMENT_METHODS[statement_type])
+    statement = getter(view="detailed")
+    if statement is None:
+        return None
+    frame = statement.to_dataframe(view="detailed", presentation=False)
+    if not isinstance(frame, pd.DataFrame) or frame.empty:
+        return None
+    return frame
 
 
-def _build_view_dataframe(
+def _build_statement_dataframe(
     xbrls: XBRLS,
     statement_type: StatementType,
-    view: str,
-    num_periods: int,
+    max_periods: int,
 ) -> pd.DataFrame:
-    """Build a multi-period DataFrame with per-filing view filtering.
+    """Build one multi-period raw detailed frame for ``statement_type``.
 
-    XBRLS stitched ``to_dataframe()`` does not apply summary/standard/detailed
-    filtering (summary and standard both map to include_dimensions=False, and the
-    stitcher drops dimensional rows). We still use XBRLS for filing selection and
-    period alignment, then call ``to_dataframe(view=...)`` on each underlying XBRL.
+    XBRLS's stitched ``to_dataframe()`` drops dimensional rows, so we use XBRLS
+    only for filing selection and period alignment
+    (``determine_optimal_periods``, newest period first) and read each
+    filing's own detailed frame, taking the column for that filing's period.
+
+    Rows are matched across filings by :func:`get_row_id`, with the 1-based
+    occurrence of that id within the filing (so e.g. cash beginning/end of
+    period, which share a concept, stay separate rows). Metadata comes from
+    the newest filing a row appears in (first seen wins); rows only in older
+    filings are appended after it. Values keep raw XBRL signs.
     """
-    xbrl_type = _STATEMENT_XBRL_TYPES[statement_type]
-    statement_getter_name = _STATEMENT_METHODS[statement_type]
     period_metas = determine_optimal_periods(
         xbrls.xbrl_list,
-        xbrl_type,
-        max_periods=num_periods,
+        _STATEMENT_XBRL_TYPES[statement_type],
+        max_periods=max_periods,
     )
-
     if not period_metas:
-        return pd.DataFrame()
+        return _empty_statement_frame()
 
     period_labels = [str(_period_date(meta)) for meta in period_metas]
-    rows_by_key: dict[tuple, dict] = {}
-    row_order: list[tuple] = []
+    rows_by_id: dict[str, dict] = {}
+    values_by_id: dict[str, dict[str, object]] = {}
+    frames_by_index: dict[int, pd.DataFrame | None] = {}
 
-    for meta in period_metas:
-        xbrl = xbrls.xbrl_list[meta["xbrl_index"]]
-        statement = getattr(xbrl.statements, statement_getter_name)(view=view)
-        filing_df = statement.to_dataframe(view=view)
-        period_date = _period_date(meta)
-        period_column = _column_for_period_date(filing_df, period_date)
-        period_label = str(period_date)
+    for meta, period_label in zip(period_metas, period_labels, strict=True):
+        xbrl_index = meta["xbrl_index"]
+        if xbrl_index not in frames_by_index:
+            frames_by_index[xbrl_index] = _filing_frame(
+                xbrls.xbrl_list[xbrl_index], statement_type
+            )
+        filing_df = frames_by_index[xbrl_index]
+        if filing_df is None:
+            continue
+        period_column = _column_for_period_date(filing_df, _period_date(meta))
 
-        for _, row in filing_df.iterrows():
-            key = _row_key(row)
-            if key not in rows_by_key:
-                rows_by_key[key] = {
-                    "label": row.get("label", ""),
-                    "concept": row.get("concept"),
-                    "standard_concept": row.get("standard_concept"),
-                    "level": int(row.get("level", 0) or 0),
-                    "is_total": _is_total_row(row.get("label", "")),
-                    "values": {},
+        occurrences: dict[str, int] = {}
+        for record in filing_df.to_dict(orient="records"):
+            if pd.isna(record.get("concept")) or not str(record["concept"]).strip():
+                logger.debug("Skipping %s row without a concept", statement_type)
+                continue
+            base_id = get_row_id(record)
+            occurrences[base_id] = occurrences.get(base_id, 0) + 1
+            row_id = get_row_id(record, occurrence=occurrences[base_id])
+
+            if row_id not in rows_by_id:
+                rows_by_id[row_id] = {
+                    col: record.get(col) for col in EDGARTOOLS_METADATA_COLUMNS
                 }
-                row_order.append(key)
+                level = record.get("level")
+                rows_by_id[row_id]["level"] = 0 if pd.isna(level) else int(level)
+                values_by_id[row_id] = {}
 
             if period_column is not None:
-                value = row.get(period_column)
-                rows_by_key[key]["values"][period_label] = (
-                    None if pd.isna(value) else value
-                )
+                value = record.get(period_column)
+                values = values_by_id[row_id]
+                if period_label not in values or values[period_label] is None:
+                    values[period_label] = None if pd.isna(value) else value
 
-    data = {
-        "label": [rows_by_key[key]["label"] for key in row_order],
-        "concept": [rows_by_key[key]["concept"] for key in row_order],
-        "standard_concept": [rows_by_key[key]["standard_concept"] for key in row_order],
-        "level": [rows_by_key[key]["level"] for key in row_order],
-        "is_total": [rows_by_key[key]["is_total"] for key in row_order],
-    }
-    for period_label in period_labels:
-        data[period_label] = [
-            rows_by_key[key]["values"].get(period_label) for key in row_order
-        ]
+    if not rows_by_id:
+        return _empty_statement_frame()
 
+    row_ids = list(rows_by_id)
+    data: dict[str, list] = {"row_id": row_ids}
+    for col in EDGARTOOLS_METADATA_COLUMNS:
+        data[col] = [rows_by_id[row_id][col] for row_id in row_ids]
+    for period_label in dict.fromkeys(period_labels):
+        # Numeric only: a stray text fact (edgartools keeps TextBlock values as
+        # strings) would make the column unwritable to parquet.
+        data[period_label] = pd.to_numeric(
+            pd.Series(
+                [values_by_id[row_id].get(period_label) for row_id in row_ids],
+                dtype=object,
+            ),
+            errors="coerce",
+        ).astype(float)
     return pd.DataFrame(data)
 
 
@@ -182,46 +221,44 @@ def _latest_filing_date(filings) -> date:
     return max(filing_dates)
 
 
-def _build_all_statement_views(xbrls: XBRLS, num_periods: int) -> PeriodBundle:
-    return {
-        statement_type: {
-            view: _build_view_dataframe(xbrls, statement_type, view, num_periods)
-            for view in _VIEWS
-        }
-        for statement_type in _STATEMENT_TYPES
+def _statement_set(bundle: PeriodBundle) -> StatementSet:
+    statements = {
+        statement_type: Statement(bundle[statement_type], statement_type)
+        for statement_type in STATEMENT_TYPES
     }
-
-
-def _load_cached_bundle(
-    *,
-    cik: int | str,
-    ticker: str,
-    period: PeriodType,
-    num_periods: int,
-) -> PeriodBundle | None:
-    bundle = load_period_bundle(
-        cik=cik,
-        period=period,
-        num_periods=num_periods,
-        cache_dir=EDGARTOOLS_CACHE_DIR,
+    all_periods = {p for s in statements.values() for p in s.periods}
+    return StatementSet(
+        **statements,
+        periods=tuple(sorted(all_periods, reverse=True)),
     )
-    if bundle is None:
-        return None
+
+
+def _touch(cik: int | str, ticker: str) -> None:
     touch_company_cache(
         cik=cik,
         ticker=ticker,
         cache_dir=EDGARTOOLS_CACHE_DIR,
         max_companies=EDGARTOOLS_COMPANY_CACHE_SIZE,
     )
-    return bundle
 
 
-def get_all_statement_views(
-    ticker: str,
-    period: PeriodType,
-    num_periods: int = 10,
-) -> PeriodBundle:
-    """Return summary/standard/detailed DataFrames for all statement types."""
+def _load_cached_set(
+    *, cik: int | str, ticker: str, period: PeriodType
+) -> StatementSet | None:
+    bundle = load_period_bundle(cik=cik, period=period, cache_dir=EDGARTOOLS_CACHE_DIR)
+    if bundle is None:
+        return None
+    _touch(cik, ticker)
+    return _statement_set(bundle)
+
+
+def load_statement_set(ticker: str, period: PeriodType) -> StatementSet:
+    """Return all cached periods of all three statements for ``ticker``.
+
+    Served from the ``(cik, period)`` cache when fresh; otherwise fetches up to
+    ``MAX_CACHE_YEARS`` 10-Ks (annual) or ``MAX_CACHE_QUARTERS`` 10-Qs
+    (quarterly), builds, and caches the raw detailed frames.
+    """
     load_project_dotenv()
     if not os.environ.get("EDGAR_IDENTITY"):
         raise ValueError("EDGAR_IDENTITY environment variable is not set.")
@@ -229,47 +266,68 @@ def get_all_statement_views(
 
     cached_cik = find_cached_cik(EDGARTOOLS_CACHE_DIR, ticker)
     if cached_cik is not None:
-        cached = _load_cached_bundle(
-            cik=cached_cik,
-            ticker=ticker,
-            period=period,
-            num_periods=num_periods,
-        )
+        cached = _load_cached_set(cik=cached_cik, ticker=ticker, period=period)
         if cached is not None:
             return cached
 
     company = Company(ticker)
-    cached = _load_cached_bundle(
-        cik=company.cik,
-        ticker=ticker,
-        period=period,
-        num_periods=num_periods,
-    )
+    cached = _load_cached_set(cik=company.cik, ticker=ticker, period=period)
     if cached is not None:
         return cached
 
-    form = _FORM_BY_PERIOD[period]
-    filings = company.get_filings(form=form, amendments=False).head(num_periods)
+    max_periods = _MAX_PERIODS_BY_PERIOD[period]
+    filings = company.get_filings(form=_FORM_BY_PERIOD[period], amendments=False).head(
+        max_periods
+    )
     latest_filing_date = _latest_filing_date(filings)
     xbrls = XBRLS.from_filings(filings, filter_amendments=True)
 
-    all_views = _build_all_statement_views(xbrls, num_periods)
+    bundle: PeriodBundle = {}
+    for statement_type in STATEMENT_TYPES:
+        raw = _build_statement_dataframe(xbrls, statement_type, max_periods)
+        # Statement adds tags/origin/is_total and validates row_id uniqueness.
+        bundle[statement_type] = Statement(raw, statement_type).frame
+    statement_set = _statement_set(bundle)
 
     save_period_bundle(
         cik=company.cik,
         period=period,
-        num_periods=num_periods,
         latest_filing_date=latest_filing_date,
-        views=all_views,
+        frames=bundle,
+        periods=statement_set.periods,
         cache_dir=EDGARTOOLS_CACHE_DIR,
     )
-    touch_company_cache(
-        cik=company.cik,
-        ticker=ticker,
-        cache_dir=EDGARTOOLS_CACHE_DIR,
-        max_companies=EDGARTOOLS_COMPANY_CACHE_SIZE,
-    )
-    return all_views
+    _touch(company.cik, ticker)
+    return statement_set
+
+
+# --- TEMPORARY legacy wrappers ------------------------------------------------
+# Removed in the next commit, once routes / table.py consume StatementSet
+# projections directly. They keep the old nested-dict shape so routes work
+# unchanged: one frame per view, sliced to each statement's newest
+# ``num_periods`` periods, preferred_sign applied, ``row_id`` dropped (table.py
+# would otherwise treat it as a period column).
+
+
+def _legacy_views(statement: Statement, num_periods: int) -> dict[str, pd.DataFrame]:
+    periods = statement.periods[:num_periods]
+    return {
+        view: statement.project(view, periods).drop(columns="row_id")
+        for view in STATEMENT_VIEWS
+    }
+
+
+def get_all_statement_views(
+    ticker: str,
+    period: PeriodType,
+    num_periods: int = 10,
+) -> dict[StatementType, dict[str, pd.DataFrame]]:
+    """Return summary/standard/detailed DataFrames for all statement types."""
+    statement_set = load_statement_set(ticker, period)
+    return {
+        statement_type: _legacy_views(statement_set.get(statement_type), num_periods)
+        for statement_type in STATEMENT_TYPES
+    }
 
 
 def get_statement_views(
@@ -279,4 +337,5 @@ def get_statement_views(
     num_periods: int = 10,
 ) -> dict[str, pd.DataFrame]:
     """Return summary/standard/detailed DataFrames for one statement type."""
-    return get_all_statement_views(ticker, period, num_periods)[statement_type]
+    statement_set = load_statement_set(ticker, period)
+    return _legacy_views(statement_set.get(statement_type), num_periods)
