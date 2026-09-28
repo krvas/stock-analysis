@@ -183,7 +183,8 @@ serialize() → {
   periods. Metadata = `STATEMENT_VIEW_METADATA_COLUMNS`: `label, concept,
   standard_concept, preferred_sign, level, is_total, is_abstract` plus every
   `Statement` column from `statement.py` (`STATEMENT_METADATA_COLUMNS`, incl.
-  `row_id`).
+  `row_id`). Rows keyed by `row_id` (`row_id_col="row_id"`); a frame without
+  it raises `TableSerializationError` (no ad-hoc id derivation).
 - Missing input cols → `null`. NaN → `null`. Bad spec → `TableSerializationError`.
 - **Model** (`components/table_model.js`): receives table data
   (`fromSerialized`), owns cell state (`getCell`/`setCell`/`subscribe`/
@@ -227,10 +228,10 @@ serialize() → {
   `table_wiring.js`; shared component files must not scrape input DOM for
   save payloads and must not hold per-sub-page field-shaping logic. Generalizes
   the "registry = identity, builders = data" split in §4.
-- `find_row_id(base_concept)` / `set_cell(column_id, row_id, value)`: write
+- `find_row_id(key)` / `set_cell(column_id, row_id, value)`: write
   helpers used to inject saved wizard prefs into a `Table` before
   `serialize()`. `find_row_id` maps a stored pref key to a row id (exact match
-  on `row_id_col`, else exact match on `standard_concept`); `set_cell` mutates
+  on `row_id_col` only); `set_cell` mutates
   the underlying DataFrame (adding the column if missing). `Table` is not
   read-only.
 
