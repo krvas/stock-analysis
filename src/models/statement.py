@@ -2,9 +2,10 @@
 
 A :class:`Statement` wraps one statement's frame whose columns are exactly
 edgartools' ``to_dataframe`` metadata columns (same names) plus a few columns we
-add (``row_id``, ``tags``, ``origin``, ``is_total``); every other column is a
-period column (ISO date string, newest first). Values are stored with **raw**
-XBRL signs; ``preferred_sign`` is applied only in :meth:`Statement.project`.
+add (``row_id``, ``tags``, ``origin``, ``is_total``, ``dimension_key``); every
+other column is a period column (ISO date string, newest first). Values are
+stored with **raw** XBRL signs; ``preferred_sign`` is applied only in
+:meth:`Statement.project`.
 
 Pure domain module: pandas only, no edgartools import, no I/O.
 See ``specs/adjustments_architecture.md`` §3–§5.
@@ -47,8 +48,19 @@ EDGARTOOLS_METADATA_COLUMNS: tuple[str, ...] = (
     "parent_abstract_concept",
 )
 
-# Columns we add on top of edgartools' metadata.
-ADDED_COLUMNS: tuple[str, ...] = ("row_id", "tags", "origin", "is_total")
+# Columns we add on top of edgartools' metadata. ``dimension_key`` is derived
+# edgartools metadata: every axis/member pair of a dimensional row (see
+# :func:`format_dimension_key`), because ``to_dataframe`` only exposes the
+# *primary* pair in ``dimension_axis`` / ``dimension_member``. The cache builder
+# fills it from ``Statement.get_raw_data``'s ``dimension_metadata``; frames
+# without it (e.g. inserted rows) fall back to the primary pair.
+ADDED_COLUMNS: tuple[str, ...] = (
+    "row_id",
+    "tags",
+    "origin",
+    "is_total",
+    "dimension_key",
+)
 
 STATEMENT_METADATA_COLUMNS: frozenset[str] = frozenset(
     EDGARTOOLS_METADATA_COLUMNS + ADDED_COLUMNS
@@ -99,26 +111,83 @@ def _clean_str(value: object) -> str | None:
     return text or None
 
 
+_DIMENSION_PAIR_SEPARATOR = "|"
+
+
+def format_dimension_key(pairs: Sequence[tuple[str, str]]) -> str | None:
+    """Encode a row's full dimension as a ``dimension_key`` cell.
+
+    ``pairs`` are ``(axis, member)`` QNames exactly as edgartools reports them
+    (e.g. ``("srt:ConsolidationItemsAxis", "us-gaap_OperatingSegmentsMember")``),
+    in edgartools' order. Encoded as ``axis=member`` joined by ``|``; ``None``
+    when there are no pairs (non-dimensional row).
+    """
+    parts = []
+    for axis, member in pairs:
+        axis_text = _clean_str(axis)
+        member_text = _clean_str(member)
+        if axis_text is None and member_text is None:
+            continue
+        parts.append(f"{axis_text or ''}={member_text or ''}")
+    return _DIMENSION_PAIR_SEPARATOR.join(parts) or None
+
+
+def _parse_dimension_key(key: str) -> list[tuple[str, str]]:
+    pairs = []
+    for part in key.split(_DIMENSION_PAIR_SEPARATOR):
+        axis, _, member = part.partition("=")
+        pairs.append((axis, member))
+    return pairs
+
+
+def _axis_local_name(axis: str) -> str:
+    """Strip an axis QName's namespace prefix (``srt:X`` / ``srt_X`` → ``X``).
+
+    Filers move axes between taxonomies over the years (e.g.
+    ``us-gaap:ConsolidationItemsAxis`` → ``srt:ConsolidationItemsAxis``); the
+    local name is what identifies the axis across filings.
+    """
+    if ":" in axis:
+        return axis.rsplit(":", 1)[1]
+    if "_" in axis:
+        return axis.split("_", 1)[1]
+    return axis
+
+
+def _dimension_pairs(row: Mapping[str, Any] | pd.Series) -> list[tuple[str, str]]:
+    key = _clean_str(row.get("dimension_key"))
+    if key is not None:
+        return _parse_dimension_key(key)
+    axis = _clean_str(row.get("dimension_axis"))
+    member = _clean_str(row.get("dimension_member"))
+    if axis is None and member is None:
+        return []
+    return [(axis or "", member or "")]
+
+
 def get_row_id(row: Mapping[str, Any] | pd.Series, *, occurrence: int = 1) -> str:
     """Return the stable row id for one statement row.
 
     This is the **only** place row ids are formed. Format:
 
     - non-dimensional row: ``concept`` (e.g. ``us-gaap_Revenues``)
-    - dimensional row: ``concept|axis=member``
-      (e.g. ``us-gaap_Revenues|srt_ProductOrServiceAxis=us-gaap_ProductMember``)
+    - dimensional row: ``concept|Axis=member`` for **every** axis, sorted by
+      axis, e.g. ``us-gaap_Revenues|ProductOrServiceAxis=us-gaap_ProductMember``
+      or ``Rev|ConsolidationItemsAxis=us-gaap_OperatingSegmentsMember``
+      ``|StatementBusinessSegmentsAxis=aapl_AmericasSegmentMember``.
+      Axes use their local name (namespace prefix stripped, see
+      :func:`_axis_local_name`); members keep their full QName.
     - ``occurrence`` > 1 appends ``#<occurrence>``
       (e.g. ``us-gaap_CashCashEquivalents...#2``)
 
-    A row counts as dimensional when it has a ``dimension_axis`` or
-    ``dimension_member``; NaN/None/blank values are treated as absent.
+    Axis/member pairs come from ``dimension_key`` when present, else from the
+    primary ``dimension_axis`` / ``dimension_member``; NaN/None/blank values
+    are treated as absent.
 
-    The base id is not unique on its own: edgartools only exposes the
-    *primary* (first) axis/member of a multi-axis row, and a filer can present
-    the same concept twice non-dimensionally within one filing (e.g. cash
-    beginning/end of period on the cash flow statement). The cache builder
-    passes the 1-based ``occurrence`` of the base id within a filing to keep
-    those rows apart. :class:`Statement` still detects any remaining
+    A filer can still present the same concept twice within one filing (e.g.
+    cash beginning/end of period on the cash flow statement). The cache
+    builder passes the 1-based ``occurrence`` of the base id within a filing
+    to keep those rows apart. :class:`Statement` still detects any remaining
     duplicates and raises :class:`DuplicateRowIdError` rather than deduping.
     """
     if occurrence < 1:
@@ -126,12 +195,11 @@ def get_row_id(row: Mapping[str, Any] | pd.Series, *, occurrence: int = 1) -> st
     concept = _clean_str(row.get("concept"))
     if concept is None:
         raise ValueError("cannot form a row id for a row without a concept")
-    axis = _clean_str(row.get("dimension_axis"))
-    member = _clean_str(row.get("dimension_member"))
-    base = (
-        concept
-        if axis is None and member is None
-        else f"{concept}|{axis or ''}={member or ''}"
+    pairs = sorted(
+        (_axis_local_name(axis), member) for axis, member in _dimension_pairs(row)
+    )
+    base = _DIMENSION_PAIR_SEPARATOR.join(
+        [concept, *(f"{axis}={member}" for axis, member in pairs)]
     )
     return base if occurrence == 1 else f"{base}#{occurrence}"
 
@@ -155,6 +223,30 @@ def _bool_flag(frame: pd.DataFrame, column: str) -> pd.Series:
     if column not in frame.columns:
         return pd.Series(False, index=frame.index)
     return frame[column].eq(True)
+
+
+def _presentation_ancestors(df: pd.DataFrame, rows: pd.Series) -> set[str]:
+    """Concepts that are presentation ancestors of the rows selected by ``rows``.
+
+    Starts from each selected row's own ``parent_abstract_concept`` (metadata
+    from the filing the row came from), then walks upward using the first
+    parent seen per concept (edgartools reports it per concept).
+    """
+    if "parent_abstract_concept" not in df.columns:
+        return set()
+    parent_of: dict[str, str] = {}
+    for concept, parent in zip(df["concept"], df["parent_abstract_concept"]):
+        parent_text = _clean_str(parent)
+        if parent_text is not None and concept not in parent_of:
+            parent_of[concept] = parent_text
+
+    ancestors: set[str] = set()
+    for parent in df.loc[rows, "parent_abstract_concept"]:
+        current = _clean_str(parent)
+        while current is not None and current not in ancestors:
+            ancestors.add(current)
+            current = parent_of.get(current)
+    return ancestors
 
 
 def _check_unique_row_ids(row_ids: pd.Series) -> None:
@@ -318,9 +410,9 @@ class Statement:
         ``preferred_sign`` where it is -1 (edgartools encodes it as ±1 floats,
         NaN/None when the presentation linkbase gives no preferred label —
         treated as +1). Non-abstract rows with no value in the requested
-        periods are dropped. Abstract rows are always kept as-is; whether they
-        should instead depend on surviving descendants is left to the
-        projection-parity check against the legacy view frames.
+        periods are dropped. An abstract (header) row is kept only when some
+        kept non-abstract row has it as a presentation ancestor, following
+        the ``parent_abstract_concept`` chain; empty headers are dropped.
 
         Output columns: :data:`PROJECTION_METADATA_COLUMNS` + period columns.
         """
@@ -346,8 +438,10 @@ class Statement:
             sign = np.where(df["preferred_sign"].eq(-1), -1.0, 1.0)
             values = values.mul(sign, axis=0)
 
-        has_value = values.notna().any(axis=1)
-        keep = view_mask & (has_value | _bool_flag(df, "abstract"))
+        abstract = _bool_flag(df, "abstract")
+        data_kept = view_mask & ~abstract & values.notna().any(axis=1)
+        live_headers = _presentation_ancestors(df, data_kept)
+        keep = data_kept | (view_mask & abstract & df["concept"].isin(live_headers))
 
         meta = pd.DataFrame(index=df.index)
         for col in PROJECTION_METADATA_COLUMNS:

@@ -24,9 +24,44 @@ _GETTERS = {
 
 
 def _filing_df(period_column: str, rows: list[dict]) -> pd.DataFrame:
-    """A per-filing edgartools detailed frame: metadata + two period columns."""
+    """A per-filing edgartools detailed frame: metadata + two period columns.
+
+    A row's ``axes`` (list of ``(axis, member)``) makes it dimensional: like
+    edgartools, the frame exposes only the first pair, while the matching
+    ``get_raw_data`` item (kept in ``frame.attrs["raw"]``, with a structural
+    axis item in front) carries all of them in ``dimension_metadata``.
+    """
     records = []
+    raw: list[dict] = [{"concept": "us-gaap_StatementTable", "label": "[Table]"}]
     for row in rows:
+        axes = row.get("axes") or []
+        if axes:
+            row = {
+                **row,
+                "dimension": True,
+                "dimension_axis": axes[0][0],
+                "dimension_member": axes[0][1],
+            }
+        raw.append(
+            {
+                "concept": row["concept"],
+                "is_dimension": bool(row.get("dimension", False)),
+                "full_dimension_label": None,
+                "dimension_metadata": [
+                    {"dimension": axis, "member": member} for axis, member in axes
+                ]
+                or (
+                    [
+                        {
+                            "dimension": row["dimension_axis"],
+                            "member": row["dimension_member"],
+                        }
+                    ]
+                    if row.get("dimension")
+                    else []
+                ),
+            }
+        )
         record = {
             "concept": row["concept"],
             "label": row.get("label", row["concept"]),
@@ -50,16 +85,18 @@ def _filing_df(period_column: str, rows: list[dict]) -> pd.DataFrame:
             "point_in_time": False,
         }
         records.append(record)
-    return pd.DataFrame(records)
+    frame = pd.DataFrame(records)
+    frame.attrs["raw"] = raw
+    return frame
 
 
 def _mock_xbrl(frames_by_statement: dict[str, pd.DataFrame]) -> MagicMock:
     xbrl = MagicMock()
     for statement_type, getter in _GETTERS.items():
         statement = MagicMock()
-        statement.to_dataframe.return_value = frames_by_statement.get(
-            statement_type, pd.DataFrame()
-        )
+        frame = frames_by_statement.get(statement_type, pd.DataFrame())
+        statement.to_dataframe.return_value = frame
+        statement.get_raw_data.return_value = frame.attrs.get("raw", [])
         getattr(xbrl.statements, getter).return_value = statement
     return xbrl
 
@@ -141,6 +178,7 @@ def test_build_one_raw_frame_with_newest_metadata(mock_periods: MagicMock) -> No
     assert list(df.columns) == [
         "row_id",
         *EDGARTOOLS_METADATA_COLUMNS,
+        "dimension_key",
         "2024-09-28",
         "2023-09-30",
     ]
@@ -170,6 +208,110 @@ def test_build_one_raw_frame_with_newest_metadata(mock_periods: MagicMock) -> No
 
     statement = Statement(df, "cashflow")
     assert statement.periods == ["2024-09-28", "2023-09-30"]
+
+
+@patch("src.api.edgartools.source.determine_optimal_periods")
+def test_build_keys_multi_axis_rows_by_every_axis(mock_periods: MagicMock) -> None:
+    """Rows sharing a primary axis/member but differing in a secondary member
+    stay distinct and merge by full dimension even when the older filing
+    presents them in a different order (and with a renamed axis namespace)."""
+    seg = ("srt:ConsolidationItemsAxis", "us-gaap_OperatingSegmentsMember")
+    newest = _mock_xbrl(
+        {
+            "income": _filing_df(
+                "2024-09-28 (FY)",
+                [
+                    {"concept": "Rev", "value": 100.0},
+                    {
+                        "concept": "Rev",
+                        "label": "Americas",
+                        "axes": [seg, ("us-gaap:SegmentsAxis", "AmericasMember")],
+                        "value": 60.0,
+                    },
+                    {
+                        "concept": "Rev",
+                        "label": "Europe",
+                        "axes": [seg, ("us-gaap:SegmentsAxis", "EuropeMember")],
+                        "value": 40.0,
+                    },
+                ],
+            )
+        }
+    )
+    old_seg = ("us-gaap:ConsolidationItemsAxis", "us-gaap_OperatingSegmentsMember")
+    older = _mock_xbrl(
+        {
+            "income": _filing_df(
+                "2023-09-30 (FY)",
+                [
+                    {"concept": "Rev", "value": 90.0},
+                    {
+                        "concept": "Rev",
+                        "label": "Total segments",
+                        "axes": [old_seg],
+                        "value": 90.0,
+                    },
+                    {
+                        "concept": "Rev",
+                        "label": "Europe",
+                        "axes": [old_seg, ("us-gaap:SegmentsAxis", "EuropeMember")],
+                        "value": 35.0,
+                    },
+                    {
+                        "concept": "Rev",
+                        "label": "Americas",
+                        "axes": [old_seg, ("us-gaap:SegmentsAxis", "AmericasMember")],
+                        "value": 55.0,
+                    },
+                ],
+            )
+        }
+    )
+    xbrls = MagicMock()
+    xbrls.xbrl_list = [newest, older]
+    mock_periods.return_value = [
+        {"xbrl_index": 0, "end_date": "2024-09-28", "period_type": "duration"},
+        {"xbrl_index": 1, "end_date": "2023-09-30", "period_type": "duration"},
+    ]
+
+    df = _build_statement_dataframe(xbrls, "income", max_periods=16)
+
+    segment = "ConsolidationItemsAxis=us-gaap_OperatingSegmentsMember"
+    americas = f"Rev|{segment}|SegmentsAxis=AmericasMember"
+    europe = f"Rev|{segment}|SegmentsAxis=EuropeMember"
+    assert df["row_id"].tolist() == ["Rev", americas, europe, f"Rev|{segment}"]
+    by_id = df.set_index("row_id")
+    periods = ["2024-09-28", "2023-09-30"]
+    assert by_id.loc[americas, periods].tolist() == [60.0, 55.0]
+    assert by_id.loc[europe, periods].tolist() == [40.0, 35.0]
+    assert pd.isna(by_id.loc[f"Rev|{segment}", "2024-09-28"])
+    assert by_id.loc[f"Rev|{segment}", "2023-09-30"] == 90.0
+    assert by_id.loc[americas, "dimension_key"] == (
+        "srt:ConsolidationItemsAxis=us-gaap_OperatingSegmentsMember"
+        "|us-gaap:SegmentsAxis=AmericasMember"
+    )
+    assert pd.isna(by_id.loc["Rev", "dimension_key"])
+    Statement(df, "income")  # unique row ids
+
+
+@patch("src.api.edgartools.source.determine_optimal_periods")
+def test_build_falls_back_to_primary_dimension_when_raw_misaligned(
+    mock_periods: MagicMock,
+) -> None:
+    frame = _filing_df(
+        "2024-09-28 (FY)",
+        [{"concept": "Rev", "axes": [("A", "M"), ("B", "N")], "value": 1.0}],
+    )
+    frame.attrs["raw"] = [{"concept": "Other", "is_dimension": False}]
+    xbrls = MagicMock()
+    xbrls.xbrl_list = [_mock_xbrl({"income": frame})]
+    mock_periods.return_value = [
+        {"xbrl_index": 0, "end_date": "2024-09-28", "period_type": "duration"}
+    ]
+
+    df = _build_statement_dataframe(xbrls, "income", max_periods=16)
+
+    assert df["row_id"].tolist() == ["Rev|A=M"]
 
 
 @patch("src.api.edgartools.source.determine_optimal_periods")
