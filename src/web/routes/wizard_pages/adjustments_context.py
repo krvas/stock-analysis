@@ -40,17 +40,19 @@ def _apply_saved_opex_to_capex_preferences(
     if saved.empty:
         return
 
+    # ``base_concept`` holds a row id (see ``get_row_id``); the column keeps
+    # its historical name. Keys are matched exactly -- no concept fallback.
     for _, pref in saved.iterrows():
-        base_concept = pref["base_concept"]
-        if base_concept is None or (
-            isinstance(base_concept, float) and pd.isna(base_concept)
+        saved_row_id = pref["base_concept"]
+        if saved_row_id is None or (
+            isinstance(saved_row_id, float) and pd.isna(saved_row_id)
         ):
             continue
-        row_id = table.find_row_id(str(base_concept))
+        row_id = table.find_row_id(str(saved_row_id))
         if row_id is None:
             logger.warning(
-                "Skipping opex-to-capex preference for unknown base_concept %r",
-                base_concept,
+                "Skipping opex-to-capex preference for unknown row id %r",
+                saved_row_id,
             )
             continue
         table.set_cell("capitalize", row_id, True)
@@ -63,13 +65,14 @@ def opex_to_capex_context(
 ) -> dict[str, object]:
     income = load_statement_set(ticker, period).income
     df = income.project("detailed", income.periods[:2])
+    # Selection by standard_concept; identity is the ``row_id`` from get_row_id.
     opex = df[df["standard_concept"].isin(OPERATING_EXPENSES)]
     columns = period_column_specs(opex) + OPEX_TO_CAPEX_INPUT_COLUMNS
     table = Table(
         opex,
         columns,
         linked_groups={},
-        row_id_col="standard_concept",
+        row_id_col="row_id",
         level_col="level",
         parent_id_col=None,
     )
