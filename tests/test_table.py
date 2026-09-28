@@ -5,6 +5,7 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
+from src.models.statement import Statement, get_row_id
 from src.models.table import (
     ColumnSpec,
     LinkedGroupSpec,
@@ -12,11 +13,13 @@ from src.models.table import (
     TableSerializationError,
     statement_table_from_dataframe,
 )
+from tests.statement_fixtures import derived_calc_edges
 
 
 def test_table_serialize_statement_shape() -> None:
     df = pd.DataFrame(
         {
+            "row_id": ["c1", "c2"],
             "concept": ["c1", "c2"],
             "label": ["Revenue", "Total revenue"],
             "level": [0, 0],
@@ -34,6 +37,49 @@ def test_table_serialize_statement_shape() -> None:
     assert payload["rows"][0]["id"] == "c1"
     assert payload["rows"][0]["cells"]["2024-12-31"] == 100.0
     assert payload["rows"][1]["is_total"] is True
+
+
+def test_statement_table_keys_rows_by_row_id() -> None:
+    raw = pd.DataFrame(
+        {
+            "concept": ["us-gaap_Revenues", "us-gaap_Revenues", "us-gaap_Revenues"],
+            "label": ["Revenue", "Products", "Services"],
+            "level": [0, 1, 1],
+            "dimension": [False, True, True],
+            "is_breakdown": [False, True, True],
+            "dimension_axis": [
+                None,
+                "srt:ProductOrServiceAxis",
+                "srt:ProductOrServiceAxis",
+            ],
+            "dimension_member": [
+                None,
+                "us-gaap_ProductMember",
+                "us-gaap_ServiceMember",
+            ],
+            "2024-12-31": [100.0, 60.0, 40.0],
+        }
+    )
+    projected = Statement(raw, "income", derived_calc_edges(raw)).project(
+        "detailed", ["2024-12-31"]
+    )
+
+    rows = statement_table_from_dataframe(projected).serialize()["rows"]
+
+    ids = [row["id"] for row in rows]
+    assert ids == [get_row_id(record) for _, record in raw.iterrows()]
+    assert ids == [
+        "us-gaap_Revenues",
+        "us-gaap_Revenues|ProductOrServiceAxis=us-gaap_ProductMember",
+        "us-gaap_Revenues|ProductOrServiceAxis=us-gaap_ServiceMember",
+    ]
+    assert [row["cells"]["2024-12-31"] for row in rows] == [100.0, 60.0, 40.0]
+
+
+def test_statement_table_requires_row_id_column() -> None:
+    df = pd.DataFrame({"concept": ["c1"], "label": ["Revenue"], "2024": [1.0]})
+    with pytest.raises(TableSerializationError, match="row_id_col 'row_id'"):
+        statement_table_from_dataframe(df)
 
 
 def test_table_rejects_unknown_linked_group_column() -> None:
@@ -65,7 +111,7 @@ def test_table_rejects_unknown_linked_group_column() -> None:
         )
 
 
-def test_table_find_row_id_matches_row_id_col_and_standard_concept() -> None:
+def test_table_find_row_id_exact_match_on_row_id_col_only() -> None:
     df = pd.DataFrame(
         {
             "concept": ["us-gaap_ResearchAndDevelopmentExpense"],
@@ -79,20 +125,37 @@ def test_table_find_row_id_matches_row_id_col_and_standard_concept() -> None:
         {},
         row_id_col="concept",
     )
-    # Exact match against row_id_col ("concept").
     assert table.find_row_id("us-gaap_ResearchAndDevelopmentExpense") == (
         "us-gaap_ResearchAndDevelopmentExpense"
     )
-    # Exact match against standard_concept.
+    assert table.find_row_id("  us-gaap_ResearchAndDevelopmentExpense ") == (
+        "us-gaap_ResearchAndDevelopmentExpense"
+    )
+    # Other columns are never consulted, and there is no fuzzy/suffix match.
+    assert table.find_row_id("ResearchAndDevelopmentExpenses") is None
+    assert table.find_row_id("ResearchAndDevelopmentExpense") is None
+    assert table.find_row_id("") is None
+
+
+def test_table_find_row_id_matches_any_row_id_col() -> None:
+    df = pd.DataFrame(
+        {
+            "concept": ["us-gaap_ResearchAndDevelopmentExpense"],
+            "standard_concept": ["ResearchAndDevelopmentExpenses"],
+            "label": ["R&D"],
+        }
+    )
+    table = Table(
+        df,
+        [ColumnSpec(id="x", label="X", kind="input", dtype="string")],
+        {},
+        row_id_col="standard_concept",
+    )
     assert (
         table.find_row_id("ResearchAndDevelopmentExpenses")
-        == "us-gaap_ResearchAndDevelopmentExpense"
+        == "ResearchAndDevelopmentExpenses"
     )
-    # A key that would have matched under the old unscoped suffix heuristic
-    # (it's a suffix of the concept string, but not an exact match against
-    # either row_id_col or standard_concept) must now return None rather
-    # than silently guessing.
-    assert table.find_row_id("ResearchAndDevelopmentExpense") is None
+    assert table.find_row_id("us-gaap_ResearchAndDevelopmentExpense") is None
 
 
 def test_table_set_cell_adds_column_and_updates_row() -> None:
