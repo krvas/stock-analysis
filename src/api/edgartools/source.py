@@ -39,6 +39,7 @@ from src.models.statement import (
     Statement,
     StatementSet,
     StatementType,
+    format_dimension_key,
     get_row_id,
 )
 
@@ -105,12 +106,89 @@ def _column_for_period_date(df: pd.DataFrame, period_date) -> str | None:
     return None
 
 
+# Metadata columns carried per row into the stored frame.
+_STORED_METADATA_COLUMNS: tuple[str, ...] = (
+    *EDGARTOOLS_METADATA_COLUMNS,
+    "dimension_key",
+)
+
+
 def _empty_statement_frame() -> pd.DataFrame:
-    return pd.DataFrame(columns=["row_id", *EDGARTOOLS_METADATA_COLUMNS])
+    return pd.DataFrame(columns=["row_id", *_STORED_METADATA_COLUMNS])
+
+
+def _text(value: object) -> str:
+    return "" if value is None or pd.isna(value) else str(value)
+
+
+def _raw_item_matches(item: dict, record: dict) -> bool:
+    """Whether raw-data ``item`` is the source of ``to_dataframe`` ``record``."""
+    if item.get("concept") != record.get("concept"):
+        return False
+    is_dimension = bool(item.get("is_dimension"))
+    if is_dimension != bool(record.get("dimension")):
+        return False
+    if not is_dimension:
+        return True
+    metadata = item.get("dimension_metadata") or []
+    primary = metadata[0] if metadata else {}
+    return (
+        _text(item.get("full_dimension_label")) == _text(record.get("dimension_label"))
+        and _text(primary.get("dimension")) == _text(record.get("dimension_axis"))
+        and _text(primary.get("member")) == _text(record.get("dimension_member"))
+    )
+
+
+def _dimension_keys(statement, frame: pd.DataFrame) -> list[str | None] | None:
+    """Full ``dimension_key`` per row of ``frame`` (see ``statement.py``).
+
+    ``to_dataframe`` exposes only the primary axis/member of a multi-axis row;
+    every pair is in ``get_raw_data()``'s ``dimension_metadata``. edgartools
+    builds the frame from that raw data in order, dropping only XBRL
+    structural items (axes, domains, tables, root abstracts), so the frame is
+    an ordered subsequence of it: match greedily, checking concept and the
+    frame's own dimension columns. Returns ``None`` (caller falls back to the
+    primary pair) if any frame row cannot be matched.
+    """
+    try:
+        raw = list(statement.get_raw_data(view="detailed"))
+    except Exception:  # noqa: BLE001 - edgartools raises assorted errors
+        logger.warning("get_raw_data failed; using primary dimension only")
+        return None
+
+    keys: list[str | None] = []
+    position = 0
+    for record in frame.to_dict(orient="records"):
+        while position < len(raw) and not _raw_item_matches(raw[position], record):
+            position += 1
+        if position == len(raw):
+            logger.warning(
+                "Could not align raw data with to_dataframe row %r; "
+                "using primary dimension only",
+                record.get("concept"),
+            )
+            return None
+        item = raw[position]
+        position += 1
+        if not item.get("is_dimension"):
+            keys.append(None)
+            continue
+        keys.append(
+            format_dimension_key(
+                [
+                    (meta.get("dimension"), meta.get("member"))
+                    for meta in item.get("dimension_metadata") or []
+                ]
+            )
+        )
+    return keys
 
 
 def _filing_frame(xbrl, statement_type: StatementType) -> pd.DataFrame | None:
-    """One raw (``presentation=False``) detailed frame for one filing."""
+    """One raw (``presentation=False``) detailed frame for one filing.
+
+    Adds our ``dimension_key`` column (all axis/member pairs per row).
+    """
     getter = getattr(xbrl.statements, _STATEMENT_METHODS[statement_type])
     statement = getter(view="detailed")
     if statement is None:
@@ -118,6 +196,9 @@ def _filing_frame(xbrl, statement_type: StatementType) -> pd.DataFrame | None:
     frame = statement.to_dataframe(view="detailed", presentation=False)
     if not isinstance(frame, pd.DataFrame) or frame.empty:
         return None
+    frame = frame.copy()
+    keys = _dimension_keys(statement, frame)
+    frame["dimension_key"] = keys if keys is not None else None
     return frame
 
 
@@ -133,9 +214,10 @@ def _build_statement_dataframe(
     (``determine_optimal_periods``, newest period first) and read each
     filing's own detailed frame, taking the column for that filing's period.
 
-    Rows are matched across filings by :func:`get_row_id`, with the 1-based
-    occurrence of that id within the filing (so e.g. cash beginning/end of
-    period, which share a concept, stay separate rows). Metadata comes from
+    Rows are matched across filings by :func:`get_row_id` (concept plus every
+    axis/member, from ``dimension_key``), with the 1-based occurrence of that
+    id within the filing (so e.g. cash beginning/end of period, which share a
+    concept, stay separate rows). Metadata comes from
     the newest filing a row appears in (first seen wins); rows only in older
     filings are appended after it. Values keep raw XBRL signs.
     """
@@ -174,7 +256,7 @@ def _build_statement_dataframe(
 
             if row_id not in rows_by_id:
                 rows_by_id[row_id] = {
-                    col: record.get(col) for col in EDGARTOOLS_METADATA_COLUMNS
+                    col: record.get(col) for col in _STORED_METADATA_COLUMNS
                 }
                 level = record.get("level")
                 rows_by_id[row_id]["level"] = 0 if pd.isna(level) else int(level)
@@ -191,7 +273,7 @@ def _build_statement_dataframe(
 
     row_ids = list(rows_by_id)
     data: dict[str, list] = {"row_id": row_ids}
-    for col in EDGARTOOLS_METADATA_COLUMNS:
+    for col in _STORED_METADATA_COLUMNS:
         data[col] = [rows_by_id[row_id][col] for row_id in row_ids]
     for period_label in dict.fromkeys(period_labels):
         # Numeric only: a stray text fact (edgartools keeps TextBlock values as

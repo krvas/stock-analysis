@@ -97,6 +97,9 @@ edgartools ──(cache build, once)──► parquet: 3 Statement frames per (c
   - `tags` (e.g. `{"da"}`)
   - `origin` (`reported` | `adjustment:<type>`)
   - `is_total` (existing label heuristic)
+  - `dimension_key` (derived edgartools metadata: every `axis=member` QName pair
+    of a dimensional row, from `get_raw_data()`'s `dimension_metadata`;
+    `to_dataframe` only exposes the primary pair)
 - No per-statement subclasses. `statement_type` is an attribute.
 - Methods:
   - `find(concept=… | standard_concept=…)`
@@ -106,8 +109,10 @@ edgartools ──(cache build, once)──► parquet: 3 Statement frames per (c
   - `project(view, periods) -> DataFrame`, which applies `preferred_sign` for
     display
 - **Unified row id.** `get_row_id(row) -> str` in `src/models/statement.py` is the
-  *only* place ids are formed: `concept`, plus the dimension axis/member for
-  dimensional rows.
+  *only* place ids are formed: `concept`, plus every `axis=member` pair for
+  dimensional rows (sorted by axis; axis namespace prefix stripped, member
+  QName kept). A `#n` suffix disambiguates genuine repeats within one filing
+  (e.g. cash at beginning/end of period).
   - Every consumer calls it: cache build, `Table` `row_id_col`, wizard builders,
     POST handlers, and `find_row_id`.
   - A test asserts uniqueness per statement.

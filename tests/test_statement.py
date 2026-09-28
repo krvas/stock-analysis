@@ -12,6 +12,7 @@ from src.models.statement import (
     DuplicateRowIdError,
     Statement,
     StatementSet,
+    format_dimension_key,
     get_row_id,
     is_total_label,
 )
@@ -106,6 +107,8 @@ def _income_frame() -> pd.DataFrame:
             **{P1: 60.0, P2: 55.0, P3: 50.0},
         ),
     ]
+    for row in rows[1:]:
+        row["parent_abstract_concept"] = "IncomeStatementAbstract"
     return pd.DataFrame(rows)
 
 
@@ -145,6 +148,66 @@ def test_get_row_id_treats_missing_dimension_fields_as_absent(missing) -> None:
 def test_get_row_id_requires_concept() -> None:
     with pytest.raises(ValueError):
         get_row_id({"concept": None})
+
+
+def test_get_row_id_uses_every_axis_from_dimension_key_sorted_by_axis() -> None:
+    row = {
+        "concept": "Rev",
+        "dimension_axis": "srt:ConsolidationItemsAxis",
+        "dimension_member": "us-gaap_OperatingSegmentsMember",
+        "dimension_key": format_dimension_key(
+            [
+                ("srt:ConsolidationItemsAxis", "us-gaap_OperatingSegmentsMember"),
+                ("us-gaap:StatementBusinessSegmentsAxis", "aapl_AmericasMember"),
+            ]
+        ),
+    }
+    other = {
+        **row,
+        "dimension_key": format_dimension_key(
+            [
+                ("srt:ConsolidationItemsAxis", "us-gaap_OperatingSegmentsMember"),
+                ("us-gaap:StatementBusinessSegmentsAxis", "aapl_EuropeMember"),
+            ]
+        ),
+    }
+    assert get_row_id(row) == (
+        "Rev|ConsolidationItemsAxis=us-gaap_OperatingSegmentsMember"
+        "|StatementBusinessSegmentsAxis=aapl_AmericasMember"
+    )
+    assert get_row_id(row) != get_row_id(other)
+    reordered = {
+        **row,
+        "dimension_key": format_dimension_key(
+            [
+                ("us-gaap:StatementBusinessSegmentsAxis", "aapl_AmericasMember"),
+                ("srt:ConsolidationItemsAxis", "us-gaap_OperatingSegmentsMember"),
+            ]
+        ),
+    }
+    assert get_row_id(reordered) == get_row_id(row)
+
+
+def test_get_row_id_strips_axis_namespace_but_not_member() -> None:
+    old = {
+        "concept": "Rev",
+        "dimension_axis": "us-gaap:ConsolidationItemsAxis",
+        "dimension_member": "us-gaap_CorporateNonSegmentMember",
+    }
+    new = {**old, "dimension_axis": "srt:ConsolidationItemsAxis"}
+    underscore = {**old, "dimension_axis": "srt_ConsolidationItemsAxis"}
+    expected = "Rev|ConsolidationItemsAxis=us-gaap_CorporateNonSegmentMember"
+    assert get_row_id(old) == get_row_id(new) == get_row_id(underscore) == expected
+    assert get_row_id({**old, "dimension_member": "srt_CorporateNonSegmentMember"}) != (
+        expected
+    )
+
+
+def test_get_row_id_single_axis_key_matches_primary_fallback() -> None:
+    row = {"concept": "Rev", "dimension_axis": "srt:A", "dimension_member": "x_M"}
+    keyed = {**row, "dimension_key": format_dimension_key([("srt:A", "x_M")])}
+    assert get_row_id(row) == get_row_id(keyed) == "Rev|A=x_M"
+    assert format_dimension_key([]) is None
 
 
 def test_get_row_id_occurrence_suffix() -> None:
@@ -266,7 +329,53 @@ def test_project_slices_periods_and_drops_empty_rows() -> None:
     ids = out["row_id"].tolist()
     assert "ResearchAndDevelopmentExpense" not in ids  # only has P1
     assert "SellingGeneralAndAdministrativeExpense" in ids
-    assert "IncomeStatementAbstract" in ids  # abstract rows kept as-is
+    assert "IncomeStatementAbstract" in ids  # has kept descendants
+
+
+def test_project_keeps_only_abstracts_with_kept_descendants() -> None:
+    rows = [
+        _row("Top", "Top", abstract=True, level=0),
+        _row("Section", "Section", abstract=True, parent_abstract_concept="Top"),
+        _row("Leaf", "Leaf", parent_abstract_concept="Section", **{P1: 1.0}),
+        _row("Empty", "Empty", abstract=True, parent_abstract_concept="Top"),
+        _row("Dead", "Dead", parent_abstract_concept="Empty", **{P2: 2.0}),
+        _row("Orphan", "Orphan header", abstract=True),
+    ]
+    statement = Statement(pd.DataFrame(rows), "income")
+
+    # Nested ancestors of a kept row survive; headers over empty rows do not.
+    assert statement.project("detailed", periods=[P1])["row_id"].tolist() == [
+        "Top",
+        "Section",
+        "Leaf",
+    ]
+    assert statement.project("detailed", periods=[P2])["row_id"].tolist() == [
+        "Top",
+        "Empty",
+        "Dead",
+    ]
+
+
+def test_project_drops_abstract_whose_only_descendants_are_filtered_by_view() -> None:
+    rows = [
+        _row("Geo", "By geography", abstract=True),
+        _row(
+            "Rev",
+            "US",
+            dimension=True,
+            is_breakdown=True,
+            dimension_axis="GeoAxis",
+            dimension_member="US",
+            parent_abstract_concept="Geo",
+            **{P1: 1.0},
+        ),
+    ]
+    statement = Statement(pd.DataFrame(rows), "income")
+    assert statement.project("summary").empty
+    assert statement.project("detailed")["row_id"].tolist() == [
+        "Geo",
+        "Rev|GeoAxis=US",
+    ]
 
 
 def test_project_unknown_period_raises() -> None:

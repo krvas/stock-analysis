@@ -44,7 +44,7 @@ PeriodType = Literal["annual", "quarterly"]
 PeriodBundle = dict[StatementType, pd.DataFrame]
 
 # Bump when the on-disk bundle shape changes; mismatched bundles are rebuilt.
-CACHE_SCHEMA_VERSION = 2
+CACHE_SCHEMA_VERSION = 3
 
 _INDEX_FILENAME = "company_lru.json"
 _LEGACY_BUNDLE_DIR_RE = re.compile(r"^(annual|quarterly)_\d+$")
