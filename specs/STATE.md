@@ -1,6 +1,7 @@
 # STATE.md
 
 What exists today (not vision). Product intent: `specs/vision.md`.
+Planned adjustments/statement-model redesign (not yet implemented): `specs/adjustments_architecture.md`.
 Audience: planning and coding agents — prefer this file over guessing layout.
 
 Python 3.12, pandas, FastAPI + Jinja SSR, vanilla JS (no frontend libs). Local
