@@ -2,7 +2,8 @@
 
 What exists today (not vision). Product intent: `specs/vision.md`.
 Adjustments/statement-model redesign: `specs/adjustments_architecture.md` —
-phase 1 (cache + `Statement`) implemented; phases 2–5 not.
+phases 1–2 (cache + `Statement`; row-id unification) implemented; phases
+3–5 (adjustment engine, opex-to-capex type, consumers) not.
 Audience: planning and coding agents — prefer this file over guessing layout.
 
 Python 3.12, pandas, FastAPI + Jinja SSR, vanilla JS (no frontend libs). Local
@@ -14,7 +15,7 @@ single-user; no auth. Keep UI simple while building features.
 | --- | --- | --- |
 | Vendor ingest | IndianAPI / Alpha Vantage / Finnhub → schema-shaped DataFrames | `data/duckdb/indian_stocks.duckdb` |
 | EDGAR viewer | US 10-K/10-Q, 3 statements × `summary\|standard\|detailed` | parquet under `data/edgartools_cache/` |
-| Wizard (active work) | Per-ticker pages/sub-pages; user processing choices | `data/duckdb/wizard.duckdb` (prefs; UI not wired) |
+| Wizard (active work) | Per-ticker pages/sub-pages; user processing choices | `data/duckdb/wizard.duckdb` (prefs; opex-to-capex only) |
 
 They do not share data. Standardized DuckDB is easy to query across companies
 but loses XBRL detail; edgartools keeps full line items but is not
@@ -42,7 +43,7 @@ src/pipelines/             CLIs (load_from_names, calc_residual_report,
                            convert_adjustment_pref_keys)
 src/database/              schema.sql + tables.py; wizard.sql + wizard_tables.py
                            manager.py (BaseDatabaseManager, DatabaseManager)
-                           wizard_manager.py, adjustments.py
+                           wizard_manager.py (WizardDatabaseManager: prefs I/O)
 src/models/statement.py    Statement / StatementSet / get_row_id / calc_residuals
                            (pure domain: pandas only, no I/O)
 src/models/table.py        Table / ColumnSpec / LinkedGroupSpec  (FE↔BE contract)
@@ -50,7 +51,8 @@ src/models/edgartools/html_renderer.py   DataFrames → Table.serialize() payloa
 src/web/app.py             FastAPI; / → {statements, wizard, screener, docs}
 src/web/wizard_registry.py page/sub-page identity (only place)
 src/web/routes/            statements.py, wizard.py, screener.py
-src/web/routes/wizard_pages/  context builders (adjustments.py)
+src/web/routes/wizard_pages/  adjustments_context.py (builder),
+                           adjustments_post.py (POST handler)
 src/templates/wizard/      landing, base_subpage, _nav, not_implemented,
                            {page}/{subpage}.html
 src/templates/macros/line_item_table.html
@@ -66,7 +68,8 @@ tests/                     pytest; no HTTP/route tests
 ## 3. Hard rules
 
 - `src/api/` returns DataFrames. Vendor writes only via `DatabaseManager`.
-  Wizard prefs only via `WizardDatabaseManager` / `adjustments.py`.
+  Wizard prefs only via `WizardDatabaseManager` (`wizard_manager.py`).
+- Row ids only via `get_row_id` (§4); never re-derive ids elsewhere.
 - Schema truth: `schema.sql` / `wizard.sql`; Python mirrors must change with them.
 - Config only in `src/config.py`. Routers in `src/web/routes/`, registered in
   `routes/__init__.py`. Templates extend `base.html`; pass `active_nav`.
@@ -122,9 +125,11 @@ over `periods[:num_periods]`. Payload is nested Table JSON;
 `statement_view.js` toggles type/level and balance-sheet fund-flow
 client-side.
 
-`get_row_id` (only place ids are formed): `concept`, plus
-`|Axis=member` for every axis of a dimensional row (sorted by axis, axis
-prefix stripped, member QName kept), `#n` for repeats within one filing.
+`get_row_id` (`statement.py`; only place ids are formed): `concept`, plus
+`|Axis=member` for every axis of a dimensional row (axis local name, sorted;
+member QName kept), `#n` (n ≥ 2) for repeats within one filing. Stored in the
+cache's `row_id` column; `Table` rows (§5) and opex-to-capex pref keys use it
+verbatim.
 `calc_residuals(statement)`: `reported(parent) − Σ weight·child` over
 non-dimensional calc children (raw signs); `calc_residual_report` CLI runs it
 over the cache (read-only).
@@ -154,7 +159,10 @@ builder: `load_statement_set(...).income.project("detailed")` over the newest
 and is stored verbatim in `adjustment_preferences.base_concept` (column name
 kept); prefill matches it exactly via `find_row_id`.
 Legacy prefs keyed by `standard_concept`/`concept` are re-keyed to row ids
-by the one-off, idempotent `convert_adjustment_pref_keys` CLI. Saves: POSTs
+by the one-off `convert_adjustment_pref_keys` CLI (`--dry-run`; reads each
+ticker's `Statement`; skips keys already row ids; ambiguous/conflicting keys
+logged and left; writes via
+`WizardDatabaseManager.rename_adjustment_preference_keys`). Saves: POSTs
 to `/wizard/{ticker}/{page_slug}/{subpage_slug}` →
 `wizard_pages/adjustments_post.py::opex_to_capex_post` →
 `WizardDatabaseManager.upsert_adjustment_preferences` (writes
@@ -164,7 +172,8 @@ to `/wizard/{ticker}/{page_slug}/{subpage_slug}` →
 No restatement (prefs only, not applied to displayed numbers).
 
 **wizard.duckdb** `adjustment_preferences`: PK `adjustment_id`, unique
-`(ticker, exchange, adjustment_type, base_concept)`. Types intended:
+`(ticker, exchange, adjustment_type, base_concept)`; `base_concept` holds a
+row id (name predates row ids). Types intended:
 `opex_to_capex` | `maintenance_capex` | `assets_in_use`; `value` is years or
 %. Tested; written/read by `adjustments_post.py` / `adjustments_context.py`
 for `opex_to_capex` — other adjustment types still unused by routes.
@@ -251,12 +260,13 @@ Working: vendor DuckDB + IndianAPI/AlphaVantage; edgartools fetch/cache;
 `/statements`; wizard shell + opex table; Table used by statements + opex;
 `TableModel` + `linked_groups` + view slots + `GenericInput` subscriptions in
 `table_wiring.js` wired for opex-to-capex (receive, render, live edits,
-linked-group math); prefs store (no UI).
+linked-group math); prefs store (opex-to-capex save/prefill).
 
 Partial: opex (save/prefill for `adjustments/opex-to-capex` only; no
 restatement); Finnhub; `load_to_database.py`.
 
-NYI: every other wizard sub-page; wizard UI ↔ DuckDB; screener; analytics;
+NYI: every other wizard sub-page; adjustment engine / restatement
+(design phases 3–5); screener; analytics;
 finfetch.
 
 Tests cover clients, DBs, edgartools, Table, wizard DB. No web tests. Cache

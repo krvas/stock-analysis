@@ -1,6 +1,7 @@
 # Adjustments architecture
 
-Status: design approved; phase 1 (cache + `Statement`, §10) implemented, phases 2–5 not.
+Status: design approved; phases 1–2 (cache + `Statement`, row-id unification;
+§10) implemented, phases 3–5 (engine) not.
 Open tensions in §9 are unresolved.
 
 ## 1. Context
