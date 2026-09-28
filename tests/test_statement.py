@@ -241,7 +241,36 @@ def test_constructor_fills_added_columns_without_mutating_input() -> None:
     assert all(tags == () for tags in df["tags"])
     assert df.loc[df["concept"] == "GrossProfit", "is_total"].item()
     assert not df.loc[df["concept"] == "Revenues", "is_total"].iloc[0]
+    # in_standard defaults to "not dimension or not is_breakdown".
+    assert df["in_standard"].tolist() == [
+        True,
+        True,
+        True,
+        False,
+        True,
+        True,
+        True,
+        True,
+    ]
     assert statement.periods == [P1, P2, P3]
+
+
+def test_constructor_fills_missing_in_standard_cells_with_default() -> None:
+    frame = _income_frame()
+    frame["in_standard"] = [True, True, False, None, None, True, True, True]
+    df = Statement(frame, "income").frame
+    assert df["in_standard"].dtype == bool
+    # Stored flags win; missing cells get the default (US is a breakdown).
+    assert df["in_standard"].tolist() == [
+        True,
+        True,
+        False,
+        False,
+        True,
+        True,
+        True,
+        True,
+    ]
 
 
 def test_constructor_normalizes_parquet_style_tags() -> None:
@@ -304,6 +333,17 @@ def test_project_standard_keeps_non_breakdown_dimensions() -> None:
     ids = _income().project("standard")["row_id"].tolist()
     assert "Revenues|ProductOrServiceAxis=ProductMember" in ids
     assert "Revenues|StatementGeographicalAxis=US" not in ids
+
+
+def test_project_standard_filters_on_stored_in_standard() -> None:
+    """A non-breakdown dimensional row whose member edgartools' standard view
+    drops (``in_standard`` False) is hidden in standard, shown in detailed."""
+    frame = _income_frame()
+    frame["in_standard"] = [True, True, False, False, True, True, True, True]
+    statement = Statement(frame, "income")
+    product = "Revenues|ProductOrServiceAxis=ProductMember"
+    assert product not in statement.project("standard")["row_id"].tolist()
+    assert product in statement.project("detailed")["row_id"].tolist()
 
 
 def test_project_detailed_keeps_all_rows_with_values() -> None:
@@ -413,6 +453,8 @@ def test_insert_returns_new_statement_after_row() -> None:
     inserted = new.frame.loc[new.frame["row_id"] == "DepreciationRnD"].iloc[0]
     assert inserted["origin"] == "adjustment:opex_to_capex"
     assert inserted["tags"] == ("da",)
+    assert inserted["in_standard"]  # non-dimensional inserted rows default to True
+    assert "DepreciationRnD" in new.project("standard")["row_id"].tolist()
     assert inserted[P1] == 2.0
     assert math.isnan(inserted[P2])
 

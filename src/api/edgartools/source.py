@@ -13,6 +13,7 @@ import os
 from datetime import date
 from typing import Literal
 
+import numpy as np
 import pandas as pd
 from edgar import Company
 from edgar.xbrl import XBRLS
@@ -39,6 +40,7 @@ from src.models.statement import (
     Statement,
     StatementSet,
     StatementType,
+    dimension_pairs,
     format_dimension_key,
     get_row_id,
 )
@@ -110,6 +112,7 @@ def _column_for_period_date(df: pd.DataFrame, period_date) -> str | None:
 _STORED_METADATA_COLUMNS: tuple[str, ...] = (
     *EDGARTOOLS_METADATA_COLUMNS,
     "dimension_key",
+    "in_standard",
 )
 
 
@@ -184,10 +187,80 @@ def _dimension_keys(statement, frame: pd.DataFrame) -> list[str | None] | None:
     return keys
 
 
+def _standard_valid_members(xbrl, statement) -> dict[str, set[str]]:
+    """Axis -> members edgartools' standard view allows for ``statement``.
+
+    Replicates edgartools 5.47 ``XBRL.get_statement``: it resolves the
+    statement's role with ``XBRL.find_statement`` and passes
+    ``XBRL._get_valid_dimensional_members(presentation_tree)`` (private API —
+    re-check on edgartools upgrades) to ``_generate_line_items``, which for any
+    view but detailed drops dimensional facts whose member is not listed for
+    their axis. Keys/members are underscore-normalised QNames. ``{}`` (no
+    filtering, as in edgartools) when the role/tree cannot be resolved.
+    """
+    try:
+        statement_id = statement.canonical_type or statement.role_or_type
+        _, role, _ = xbrl.find_statement(statement_id)
+        trees = xbrl.presentation_trees
+        if not role or role not in trees:
+            return {}
+        return dict(xbrl._get_valid_dimensional_members(trees[role]))
+    except Exception:  # noqa: BLE001 - edgartools raises assorted errors
+        logger.warning("Could not read presentation members; in_standard unfiltered")
+        return {}
+
+
+def _passes_member_filter(
+    pairs: list[tuple[str, str]], valid_members: dict[str, set[str]]
+) -> bool:
+    """edgartools' strict standard-view member check for one dimensional row.
+
+    Mirrors the ``is_valid_dimension`` loop in edgartools 5.47
+    ``XBRL._generate_line_items``: a fact is dropped if **any** of its axes is
+    in ``valid_members`` with a member not listed for it; axes absent from
+    ``valid_members`` never exclude. Facts of one row share all axis/member
+    pairs, so the check is per row.
+    """
+    for axis, member in pairs:
+        axis_key = str(axis).replace(":", "_")
+        member_key = str(member).replace(":", "_")
+        if axis_key in valid_members and member_key not in valid_members[axis_key]:
+            return False
+    return True
+
+
+def _is_true(value: object) -> bool:
+    return isinstance(value, bool | np.bool_) and bool(value)
+
+
+def _in_standard(frame: pd.DataFrame, valid_members: dict[str, set[str]]) -> list:
+    """Whether edgartools' ``view="standard"`` keeps each row of ``frame``.
+
+    ``Statement._build_dataframe_from_raw_data`` keeps every non-dimensional
+    item and drops dimensional items where ``is_breakdown`` (same per-item
+    value as the detailed frame's column); ``get_statement`` has already
+    dropped dimensional facts failing the member filter. So a row is in
+    standard iff it is non-dimensional, or it is not a breakdown and passes
+    :func:`_passes_member_filter` on all of its axis/member pairs.
+    """
+    flags = []
+    for record in frame.to_dict(orient="records"):
+        if not _is_true(record.get("dimension")):
+            flags.append(True)
+            continue
+        flags.append(
+            not _is_true(record.get("is_breakdown"))
+            and _passes_member_filter(dimension_pairs(record), valid_members)
+        )
+    return flags
+
+
 def _filing_frame(xbrl, statement_type: StatementType) -> pd.DataFrame | None:
     """One raw (``presentation=False``) detailed frame for one filing.
 
-    Adds our ``dimension_key`` column (all axis/member pairs per row).
+    Adds our ``dimension_key`` column (all axis/member pairs per row) and
+    ``in_standard`` (edgartools' standard-view membership, see
+    :func:`_in_standard`) without a second ``to_dataframe`` call.
     """
     getter = getattr(xbrl.statements, _STATEMENT_METHODS[statement_type])
     statement = getter(view="detailed")
@@ -199,6 +272,7 @@ def _filing_frame(xbrl, statement_type: StatementType) -> pd.DataFrame | None:
     frame = frame.copy()
     keys = _dimension_keys(statement, frame)
     frame["dimension_key"] = keys if keys is not None else None
+    frame["in_standard"] = _in_standard(frame, _standard_valid_members(xbrl, statement))
     return frame
 
 
@@ -217,8 +291,8 @@ def _build_statement_dataframe(
     Rows are matched across filings by :func:`get_row_id` (concept plus every
     axis/member, from ``dimension_key``), with the 1-based occurrence of that
     id within the filing (so e.g. cash beginning/end of period, which share a
-    concept, stay separate rows). Metadata comes from
-    the newest filing a row appears in (first seen wins); rows only in older
+    concept, stay separate rows). Metadata (including ``in_standard``) comes
+    from the newest filing a row appears in (first seen wins); rows only in older
     filings are appended after it. Values keep raw XBRL signs.
     """
     period_metas = determine_optimal_periods(

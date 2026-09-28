@@ -2,7 +2,8 @@
 
 A :class:`Statement` wraps one statement's frame whose columns are exactly
 edgartools' ``to_dataframe`` metadata columns (same names) plus a few columns we
-add (``row_id``, ``tags``, ``origin``, ``is_total``, ``dimension_key``); every
+add (``row_id``, ``tags``, ``origin``, ``is_total``, ``dimension_key``,
+``in_standard``); every
 other column is a period column (ISO date string, newest first). Values are
 stored with **raw** XBRL signs; ``preferred_sign`` is applied only in
 :meth:`Statement.project`.
@@ -54,12 +55,21 @@ EDGARTOOLS_METADATA_COLUMNS: tuple[str, ...] = (
 # *primary* pair in ``dimension_axis`` / ``dimension_member``. The cache builder
 # fills it from ``Statement.get_raw_data``'s ``dimension_metadata``; frames
 # without it (e.g. inserted rows) fall back to the primary pair.
+#
+# ``in_standard`` is whether edgartools' ``view="standard"`` keeps the row. It is
+# not derivable from ``dimension`` / ``is_breakdown`` alone: standard also drops
+# dimensional rows whose axis member is not in the statement's presentation
+# linkbase (a filter ``view="detailed"`` skips). The cache builder computes it
+# per filing; like other metadata it comes from the newest filing the row
+# appears in. Rows without it (e.g. inserted rows) default to
+# ``not dimension or not is_breakdown`` (see :func:`_default_in_standard`).
 ADDED_COLUMNS: tuple[str, ...] = (
     "row_id",
     "tags",
     "origin",
     "is_total",
     "dimension_key",
+    "in_standard",
 )
 
 STATEMENT_METADATA_COLUMNS: frozenset[str] = frozenset(
@@ -154,7 +164,10 @@ def _axis_local_name(axis: str) -> str:
     return axis
 
 
-def _dimension_pairs(row: Mapping[str, Any] | pd.Series) -> list[tuple[str, str]]:
+def dimension_pairs(row: Mapping[str, Any] | pd.Series) -> list[tuple[str, str]]:
+    """All ``(axis, member)`` pairs of a row: from ``dimension_key`` when present,
+    else the primary ``dimension_axis`` / ``dimension_member``; ``[]`` if none.
+    """
     key = _clean_str(row.get("dimension_key"))
     if key is not None:
         return _parse_dimension_key(key)
@@ -196,7 +209,7 @@ def get_row_id(row: Mapping[str, Any] | pd.Series, *, occurrence: int = 1) -> st
     if concept is None:
         raise ValueError("cannot form a row id for a row without a concept")
     pairs = sorted(
-        (_axis_local_name(axis), member) for axis, member in _dimension_pairs(row)
+        (_axis_local_name(axis), member) for axis, member in dimension_pairs(row)
     )
     base = _DIMENSION_PAIR_SEPARATOR.join(
         [concept, *(f"{axis}={member}" for axis, member in pairs)]
@@ -223,6 +236,14 @@ def _bool_flag(frame: pd.DataFrame, column: str) -> pd.Series:
     if column not in frame.columns:
         return pd.Series(False, index=frame.index)
     return frame[column].eq(True)
+
+
+def _default_in_standard(frame: pd.DataFrame) -> pd.Series:
+    """``in_standard`` for rows that lack it: non-dimensional rows are in the
+    standard view; dimensional rows are unless ``is_breakdown`` (edgartools'
+    member filter can't be evaluated without the filing's presentation tree).
+    """
+    return ~_bool_flag(frame, "dimension") | ~_bool_flag(frame, "is_breakdown")
 
 
 def _presentation_ancestors(df: pd.DataFrame, rows: pd.Series) -> set[str]:
@@ -289,6 +310,16 @@ class Statement:
         if "is_total" not in df.columns:
             labels = df["label"] if "label" in df.columns else [None] * len(df)
             df["is_total"] = [is_total_label(label) for label in labels]
+        default_in_standard = _default_in_standard(df)
+        if "in_standard" not in df.columns:
+            df["in_standard"] = default_in_standard
+        else:
+            flag = df["in_standard"]
+            df["in_standard"] = (
+                flag.astype(object)
+                .where(flag.notna(), default_in_standard)
+                .astype(bool)
+            )
 
         _check_unique_row_ids(df["row_id"])
 
@@ -405,8 +436,9 @@ class Statement:
         """Display frame for ``view`` over ``periods`` (None = all).
 
         Row filter uses edgartools' own flags: ``summary`` drops dimensional
-        rows; ``standard`` also keeps dimensional rows that are not breakdowns;
-        ``detailed`` keeps everything. Values are multiplied by
+        rows; ``standard`` keeps rows flagged ``in_standard`` (edgartools'
+        standard-view membership, stored at cache build); ``detailed`` keeps
+        everything. Values are multiplied by
         ``preferred_sign`` where it is -1 (edgartools encodes it as ±1 floats,
         NaN/None when the presentation linkbase gives no preferred label —
         treated as +1). Non-abstract rows with no value in the requested
@@ -429,7 +461,7 @@ class Statement:
         if view == "summary":
             view_mask = ~dimension
         elif view == "standard":
-            view_mask = ~dimension | ~_bool_flag(df, "is_breakdown")
+            view_mask = _bool_flag(df, "in_standard")
         else:
             view_mask = pd.Series(True, index=df.index)
 
