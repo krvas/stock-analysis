@@ -62,13 +62,17 @@ Then open:
 - Screener placeholder: `http://127.0.0.1:8000/screener`
 - API docs: `http://127.0.0.1:8000/docs`
 
-SEC identity for edgartools uses `EDGAR_IDENTITY` from `.env`. Computed statement
-views are cached under `data/edgartools_cache/companies/{cik}/{period}_{num_periods}/`
-as a bundle covering income, balance, and cashflow together. The app keeps the
-`EDGARTOOLS_COMPANY_CACHE_SIZE` most recently viewed companies (default 10) and
-deletes older company caches automatically. Bundles older than
-`EDGARTOOLS_CACHE_MAX_AGE_MONTHS` (default 3) by latest filing date are
-refetched. Override sizes via those env vars when storage or freshness needs
+SEC identity for edgartools uses `EDGAR_IDENTITY` from `.env`. Each company's
+raw detailed statements are cached under
+`data/edgartools_cache/companies/{cik}/{period}/` (`income.parquet`,
+`balance.parquet`, `cashflow.parquet`, `meta.json`), covering up to
+`MAX_CACHE_YEARS` (default 16) years; every `num_periods` and view is served
+from that one bundle. The app keeps the `EDGARTOOLS_COMPANY_CACHE_SIZE` most
+recently viewed companies (default 10) and deletes older company caches
+automatically. Bundles whose latest filing is older than
+`EDGARTOOLS_ANNUAL_CACHE_MAX_AGE_MONTHS` (default 12) or
+`EDGARTOOLS_QUARTERLY_CACHE_MAX_AGE_MONTHS` (default 3) are refetched. Override
+sizes via those env vars when storage or freshness needs
 differ. Filings are fetched directly from the SEC on cache miss.
 
 ### DatabaseManager

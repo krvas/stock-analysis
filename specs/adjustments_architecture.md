@@ -1,6 +1,7 @@
 # Adjustments architecture
 
-Status: design approved, not implemented. Open tensions in §9 are unresolved.
+Status: design approved; phase 1 (cache + `Statement`, §10) implemented, phases 2–5 not.
+Open tensions in §9 are unresolved.
 
 ## 1. Context
 
