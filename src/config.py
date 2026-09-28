@@ -49,6 +49,11 @@ EDGARTOOLS_ANNUAL_CACHE_MAX_AGE_MONTHS = max(
     1,
     int(os.environ.get("EDGARTOOLS_ANNUAL_CACHE_MAX_AGE_MONTHS", "12")),
 )
+# Years of filing history cached per company: annual bundles hold up to this
+# many 10-Ks, quarterly bundles up to 4x as many 10-Qs. Requests slice the
+# periods they need from the cached bundle.
+MAX_CACHE_YEARS = max(1, int(os.environ.get("MAX_CACHE_YEARS", "16")))
+MAX_CACHE_QUARTERS = MAX_CACHE_YEARS * 4
 
 # Logging
 LOG_DIR = PROJECT_ROOT / "logs"

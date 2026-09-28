@@ -147,6 +147,15 @@ def test_get_row_id_requires_concept() -> None:
         get_row_id({"concept": None})
 
 
+def test_get_row_id_occurrence_suffix() -> None:
+    row = {"concept": "Cash", "dimension_axis": "A", "dimension_member": "M"}
+    assert get_row_id({"concept": "Cash"}, occurrence=1) == "Cash"
+    assert get_row_id({"concept": "Cash"}, occurrence=2) == "Cash#2"
+    assert get_row_id(row, occurrence=3) == "Cash|A=M#3"
+    with pytest.raises(ValueError):
+        get_row_id({"concept": "Cash"}, occurrence=0)
+
+
 def test_is_total_label() -> None:
     assert is_total_label("Total assets")
     assert is_total_label("Assets, TOTAL")

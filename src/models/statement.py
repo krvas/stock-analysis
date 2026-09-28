@@ -99,7 +99,7 @@ def _clean_str(value: object) -> str | None:
     return text or None
 
 
-def get_row_id(row: Mapping[str, Any] | pd.Series) -> str:
+def get_row_id(row: Mapping[str, Any] | pd.Series, *, occurrence: int = 1) -> str:
     """Return the stable row id for one statement row.
 
     This is the **only** place row ids are formed. Format:
@@ -107,23 +107,33 @@ def get_row_id(row: Mapping[str, Any] | pd.Series) -> str:
     - non-dimensional row: ``concept`` (e.g. ``us-gaap_Revenues``)
     - dimensional row: ``concept|axis=member``
       (e.g. ``us-gaap_Revenues|srt_ProductOrServiceAxis=us-gaap_ProductMember``)
+    - ``occurrence`` > 1 appends ``#<occurrence>``
+      (e.g. ``us-gaap_CashCashEquivalents...#2``)
 
     A row counts as dimensional when it has a ``dimension_axis`` or
     ``dimension_member``; NaN/None/blank values are treated as absent.
 
-    Ids are not guaranteed unique on their own: edgartools only exposes the
+    The base id is not unique on its own: edgartools only exposes the
     *primary* (first) axis/member of a multi-axis row, and a filer can present
-    the same concept twice non-dimensionally. :class:`Statement` detects such
+    the same concept twice non-dimensionally within one filing (e.g. cash
+    beginning/end of period on the cash flow statement). The cache builder
+    passes the 1-based ``occurrence`` of the base id within a filing to keep
+    those rows apart. :class:`Statement` still detects any remaining
     duplicates and raises :class:`DuplicateRowIdError` rather than deduping.
     """
+    if occurrence < 1:
+        raise ValueError("occurrence must be >= 1")
     concept = _clean_str(row.get("concept"))
     if concept is None:
         raise ValueError("cannot form a row id for a row without a concept")
     axis = _clean_str(row.get("dimension_axis"))
     member = _clean_str(row.get("dimension_member"))
-    if axis is None and member is None:
-        return concept
-    return f"{concept}|{axis or ''}={member or ''}"
+    base = (
+        concept
+        if axis is None and member is None
+        else f"{concept}|{axis or ''}={member or ''}"
+    )
+    return base if occurrence == 1 else f"{base}#{occurrence}"
 
 
 def _normalize_tags(value: object) -> tuple[str, ...]:
