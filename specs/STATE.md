@@ -185,9 +185,11 @@ per-sub-page routes.
 
 Slots match `vision.md`; **only `adjustments/opex-to-capex` has UI.** That
 builder: `load_statement_set(...).income.project("detailed")` over the newest
-2 periods, `standard_concept` in `OPERATING_EXPENSES`, `Table` (rows still
-keyed by `standard_concept` until row-id unification, phase 2)
-with period cols + input `capitalize` (bool) + `years` (number). Saves: POSTs
+2 periods, `standard_concept` in `OPERATING_EXPENSES` (selection only),
+`Table` keyed by `row_id` (from `get_row_id`) with period cols + input
+`capitalize` (bool) + `years` (number). The posted row `id` is that row id
+and is stored verbatim in `adjustment_preferences.base_concept` (column name
+kept); prefill matches it exactly via `find_row_id`. Saves: POSTs
 to `/wizard/{ticker}/{page_slug}/{subpage_slug}` →
 `wizard_pages/adjustments_post.py::opex_to_capex_post` →
 `WizardDatabaseManager.upsert_adjustment_preferences` (writes

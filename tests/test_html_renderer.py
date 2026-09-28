@@ -15,12 +15,13 @@ from src.web.routes.wizard_pages import adjustments_context
 from tests.statement_fixtures import make_statement
 
 P1, P2, P3 = "2024-09-28", "2023-09-30", "2022-09-24"
+RND = "us-gaap_ResearchAndDevelopmentExpense"
 
 
 def _frame(statement_type: str) -> pd.DataFrame:
     raw = pd.DataFrame(
         {
-            "concept": ["Revenue", "RnD", "Rev"],
+            "concept": ["Revenue", RND, "Rev"],
             "label": ["Revenue", "Research and development", "iPhone"],
             "standard_concept": [
                 "Revenue",
@@ -79,19 +80,19 @@ def test_payload_view_filtering_and_display_signs() -> None:
         _statement_set(), ticker="AAPL", period="annual", num_periods=3
     )["statements"]["income"]
 
-    assert [r["id"] for r in income["summary"]["rows"]] == ["Revenue", "RnD"]
-    assert [r["id"] for r in income["standard"]["rows"]] == ["Revenue", "RnD"]
+    assert [r["id"] for r in income["summary"]["rows"]] == ["Revenue", RND]
+    assert [r["id"] for r in income["standard"]["rows"]] == ["Revenue", RND]
     assert [r["id"] for r in income["detailed"]["rows"]] == [
         "Revenue",
-        "RnD",
+        RND,
         "Rev|Axis=IphoneMember",
     ]
 
     rows = _rows_by_id(income["summary"])
-    assert rows["RnD"]["cells"] == {P1: -5.0, P2: -4.0, P3: -3.0}
+    assert rows[RND]["cells"] == {P1: -5.0, P2: -4.0, P3: -3.0}
     assert rows["Revenue"]["cells"][P1] == 100.0
-    assert rows["RnD"]["label"] == "Research and development"
-    assert rows["RnD"]["level"] == 1
+    assert rows[RND]["label"] == "Research and development"
+    assert rows[RND]["level"] == 1
 
 
 def test_clamp_num_periods() -> None:
@@ -114,16 +115,18 @@ def test_opex_to_capex_context_uses_detailed_projection() -> None:
     table = context["opex_table"]
     assert [col["id"] for col in table["columns"]] == [P1, P2, "capitalize", "years"]
     rows = table["rows"]
-    assert [row["id"] for row in rows] == ["ResearchAndDevelopmentExpenses"]
+    # Keyed by get_row_id, not standard_concept (which only drives selection).
+    assert [row["id"] for row in rows] == [RND]
     assert rows[0]["cells"] == {P1: -5.0, P2: -4.0, "capitalize": None, "years": None}
 
 
-def test_opex_to_capex_prefill_matches_standard_concept_keys() -> None:
+def test_opex_to_capex_prefill_matches_row_id_keys() -> None:
     prefs = pd.DataFrame(
         {
-            "adjustment_type": ["opex_to_capex", "opex_to_capex"],
-            "base_concept": ["ResearchAndDevelopmentExpenses", "NotInTable"],
-            "value": [5, 3],
+            "adjustment_type": ["opex_to_capex"] * 3,
+            # The legacy standard_concept key no longer matches (exact row ids).
+            "base_concept": [RND, "ResearchAndDevelopmentExpenses", "NotInTable"],
+            "value": [5, 3, 2],
         }
     )
     with (
@@ -137,6 +140,6 @@ def test_opex_to_capex_prefill_matches_standard_concept_keys() -> None:
         context = adjustments_context.opex_to_capex_context("AAPL", "annual")
 
     (row,) = context["opex_table"]["rows"]
-    assert row["id"] == "ResearchAndDevelopmentExpenses"
+    assert row["id"] == RND
     assert row["cells"]["capitalize"] is True
     assert row["cells"]["years"] == 5.0
