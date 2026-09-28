@@ -38,7 +38,8 @@ src/config.py              paths + cache tunables (env)
 src/api/<vendor>/          fetch+parse only → DataFrame. No DB writes.
 src/api/edgartools/        source.py, cache.py, standard_terms.py  (not BaseAPIClient)
 src/ingestion/             vendor DataFrame → DatabaseManager
-src/pipelines/             CLIs (load_from_names, calc_residual_report)
+src/pipelines/             CLIs (load_from_names, calc_residual_report,
+                           convert_adjustment_pref_keys)
 src/database/              schema.sql + tables.py; wizard.sql + wizard_tables.py
                            manager.py (BaseDatabaseManager, DatabaseManager)
                            wizard_manager.py, adjustments.py
@@ -151,7 +152,9 @@ builder: `load_statement_set(...).income.project("detailed")` over the newest
 `Table` keyed by `row_id` (from `get_row_id`) with period cols + input
 `capitalize` (bool) + `years` (number). The posted row `id` is that row id
 and is stored verbatim in `adjustment_preferences.base_concept` (column name
-kept); prefill matches it exactly via `find_row_id`. Saves: POSTs
+kept); prefill matches it exactly via `find_row_id`.
+Legacy prefs keyed by `standard_concept`/`concept` are re-keyed to row ids
+by the one-off, idempotent `convert_adjustment_pref_keys` CLI. Saves: POSTs
 to `/wizard/{ticker}/{page_slug}/{subpage_slug}` →
 `wizard_pages/adjustments_post.py::opex_to_capex_post` →
 `WizardDatabaseManager.upsert_adjustment_preferences` (writes
