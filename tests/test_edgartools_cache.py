@@ -14,6 +14,7 @@ from src.api.edgartools import cache as cache_mod
 from src.api.edgartools.cache import (
     CACHE_SCHEMA_VERSION,
     _load_index,
+    cached_companies,
     find_cached_cik,
     is_period_bundle_stale,
     load_period_bundle,
@@ -214,6 +215,21 @@ def test_stale_bundle_is_deleted_on_load(tmp_path: Path) -> None:
     assert not (cache_dir / "companies" / "320193" / "quarterly").exists()
 
 
+def test_stale_bundle_is_kept_when_not_pruning(tmp_path: Path) -> None:
+    cache_dir = tmp_path / "edgartools_cache"
+    _save(cache_dir, period="quarterly", latest_filing_date=date(2024, 1, 1))
+
+    loaded = load_period_bundle(
+        cik=320193,
+        period="quarterly",
+        cache_dir=cache_dir,
+        reference=date(2024, 4, 2),
+        prune=False,
+    )
+    assert loaded is None
+    assert (cache_dir / "companies" / "320193" / "quarterly" / "meta.json").exists()
+
+
 def test_is_period_bundle_stale_respects_three_month_threshold() -> None:
     latest = date(2024, 1, 1)
     assert not is_period_bundle_stale(
@@ -299,3 +315,12 @@ def test_find_cached_cik_by_ticker(tmp_path: Path) -> None:
 
     assert find_cached_cik(cache_dir, "aapl") == "320193"
     assert find_cached_cik(cache_dir, "MSFT") is None
+
+
+def test_cached_companies_lists_index(tmp_path: Path) -> None:
+    cache_dir = tmp_path / "edgartools_cache"
+    assert cached_companies(cache_dir) == {}
+    touch_company_cache(cik=320193, ticker="aapl", cache_dir=cache_dir)
+    touch_company_cache(cik=789019, ticker="MSFT", cache_dir=cache_dir)
+
+    assert cached_companies(cache_dir) == {"320193": "AAPL", "789019": "MSFT"}

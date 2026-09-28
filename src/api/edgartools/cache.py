@@ -165,6 +165,16 @@ def is_period_bundle_stale(
     return reference > _add_months(latest_filing_date, max_age_months)
 
 
+def cached_companies(cache_dir: Path) -> dict[str, str]:
+    """``{cik: ticker}`` for every company in the LRU index (index only; bundles
+    may still be missing or stale)."""
+    return {
+        cik: entry["ticker"]
+        for cik, entry in _load_index(cache_dir)["companies"].items()
+        if entry.get("ticker")
+    }
+
+
 def find_cached_cik(cache_dir: Path, ticker: str) -> str | None:
     ticker = ticker.upper()
     for cik, entry in _load_index(cache_dir)["companies"].items():
@@ -194,19 +204,27 @@ def load_period_bundle(
     period: PeriodType,
     cache_dir: Path | None = None,
     reference: date | None = None,
+    prune: bool = True,
 ) -> PeriodBundle | None:
     """Load a cached bundle, or None (deleting it) if unusable.
 
     Unusable means: missing/invalid ``meta.json``, a ``schema_version`` other
     than :data:`CACHE_SCHEMA_VERSION`, stale, or a missing/corrupt statement
-    file.
+    file. ``prune=False`` (read-only callers such as reports) returns None
+    without deleting anything, legacy entries included.
     """
     cache_dir = Path(cache_dir) if cache_dir is not None else EDGARTOOLS_CACHE_DIR
-    _remove_legacy_entries(cache_dir, cik)
+
+    def discard() -> None:
+        if prune:
+            delete_period_bundle(cik=cik, period=period, cache_dir=cache_dir)
+
+    if prune:
+        _remove_legacy_entries(cache_dir, cik)
     meta_path = _bundle_meta_path(cache_dir, cik, period)
     if not meta_path.exists():
         if _bundle_dir(cache_dir, cik, period).exists():
-            delete_period_bundle(cik=cik, period=period, cache_dir=cache_dir)
+            discard()
         return None
 
     try:
@@ -215,19 +233,19 @@ def load_period_bundle(
         schema_version = meta.get("schema_version")
         latest_filing_date = _parse_iso_date(meta["latest_filing_date"])
     except (OSError, json.JSONDecodeError, AttributeError, KeyError, ValueError):
-        logger.warning("Invalid period bundle metadata at %s; deleting", meta_path)
-        delete_period_bundle(cik=cik, period=period, cache_dir=cache_dir)
+        logger.warning("Invalid period bundle metadata at %s", meta_path)
+        discard()
         return None
 
     if schema_version != CACHE_SCHEMA_VERSION:
         logger.info(
-            "Period bundle for CIK %s (%s) has schema_version %r (want %d); deleting",
+            "Period bundle for CIK %s (%s) has schema_version %r (want %d)",
             cik,
             period,
             schema_version,
             CACHE_SCHEMA_VERSION,
         )
-        delete_period_bundle(cik=cik, period=period, cache_dir=cache_dir)
+        discard()
         return None
 
     if is_period_bundle_stale(latest_filing_date, period=period, reference=reference):
@@ -237,7 +255,7 @@ def load_period_bundle(
             period,
             latest_filing_date,
         )
-        delete_period_bundle(cik=cik, period=period, cache_dir=cache_dir)
+        discard()
         return None
 
     bundle: PeriodBundle = {}
@@ -248,8 +266,8 @@ def load_period_bundle(
         except (OSError, ValueError) as exc:
             # FileNotFoundError, or a truncated/corrupt parquet file
             # (pyarrow's ArrowInvalid subclasses ValueError).
-            logger.warning("Unreadable period bundle file %s (%s); deleting", path, exc)
-            delete_period_bundle(cik=cik, period=period, cache_dir=cache_dir)
+            logger.warning("Unreadable period bundle file %s (%s)", path, exc)
+            discard()
             return None
     return bundle
 
