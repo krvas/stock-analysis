@@ -277,7 +277,8 @@ def test_project_unknown_period_raises() -> None:
 def test_project_columns_are_table_metadata_plus_row_id() -> None:
     out = _income().project("summary")
     meta = [c for c in out.columns if c not in (P1, P2, P3)]
-    assert set(meta) - STATEMENT_VIEW_METADATA_COLUMNS == {"row_id"}
+    assert "row_id" in meta
+    assert set(meta) <= STATEMENT_VIEW_METADATA_COLUMNS
 
 
 # --- immutability ------------------------------------------------------------

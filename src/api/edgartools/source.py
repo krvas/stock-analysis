@@ -36,7 +36,6 @@ from src.models.statement import (
     EDGARTOOLS_METADATA_COLUMNS,
     STATEMENT_METADATA_COLUMNS,
     STATEMENT_TYPES,
-    STATEMENT_VIEWS,
     Statement,
     StatementSet,
     StatementType,
@@ -50,8 +49,6 @@ PeriodType = Literal["annual", "quarterly"]
 __all__ = [
     "PeriodType",
     "StatementType",
-    "get_all_statement_views",
-    "get_statement_views",
     "load_statement_set",
 ]
 
@@ -299,43 +296,3 @@ def load_statement_set(ticker: str, period: PeriodType) -> StatementSet:
     )
     _touch(company.cik, ticker)
     return statement_set
-
-
-# --- TEMPORARY legacy wrappers ------------------------------------------------
-# Removed in the next commit, once routes / table.py consume StatementSet
-# projections directly. They keep the old nested-dict shape so routes work
-# unchanged: one frame per view, sliced to each statement's newest
-# ``num_periods`` periods, preferred_sign applied, ``row_id`` dropped (table.py
-# would otherwise treat it as a period column).
-
-
-def _legacy_views(statement: Statement, num_periods: int) -> dict[str, pd.DataFrame]:
-    periods = statement.periods[:num_periods]
-    return {
-        view: statement.project(view, periods).drop(columns="row_id")
-        for view in STATEMENT_VIEWS
-    }
-
-
-def get_all_statement_views(
-    ticker: str,
-    period: PeriodType,
-    num_periods: int = 10,
-) -> dict[StatementType, dict[str, pd.DataFrame]]:
-    """Return summary/standard/detailed DataFrames for all statement types."""
-    statement_set = load_statement_set(ticker, period)
-    return {
-        statement_type: _legacy_views(statement_set.get(statement_type), num_periods)
-        for statement_type in STATEMENT_TYPES
-    }
-
-
-def get_statement_views(
-    ticker: str,
-    statement_type: StatementType,
-    period: PeriodType,
-    num_periods: int = 10,
-) -> dict[str, pd.DataFrame]:
-    """Return summary/standard/detailed DataFrames for one statement type."""
-    statement_set = load_statement_set(ticker, period)
-    return _legacy_views(statement_set.get(statement_type), num_periods)

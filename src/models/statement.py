@@ -55,8 +55,8 @@ STATEMENT_METADATA_COLUMNS: frozenset[str] = frozenset(
 )
 
 # Columns returned by :meth:`Statement.project` ahead of the period columns.
-# Restricted to what ``statement_table_from_dataframe`` treats as metadata
-# (``src/models/table.py``) plus ``row_id``.
+# Restricted to columns ``statement_table_from_dataframe`` treats as metadata
+# (``src/models/table.py``).
 PROJECTION_METADATA_COLUMNS: tuple[str, ...] = (
     "row_id",
     "label",

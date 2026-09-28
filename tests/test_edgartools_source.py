@@ -9,11 +9,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from src.api.edgartools import source as source_mod
 from src.api.edgartools.source import (
     _build_statement_dataframe,
-    get_all_statement_views,
-    get_statement_views,
     load_statement_set,
 )
 from src.config import MAX_CACHE_QUARTERS, MAX_CACHE_YEARS
@@ -336,30 +333,3 @@ def test_load_statement_set_returns_cached_without_sec_fetch(
         cache_dir=mock_touch_cache.call_args.kwargs["cache_dir"],
         max_companies=mock_touch_cache.call_args.kwargs["max_companies"],
     )
-
-
-def test_legacy_wrappers_slice_periods_and_apply_preferred_sign() -> None:
-    bundle = _cached_bundle()
-    statement_set = source_mod._statement_set(bundle)
-    with patch.object(source_mod, "load_statement_set", return_value=statement_set):
-        all_views = get_all_statement_views("AAPL", "annual", num_periods=2)
-        income_views = get_statement_views("AAPL", "income", "annual", num_periods=2)
-
-    assert set(all_views) == {"income", "balance", "cashflow"}
-    for views in (*all_views.values(), income_views):
-        assert set(views) == {"summary", "standard", "detailed"}
-        for frame in views.values():
-            assert "row_id" not in frame.columns
-            assert [c for c in frame.columns if c.startswith("20")] == [
-                "2024-09-28",
-                "2023-09-30",
-            ]
-
-    summary = income_views["summary"].set_index("concept")
-    assert list(summary.index) == ["Revenue", "Capex"]
-    assert summary.loc["Capex", "2024-09-28"] == -5.0  # preferred_sign applied
-    assert summary.loc["Revenue", "2024-09-28"] == 100.0
-    assert list(income_views["standard"]["concept"]) == ["Revenue", "Capex"]
-    assert list(income_views["detailed"]["concept"]) == ["Revenue", "Capex", "Rev"]
-    # Cache keeps raw signs.
-    assert bundle["income"].set_index("concept").loc["Capex", "2024-09-28"] == 5.0
