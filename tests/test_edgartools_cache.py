@@ -65,7 +65,6 @@ def _save(cache_dir: Path, **overrides) -> None:
         "period": "annual",
         "latest_filing_date": date(2024, 11, 1),
         "frames": _sample_bundle(),
-        "periods": ["2024-09-28", "2023-09-30"],
         "cache_dir": cache_dir,
     }
     kwargs.update(overrides)
@@ -95,7 +94,6 @@ def test_save_and_load_round_trips_raw_frames(tmp_path: Path) -> None:
         "schema_version": CACHE_SCHEMA_VERSION,
         "period": "annual",
         "latest_filing_date": "2024-11-01",
-        "periods": ["2024-09-28", "2023-09-30"],
     }
 
     loaded = _load(cache_dir)

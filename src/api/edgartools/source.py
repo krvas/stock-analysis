@@ -349,7 +349,7 @@ def _build_statement_dataframe(
     data: dict[str, list] = {"row_id": row_ids}
     for col in _STORED_METADATA_COLUMNS:
         data[col] = [rows_by_id[row_id][col] for row_id in row_ids]
-    for period_label in dict.fromkeys(period_labels):
+    for period_label in period_labels:
         # Numeric only: a stray text fact (edgartools keeps TextBlock values as
         # strings) would make the column unwritable to parquet.
         data[period_label] = pd.to_numeric(
@@ -447,7 +447,6 @@ def load_statement_set(ticker: str, period: PeriodType) -> StatementSet:
         period=period,
         latest_filing_date=latest_filing_date,
         frames=bundle,
-        periods=statement_set.periods,
         cache_dir=EDGARTOOLS_CACHE_DIR,
     )
     _touch(company.cik, ticker)

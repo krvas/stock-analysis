@@ -7,7 +7,7 @@ bundle. Layout::
 
     companies/{cik}/{period}/{statement_type}.parquet
     companies/{cik}/{period}/meta.json   # schema_version, period,
-                                         # latest_filing_date, periods
+                                         # latest_filing_date
 
 Bundles are rebuilt when ``meta.json`` carries a different
 :data:`CACHE_SCHEMA_VERSION`, when files are missing or unreadable, and when
@@ -19,7 +19,7 @@ from __future__ import annotations
 import json
 import logging
 import shutil
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Literal
@@ -249,7 +249,6 @@ def save_period_bundle(
     period: PeriodType,
     latest_filing_date: date,
     frames: Mapping[StatementType, pd.DataFrame],
-    periods: Sequence[str] = (),
     cache_dir: Path | None = None,
 ) -> None:
     """Write one raw frame per statement type plus ``meta.json``.
@@ -275,7 +274,6 @@ def save_period_bundle(
         "schema_version": CACHE_SCHEMA_VERSION,
         "period": period,
         "latest_filing_date": latest_filing_date.isoformat(),
-        "periods": list(periods),
     }
     meta_path = _bundle_meta_path(cache_dir, cik, period)
     tmp_meta = meta_path.with_suffix(".tmp")
