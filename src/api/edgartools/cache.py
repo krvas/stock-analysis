@@ -12,6 +12,12 @@ bundle. Layout::
 Bundles are rebuilt when ``meta.json`` carries a different
 :data:`CACHE_SCHEMA_VERSION`, when files are missing or unreadable, and when
 the stored latest filing date is more than the period-specific cache age old.
+
+Companies are evicted least-recently-touched first beyond
+``EDGARTOOLS_COMPANY_CACHE_SIZE``. Tickers listed in the index's
+``pinned_tickers`` (set with :func:`set_pinned_tickers`) are never evicted and
+do not count toward that size; their bundles are still rebuilt by the
+staleness/schema rules above like any other.
 """
 
 from __future__ import annotations
@@ -19,10 +25,10 @@ from __future__ import annotations
 import json
 import logging
 import shutil
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from datetime import UTC, date, datetime
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 import pandas as pd
 
@@ -76,22 +82,37 @@ def _bundle_statement_path(
     return _bundle_dir(cache_dir, cik, period) / f"{statement_type}.parquet"
 
 
-def _load_index(cache_dir: Path) -> dict[str, dict]:
+def _normalize_tickers(tickers: Iterable[object]) -> list[str]:
+    return sorted({str(t).strip().upper() for t in tickers if str(t).strip()})
+
+
+def _load_index(cache_dir: Path) -> dict[str, Any]:
+    """The LRU index: ``companies`` (``{cik: entry}``) and ``pinned_tickers``.
+
+    A missing/corrupt file yields an empty index; a missing or invalid
+    ``pinned_tickers`` is treated as empty.
+    """
     path = _index_path(cache_dir)
     if not path.exists():
-        return {"companies": {}}
+        return {"companies": {}, "pinned_tickers": []}
     try:
         with path.open("r", encoding="utf-8") as handle:
             data = json.load(handle)
     except (OSError, json.JSONDecodeError):
         logger.warning("Corrupt edgartools LRU index at %s; starting fresh", path)
-        return {"companies": {}}
+        return {"companies": {}, "pinned_tickers": []}
     if not isinstance(data, dict) or not isinstance(data.get("companies"), dict):
-        return {"companies": {}}
+        return {"companies": {}, "pinned_tickers": []}
+    pinned = data.get("pinned_tickers")
+    if not isinstance(pinned, list):
+        if pinned is not None:
+            logger.warning("Invalid pinned_tickers in %s; ignoring", path)
+        pinned = []
+    data["pinned_tickers"] = _normalize_tickers(t for t in pinned if isinstance(t, str))
     return data
 
 
-def _save_index(cache_dir: Path, index: dict[str, dict]) -> None:
+def _save_index(cache_dir: Path, index: dict[str, Any]) -> None:
     cache_dir.mkdir(parents=True, exist_ok=True)
     path = _index_path(cache_dir)
     tmp_path = path.with_suffix(".tmp")
@@ -99,6 +120,24 @@ def _save_index(cache_dir: Path, index: dict[str, dict]) -> None:
         json.dump(index, handle, indent=2, sort_keys=True)
         handle.write("\n")
     tmp_path.replace(path)
+
+
+def pinned_tickers(cache_dir: Path | None = None) -> frozenset[str]:
+    """Tickers exempt from company LRU eviction (uppercased)."""
+    cache_dir = Path(cache_dir) if cache_dir is not None else EDGARTOOLS_CACHE_DIR
+    return frozenset(_load_index(cache_dir)["pinned_tickers"])
+
+
+def set_pinned_tickers(tickers: Iterable[str], cache_dir: Path | None = None) -> None:
+    """Replace the pinned-ticker list (see module doc).
+
+    A ticker may be pinned before its company has an index entry; the pin
+    takes effect once the company is touched. Pinning evicts nothing.
+    """
+    cache_dir = Path(cache_dir) if cache_dir is not None else EDGARTOOLS_CACHE_DIR
+    index = _load_index(cache_dir)
+    index["pinned_tickers"] = _normalize_tickers(tickers)
+    _save_index(cache_dir, index)
 
 
 def _cik_key(cik: int | str) -> str:
@@ -284,7 +323,7 @@ def save_period_bundle(
     tmp_meta.replace(meta_path)
 
 
-def _evict_company(cache_dir: Path, index: dict[str, dict], cik_key: str) -> None:
+def _evict_company(cache_dir: Path, index: dict[str, Any], cik_key: str) -> None:
     entry = index["companies"].pop(cik_key, None)
     company_dir = _company_dir(cache_dir, cik_key)
     if company_dir.exists():
@@ -309,7 +348,12 @@ def touch_company_cache(
     cache_dir: Path | None = None,
     max_companies: int | None = None,
 ) -> list[str]:
-    """Record a company fetch and evict older companies beyond ``max_companies``."""
+    """Record a company fetch and evict older companies beyond ``max_companies``.
+
+    Pinned companies (see :func:`set_pinned_tickers`) are never evicted and
+    do not count toward ``max_companies``; the limit applies to the rest.
+    Returns the evicted CIKs.
+    """
     cache_dir = Path(cache_dir) if cache_dir is not None else EDGARTOOLS_CACHE_DIR
     limit = (
         EDGARTOOLS_COMPANY_CACHE_SIZE
@@ -322,21 +366,26 @@ def touch_company_cache(
     companies = index["companies"]
 
     companies[cik_key] = {
+        **companies.get(cik_key, {}),
         "ticker": ticker.upper(),
         "last_accessed": _utc_now_iso(),
     }
 
+    pinned = set(index["pinned_tickers"])
+    unpinned = {
+        key: entry
+        for key, entry in companies.items()
+        if entry.get("ticker") not in pinned
+    }
     ordered = sorted(
-        companies.items(),
+        unpinned.items(),
         key=lambda item: item[1].get("last_accessed", ""),
         reverse=True,
     )
-    keep = {cik for cik, _ in ordered[:limit]}
     evicted: list[str] = []
-    for other_cik in list(companies):
-        if other_cik not in keep:
-            _evict_company(cache_dir, index, other_cik)
-            evicted.append(other_cik)
+    for other_cik, _ in ordered[limit:]:
+        _evict_company(cache_dir, index, other_cik)
+        evicted.append(other_cik)
 
     _save_index(cache_dir, index)
     return evicted
