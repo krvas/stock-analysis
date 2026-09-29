@@ -145,4 +145,22 @@ def test_calc_residuals_empty_without_calc_tree() -> None:
         "relative",
         "n_children",
         "n_nan_children",
+        "n_nan_weight_children",
     ]
+
+
+def test_calc_residuals_excludes_and_counts_nan_weight_children() -> None:
+    frame = pd.DataFrame(
+        [
+            _row("Total", "Total", **{P1: 10.0}),
+            _row("A", "A", parent_concept="Total", **{P1: 10.0}),
+            _row("B", "B", parent_concept="Total", weight=None, **{P1: 5.0}),
+        ]
+    )
+    residuals = calc_residuals(Statement(frame, "income"))
+
+    row = residuals.iloc[0]
+    assert row["computed"] == 10.0
+    assert row["residual"] == 0.0
+    assert row["n_children"] == 2
+    assert row["n_nan_weight_children"] == 1

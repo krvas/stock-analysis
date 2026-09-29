@@ -78,6 +78,7 @@ DETAIL_COLUMNS: tuple[str, ...] = (
     "relative",
     "n_children",
     "n_nan_children",
+    "n_nan_weight_children",
 )
 
 # ``collect_viewer_validations`` output; values in raw (unscaled) units.
