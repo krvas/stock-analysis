@@ -50,9 +50,12 @@ logger = logging.getLogger(__name__)
 PeriodType = Literal["annual", "quarterly"]
 
 __all__ = [
+    "FORM_BY_PERIOD",
+    "MAX_PERIODS_BY_PERIOD",
     "PeriodType",
     "StatementType",
     "load_statement_set",
+    "setup_edgartools",
 ]
 
 _STATEMENT_METHODS: dict[StatementType, str] = {
@@ -67,13 +70,13 @@ _STATEMENT_XBRL_TYPES: dict[StatementType, str] = {
     "cashflow": "CashFlowStatement",
 }
 
-_FORM_BY_PERIOD: dict[PeriodType, str] = {
+FORM_BY_PERIOD: dict[PeriodType, str] = {
     "annual": "10-K",
     "quarterly": "10-Q",
 }
 
 # Max filings (and periods) cached per bundle.
-_MAX_PERIODS_BY_PERIOD: dict[PeriodType, int] = {
+MAX_PERIODS_BY_PERIOD: dict[PeriodType, int] = {
     "annual": MAX_CACHE_YEARS,
     "quarterly": MAX_CACHE_QUARTERS,
 }
@@ -89,6 +92,17 @@ def _configure_edgartools_cache() -> None:
     EDGARTOOLS_CACHE_DIR.mkdir(parents=True, exist_ok=True)
     os.environ["EDGAR_LOCAL_DATA_DIR"] = str(EDGARTOOLS_CACHE_DIR)
     os.environ["EDGAR_ALLOW_NETWORK_FALLBACK"] = "True"
+
+
+def setup_edgartools() -> None:
+    """Load ``.env``, require ``EDGAR_IDENTITY`` and configure the cache.
+
+    Call before any edgartools network access.
+    """
+    load_project_dotenv()
+    if not os.environ.get("EDGAR_IDENTITY"):
+        raise ValueError("EDGAR_IDENTITY environment variable is not set.")
+    _configure_edgartools_cache()
 
 
 def _period_columns(df: pd.DataFrame) -> list[str]:
@@ -412,10 +426,7 @@ def load_statement_set(ticker: str, period: PeriodType) -> StatementSet:
     ``MAX_CACHE_YEARS`` 10-Ks (annual) or ``MAX_CACHE_QUARTERS`` 10-Qs
     (quarterly), builds, and caches the raw detailed frames.
     """
-    load_project_dotenv()
-    if not os.environ.get("EDGAR_IDENTITY"):
-        raise ValueError("EDGAR_IDENTITY environment variable is not set.")
-    _configure_edgartools_cache()
+    setup_edgartools()
 
     cached_cik = find_cached_cik(EDGARTOOLS_CACHE_DIR, ticker)
     if cached_cik is not None:
@@ -428,8 +439,8 @@ def load_statement_set(ticker: str, period: PeriodType) -> StatementSet:
     if cached is not None:
         return cached
 
-    max_periods = _MAX_PERIODS_BY_PERIOD[period]
-    filings = company.get_filings(form=_FORM_BY_PERIOD[period], amendments=False).head(
+    max_periods = MAX_PERIODS_BY_PERIOD[period]
+    filings = company.get_filings(form=FORM_BY_PERIOD[period], amendments=False).head(
         max_periods
     )
     latest_filing_date = _latest_filing_date(filings)
