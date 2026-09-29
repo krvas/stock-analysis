@@ -437,7 +437,7 @@ def test_build_in_standard_unfiltered_when_tree_unresolved(
     xbrl._get_valid_dimensional_members.assert_not_called()
 
 
-# --- load_statement_set / legacy wrappers -----------------------------------
+# --- load_statement_set -----------------------------------------------------
 
 
 def _patch_fetch(

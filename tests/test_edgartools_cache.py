@@ -179,27 +179,6 @@ def test_invalid_meta_deletes_bundle(tmp_path: Path) -> None:
     assert not meta_path.parent.exists()
 
 
-def test_legacy_entries_cleaned_up_on_load_and_save(tmp_path: Path) -> None:
-    cache_dir = tmp_path / "edgartools_cache"
-    company_dir = cache_dir / "companies" / "320193"
-
-    def _make_legacy() -> None:
-        for name in ("annual_10", "quarterly_2"):
-            (company_dir / name).mkdir(parents=True, exist_ok=True)
-            (company_dir / name / "income_summary.parquet").write_bytes(b"x")
-        (company_dir / "income_annual_10_detailed.parquet").write_bytes(b"x")
-
-    _make_legacy()
-    (company_dir / "annual_notes").mkdir()  # not a legacy bundle name
-    assert _load(cache_dir) is None
-    assert sorted(p.name for p in company_dir.iterdir()) == ["annual_notes"]
-
-    _make_legacy()
-    _save(cache_dir)
-    assert sorted(p.name for p in company_dir.iterdir()) == ["annual", "annual_notes"]
-    assert _load(cache_dir) is not None
-
-
 def test_periods_cached_separately(tmp_path: Path) -> None:
     cache_dir = tmp_path / "edgartools_cache"
     _save(cache_dir, period="quarterly", latest_filing_date=date(2024, 11, 1))

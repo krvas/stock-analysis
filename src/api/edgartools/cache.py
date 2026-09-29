@@ -12,15 +12,12 @@ bundle. Layout::
 Bundles are rebuilt when ``meta.json`` carries a different
 :data:`CACHE_SCHEMA_VERSION`, when files are missing or unreadable, and when
 the stored latest filing date is more than the period-specific cache age old.
-Legacy ``{period}_{num_periods}/`` dirs and loose ``*.parquet`` files in a
-company dir are deleted whenever that company's bundle is loaded or saved.
 """
 
 from __future__ import annotations
 
 import json
 import logging
-import re
 import shutil
 from collections.abc import Mapping, Sequence
 from datetime import UTC, date, datetime
@@ -47,7 +44,6 @@ PeriodBundle = dict[StatementType, pd.DataFrame]
 CACHE_SCHEMA_VERSION = 4
 
 _INDEX_FILENAME = "company_lru.json"
-_LEGACY_BUNDLE_DIR_RE = re.compile(r"^(annual|quarterly)_\d+$")
 
 
 def _utc_now_iso() -> str:
@@ -77,29 +73,6 @@ def _bundle_statement_path(
     statement_type: StatementType,
 ) -> Path:
     return _bundle_dir(cache_dir, cik, period) / f"{statement_type}.parquet"
-
-
-def _remove_legacy_entries(cache_dir: Path, cik: int | str) -> None:
-    """Delete pre-v2 cache entries in a company dir.
-
-    Legacy layouts: ``{annual|quarterly}_<num_periods>/`` bundle dirs and loose
-    ``*.parquet`` files directly under ``companies/{cik}/``.
-    """
-    company_dir = _company_dir(cache_dir, cik)
-    if not company_dir.is_dir():
-        return
-    for entry in company_dir.iterdir():
-        try:
-            if entry.is_dir() and _LEGACY_BUNDLE_DIR_RE.match(entry.name):
-                shutil.rmtree(entry)
-            elif entry.is_file() and entry.suffix == ".parquet":
-                entry.unlink()
-            else:
-                continue
-        except OSError as exc:
-            logger.warning("Failed to delete legacy cache entry %s: %s", entry, exc)
-            continue
-        logger.info("Deleted legacy edgartools cache entry %s", entry)
 
 
 def _load_index(cache_dir: Path) -> dict[str, dict]:
@@ -211,7 +184,7 @@ def load_period_bundle(
     Unusable means: missing/invalid ``meta.json``, a ``schema_version`` other
     than :data:`CACHE_SCHEMA_VERSION`, stale, or a missing/corrupt statement
     file. ``prune=False`` (read-only callers such as reports) returns None
-    without deleting anything, legacy entries included.
+    without deleting anything.
     """
     cache_dir = Path(cache_dir) if cache_dir is not None else EDGARTOOLS_CACHE_DIR
 
@@ -219,8 +192,6 @@ def load_period_bundle(
         if prune:
             delete_period_bundle(cik=cik, period=period, cache_dir=cache_dir)
 
-    if prune:
-        _remove_legacy_entries(cache_dir, cik)
     meta_path = _bundle_meta_path(cache_dir, cik, period)
     if not meta_path.exists():
         if _bundle_dir(cache_dir, cik, period).exists():
@@ -291,7 +262,6 @@ def save_period_bundle(
     if missing:
         raise ValueError(f"period bundle is missing statement(s): {missing}")
 
-    _remove_legacy_entries(cache_dir, cik)
     delete_period_bundle(cik=cik, period=period, cache_dir=cache_dir)
     bundle_dir = _bundle_dir(cache_dir, cik, period)
     bundle_dir.mkdir(parents=True, exist_ok=True)
