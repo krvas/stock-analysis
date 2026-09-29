@@ -122,7 +122,9 @@ Rebuilt on `schema_version` mismatch (`CACHE_SCHEMA_VERSION`), missing/corrupt
 files, or `latest_filing_date` older than
 `EDGARTOOLS_ANNUAL_CACHE_MAX_AGE_MONTHS` (12) /
 `EDGARTOOLS_QUARTERLY_CACHE_MAX_AGE_MONTHS` (3). Company LRU size
-`EDGARTOOLS_COMPANY_CACHE_SIZE` (10), index `company_lru.json`.
+`EDGARTOOLS_COMPANY_CACHE_SIZE` (10), index `company_lru.json`. Pinned
+tickers (`set_pinned_tickers`, stored in `company_lru.json`) are exempt from
+LRU eviction and don't count toward the size; staleness still applies.
 
 Views are projections: `Statement.project(view, periods)` — summary =
 non-dimensional rows, standard = `in_standard` (edgartools' standard-view

@@ -18,7 +18,9 @@ from src.api.edgartools.cache import (
     find_cached_cik,
     is_period_bundle_stale,
     load_period_bundle,
+    pinned_tickers,
     save_period_bundle,
+    set_pinned_tickers,
     touch_company_cache,
 )
 from src.models.statement import EDGARTOOLS_METADATA_COLUMNS, Statement
@@ -301,3 +303,106 @@ def test_cached_companies_lists_index(tmp_path: Path) -> None:
     touch_company_cache(cik=789019, ticker="MSFT", cache_dir=cache_dir)
 
     assert cached_companies(cache_dir) == {"320193": "AAPL", "789019": "MSFT"}
+
+
+def _touch_at(
+    cache_dir: Path, cik: int, ticker: str, when: datetime, max_companies: int
+) -> list[str]:
+    """Touch ``cik`` then backdate its ``last_accessed`` to ``when``."""
+    evicted = touch_company_cache(
+        cik=cik, ticker=ticker, cache_dir=cache_dir, max_companies=max_companies
+    )
+    index = _load_index(cache_dir)
+    index["companies"][str(cik)]["last_accessed"] = when.isoformat()
+    cache_mod._save_index(cache_dir, index)
+    return evicted
+
+
+def test_pinned_companies_survive_eviction_and_use_no_slots(tmp_path: Path) -> None:
+    cache_dir = tmp_path / "edgartools_cache"
+    set_pinned_tickers(["pin1", "PIN2"], cache_dir)
+    t0 = datetime(2026, 1, 1, tzinfo=UTC)
+
+    touches = [
+        (1, "PIN1"),
+        (2, "PIN2"),
+        (3, "AAA"),
+        (4, "BBB"),
+        (5, "CCC"),
+    ]
+    evicted: list[str] = []
+    for offset, (cik, ticker) in enumerate(touches):
+        _save(cache_dir, cik=cik)
+        evicted += _touch_at(
+            cache_dir, cik, ticker, t0 + timedelta(hours=offset), max_companies=2
+        )
+
+    assert evicted == ["3"]
+    assert set(_load_index(cache_dir)["companies"]) == {"1", "2", "4", "5"}
+    for cik in (1, 2, 4, 5):
+        assert (cache_dir / "companies" / str(cik)).exists()
+    assert not (cache_dir / "companies" / "3").exists()
+
+
+def test_set_pinned_tickers_replaces_list(tmp_path: Path) -> None:
+    cache_dir = tmp_path / "edgartools_cache"
+    set_pinned_tickers(["msft", "AAPL", "aapl"], cache_dir)
+    assert _load_index(cache_dir)["pinned_tickers"] == ["AAPL", "MSFT"]
+
+    set_pinned_tickers(["MU"], cache_dir)
+    assert pinned_tickers(cache_dir) == frozenset({"MU"})
+
+
+def test_pin_set_before_entry_exists_applies_on_touch(tmp_path: Path) -> None:
+    cache_dir = tmp_path / "edgartools_cache"
+    t0 = datetime(2026, 1, 1, tzinfo=UTC)
+    _save(cache_dir, cik=1)
+    _touch_at(cache_dir, 1, "OLD", t0, max_companies=1)
+
+    set_pinned_tickers(["AAPL"], cache_dir)
+    assert _load_index(cache_dir)["companies"].keys() == {"1"}
+
+    _save(cache_dir, cik=320193)
+    evicted = touch_company_cache(
+        cik=320193, ticker="aapl", cache_dir=cache_dir, max_companies=1
+    )
+
+    # AAPL is pinned, so OLD still fits in the single unpinned slot.
+    assert evicted == []
+    assert set(_load_index(cache_dir)["companies"]) == {"1", "320193"}
+
+
+def test_touch_preserves_pinned_tickers(tmp_path: Path) -> None:
+    cache_dir = tmp_path / "edgartools_cache"
+    set_pinned_tickers(["AAPL"], cache_dir)
+    touch_company_cache(cik=789019, ticker="MSFT", cache_dir=cache_dir)
+
+    raw = json.loads((cache_dir / "company_lru.json").read_text())
+    assert raw["pinned_tickers"] == ["AAPL"]
+    assert set(raw["companies"]) == {"789019"}
+
+
+def test_pinned_company_stale_bundle_still_discarded(tmp_path: Path) -> None:
+    cache_dir = tmp_path / "edgartools_cache"
+    set_pinned_tickers(["AAPL"], cache_dir)
+    _save(cache_dir, period="quarterly", latest_filing_date=date(2024, 1, 1))
+    touch_company_cache(cik=320193, ticker="AAPL", cache_dir=cache_dir)
+
+    assert _load(cache_dir, period="quarterly", reference=date(2024, 4, 2)) is None
+    assert not (cache_dir / "companies" / "320193" / "quarterly").exists()
+
+
+@pytest.mark.parametrize("pinned", [None, "AAPL", {"a": 1}, ["AAPL", 3]])
+def test_missing_or_invalid_pinned_tickers_tolerated(
+    tmp_path: Path, pinned: object
+) -> None:
+    cache_dir = tmp_path / "edgartools_cache"
+    index: dict[str, object] = {"companies": {}}
+    if pinned is not None:
+        index["pinned_tickers"] = pinned
+    cache_mod._save_index(cache_dir, index)
+
+    expected = frozenset({"AAPL"}) if isinstance(pinned, list) else frozenset()
+    assert pinned_tickers(cache_dir) == expected
+    touch_company_cache(cik=789019, ticker="MSFT", cache_dir=cache_dir)
+    assert set(_load_index(cache_dir)["companies"]) == {"789019"}
