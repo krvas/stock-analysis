@@ -231,7 +231,7 @@ def _normalize_tags(value: object) -> tuple[str, ...]:
     return tuple(sorted({str(tag) for tag in value}))
 
 
-def _bool_flag(frame: pd.DataFrame, column: str) -> pd.Series:
+def bool_flag(frame: pd.DataFrame, column: str) -> pd.Series:
     """Boolean mask for an edgartools flag column; missing column/None → False."""
     if column not in frame.columns:
         return pd.Series(False, index=frame.index)
@@ -243,7 +243,7 @@ def _default_in_standard(frame: pd.DataFrame) -> pd.Series:
     standard view; dimensional rows are unless ``is_breakdown`` (edgartools'
     member filter can't be evaluated without the filing's presentation tree).
     """
-    return ~_bool_flag(frame, "dimension") | ~_bool_flag(frame, "is_breakdown")
+    return ~bool_flag(frame, "dimension") | ~bool_flag(frame, "is_breakdown")
 
 
 def _presentation_ancestors(df: pd.DataFrame, rows: pd.Series) -> set[str]:
@@ -364,7 +364,7 @@ class Statement:
                 return df.iloc[0:0].copy()
             mask &= df["standard_concept"].eq(standard_concept)
         if not include_dimensional:
-            mask &= ~_bool_flag(df, "dimension")
+            mask &= ~bool_flag(df, "dimension")
         return df[mask].copy()
 
     def children(self, row_id: str) -> pd.DataFrame:
@@ -373,7 +373,7 @@ class Statement:
         concept = df["concept"].iloc[self._row_index(row_id)]
         if "parent_concept" not in df.columns:
             return df.iloc[0:0].copy()
-        mask = df["parent_concept"].eq(concept) & ~_bool_flag(df, "dimension")
+        mask = df["parent_concept"].eq(concept) & ~bool_flag(df, "dimension")
         return df[mask].copy()
 
     def insert(self, row: Mapping[str, Any], after: str | None = None) -> Statement:
@@ -457,11 +457,11 @@ class Statement:
             raise KeyError(f"unknown period(s): {unknown}")
 
         df = self._frame
-        dimension = _bool_flag(df, "dimension")
+        dimension = bool_flag(df, "dimension")
         if view == "summary":
             view_mask = ~dimension
         elif view == "standard":
-            view_mask = _bool_flag(df, "in_standard")
+            view_mask = bool_flag(df, "in_standard")
         else:
             view_mask = pd.Series(True, index=df.index)
 
@@ -470,7 +470,7 @@ class Statement:
             sign = np.where(df["preferred_sign"].eq(-1), -1.0, 1.0)
             values = values.mul(sign, axis=0)
 
-        abstract = _bool_flag(df, "abstract")
+        abstract = bool_flag(df, "abstract")
         data_kept = view_mask & ~abstract & values.notna().any(axis=1)
         live_headers = _presentation_ancestors(df, data_kept)
         keep = data_kept | (view_mask & abstract & df["concept"].isin(live_headers))
@@ -480,103 +480,6 @@ class Statement:
             meta[col] = df[col] if col in df.columns else None
         out = pd.concat([meta, values], axis=1)
         return out[keep].reset_index(drop=True)
-
-
-RESIDUAL_COLUMNS: tuple[str, ...] = (
-    "row_id",
-    "concept",
-    "label",
-    "period",
-    "reported",
-    "computed",
-    "residual",
-    "relative",
-    "n_children",
-    "n_nan_children",
-)
-
-
-def _first_per_concept(df: pd.DataFrame) -> pd.DataFrame:
-    """Keep the first row (frame order) of each concept.
-
-    A concept presented twice in one filing gets ``#n`` row ids (see
-    :func:`get_row_id`); the cache builder always adds ``#1`` before ``#2``,
-    so frame order picks ``#1``.
-    """
-    return df[~df["concept"].duplicated(keep="first")]
-
-
-def calc_residuals(statement: Statement) -> pd.DataFrame:
-    """Calc-linkbase residuals of ``statement``, one row per parent × period.
-
-    ``residual = reported(parent) − Σ weight·child`` over the parent's
-    non-dimensional calc children (:meth:`Statement.children`), on **raw**
-    signs (the frame's own values; ``preferred_sign`` is display-only).
-    See ``specs/adjustments_architecture.md`` §6.1: the engine recomputes
-    dirty totals as ``Σ weight·child + residual`` so zero specs reproduce
-    reported values exactly.
-
-    - Parents: non-dimensional rows with ≥1 non-dimensional child. When a
-      concept has several non-dimensional rows (``#n`` duplicates), only the
-      first (``#1``) is a parent, and only the first of a duplicated child
-      concept is summed — ``parent_concept`` names a concept, not a row.
-    - Periods where the parent value is NaN are skipped. NaN children count
-      as 0 and are counted in ``n_nan_children``. NaN ``weight`` counts as 1.
-    - ``relative = residual / |reported|`` (``±inf`` when reported is 0 and
-      the residual is not, NaN when both are 0).
-
-    Columns: :data:`RESIDUAL_COLUMNS`. Pure: no I/O, frame untouched.
-    """
-    df = statement.frame
-    periods = statement.periods
-    records: list[dict[str, Any]] = []
-    if "parent_concept" not in df.columns or not periods:
-        return pd.DataFrame(columns=list(RESIDUAL_COLUMNS))
-
-    values = df[periods].apply(pd.to_numeric, errors="coerce").astype(float)
-    non_dimensional = df[~_bool_flag(df, "dimension")]
-    child_concepts = set(non_dimensional["parent_concept"].dropna())
-    parents = _first_per_concept(
-        non_dimensional[non_dimensional["concept"].isin(child_concepts)]
-    )
-
-    for index, parent in parents.iterrows():
-        children = _first_per_concept(statement.children(parent["row_id"]))
-        if children.empty:
-            continue
-        weights = pd.to_numeric(
-            children.get("weight", pd.Series(1.0, index=children.index)),
-            errors="coerce",
-        ).fillna(1.0)
-        child_values = values.loc[children.index]
-        for period in periods:
-            reported = values.at[index, period]
-            if np.isnan(reported):
-                continue
-            column = child_values[period]
-            computed = float((column.fillna(0.0) * weights).sum())
-            residual = float(reported - computed)
-            if reported != 0:
-                relative = residual / abs(reported)
-            elif residual != 0:
-                relative = float(np.copysign(np.inf, residual))
-            else:
-                relative = float("nan")
-            records.append(
-                {
-                    "row_id": parent["row_id"],
-                    "concept": parent["concept"],
-                    "label": parent.get("label"),
-                    "period": period,
-                    "reported": float(reported),
-                    "computed": computed,
-                    "residual": residual,
-                    "relative": relative,
-                    "n_children": len(children),
-                    "n_nan_children": int(column.isna().sum()),
-                }
-            )
-    return pd.DataFrame.from_records(records, columns=list(RESIDUAL_COLUMNS))
 
 
 @dataclass(frozen=True)

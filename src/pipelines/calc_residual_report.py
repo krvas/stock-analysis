@@ -2,7 +2,7 @@
 
 For every cached (ticker, period type, statement), computes
 ``reported(parent) − Σ weight·child`` per calc parent × period via
-:func:`src.models.statement.calc_residuals` (raw signs) and logs a summary
+:func:`src.models.calc_residuals.calc_residuals` (raw signs) and logs a summary
 plus every non-zero residual, sorted by absolute relative residual.
 
 Reads cached bundles only — never fetches from SEC and never modifies the
@@ -32,7 +32,8 @@ from src.api.edgartools.cache import (
     load_period_bundle,
 )
 from src.config import EDGARTOOLS_CACHE_DIR
-from src.models.statement import STATEMENT_TYPES, Statement, calc_residuals
+from src.models.calc_residuals import calc_residuals
+from src.models.statement import STATEMENT_TYPES, Statement
 
 logger = logging.getLogger(__name__)
 
