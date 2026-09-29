@@ -257,7 +257,7 @@ some years' trees).
   - Don't add a missing subtotal. Resolve the parent per period: a filer may have
     `AssetsNoncurrent` in some years' calc trees and not others.
 6. **Prefs schema:** `value DOUBLE` is too narrow for later types. `params JSON`?
-   There are no migrations today.
+   There are no migrations (pre-deployment; the DB is reset instead).
   - Keep it as is for now.
 7. **Existing prefs keyed by `standard_concept`:** convert or drop?
   - Convert it, but everything should be routed through get_row_id

@@ -9,6 +9,11 @@ Audience: planning and coding agents — prefer this file over guessing layout.
 Python 3.12, pandas, FastAPI + Jinja SSR, vanilla JS (no frontend libs). Local
 single-user; no auth. Keep UI simple while building features.
 
+Under development, not deployed: there is no production data to preserve.
+The databases (`indian_stocks.duckdb`, `wizard.duckdb` in `data/duckdb/`, see
+`DEFAULT_DB_PATH` / `DEFAULT_WIZARD_DB_PATH` in `src/config.py`) can be deleted
+and rebuilt (`src.database.init_schema`, `src.database.init_wizard_schema`).
+
 ## 1. Three disconnected slices (do not “unify” as a bugfix)
 
 | Slice | Role | Store |
@@ -71,6 +76,8 @@ tests/                     pytest; no HTTP/route tests
   Wizard prefs only via `WizardDatabaseManager` (`wizard_manager.py`).
 - Row ids only via `get_row_id` (§4); never re-derive ids elsewhere.
 - Schema truth: `schema.sql` / `wizard.sql`; Python mirrors must change with them.
+- No migrations, backfills, or legacy-format fallbacks (pre-deployment): edit
+  the schema/code directly and reset the DB.
 - Config only in `src/config.py`. Routers in `src/web/routes/`, registered in
   `routes/__init__.py`. Templates extend `base.html`; pass `active_nav`.
 - New financial tables: pandas → `Table` → `serialize()` → `{columns,
@@ -318,7 +325,8 @@ app cache).
 
 ## 7. Debt agents should not paper over
 
-- No schema migrations (`CREATE TABLE IF NOT EXISTS` only).
+- No schema migrations by design (`CREATE TABLE IF NOT EXISTS` only); reset the
+  DB after schema changes.
 - Schema currency default `INR`; US data is USD — no FX layer.
 - Alpha Vantage free tier 25/day.
 - Dead exploration: `finfetch_client.py`, root `test_api_clients.py`,
