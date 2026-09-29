@@ -59,9 +59,11 @@ EDGARTOOLS_METADATA_COLUMNS: tuple[str, ...] = (
 # ``in_standard`` is whether edgartools' ``view="standard"`` keeps the row. It is
 # not derivable from ``dimension`` / ``is_breakdown`` alone: standard also drops
 # dimensional rows whose axis member is not in the statement's presentation
-# linkbase (a filter ``view="detailed"`` skips). The cache builder computes it
-# per filing; like other metadata it comes from the newest filing the row
-# appears in. Rows without it (e.g. inserted rows) default to
+# linkbase (a filter ``view="detailed"`` skips). The cache builder reads it off
+# each filing's own ``to_dataframe(view="standard")``, aligned onto the detailed
+# rows; like other metadata it comes from the newest filing the row appears in.
+# Rows without it (e.g. inserted rows, or a filing whose standard frame could
+# not be aligned) default to
 # ``not dimension or not is_breakdown`` (see :func:`_default_in_standard`).
 ADDED_COLUMNS: tuple[str, ...] = (
     "row_id",
@@ -241,7 +243,7 @@ def bool_flag(frame: pd.DataFrame, column: str) -> pd.Series:
 def _default_in_standard(frame: pd.DataFrame) -> pd.Series:
     """``in_standard`` for rows that lack it: non-dimensional rows are in the
     standard view; dimensional rows are unless ``is_breakdown`` (edgartools'
-    member filter can't be evaluated without the filing's presentation tree).
+    member filter is only known from the filing's own standard frame).
     """
     return ~bool_flag(frame, "dimension") | ~bool_flag(frame, "is_breakdown")
 

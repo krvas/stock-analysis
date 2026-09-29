@@ -40,8 +40,9 @@ PeriodType = Literal["annual", "quarterly"]
 # Raw (unprojected, raw-sign) statement frame per statement type.
 PeriodBundle = dict[StatementType, pd.DataFrame]
 
-# Bump when the on-disk bundle shape changes; mismatched bundles are rebuilt.
-CACHE_SCHEMA_VERSION = 4
+# Bump when the on-disk bundle shape (or how a stored column is computed)
+# changes; mismatched bundles are rebuilt.
+CACHE_SCHEMA_VERSION = 5
 
 _INDEX_FILENAME = "company_lru.json"
 

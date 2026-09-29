@@ -10,6 +10,7 @@ import pandas as pd
 import pytest
 
 from src.api.edgartools.source import (
+    _align,
     _build_statement_dataframe,
     load_statement_set,
 )
@@ -90,24 +91,40 @@ def _filing_df(period_column: str, rows: list[dict]) -> pd.DataFrame:
     return frame
 
 
+def _default_standard(frame: pd.DataFrame) -> pd.DataFrame:
+    """What edgartools' ``view="standard"`` keeps when no member filter applies:
+    every row except dimensional breakdowns."""
+    if frame.empty:
+        return frame
+    drop = frame["dimension"].eq(True) & frame["is_breakdown"].eq(True)
+    return frame.loc[~drop].reset_index(drop=True)
+
+
 def _mock_xbrl(
     frames_by_statement: dict[str, pd.DataFrame],
-    valid_members: dict[str, set[str]] | None = None,
+    standard_by_statement: dict[str, pd.DataFrame | Exception] | None = None,
 ) -> MagicMock:
     """A filing whose statements return the given frames.
 
-    ``valid_members`` is what edgartools' ``_get_valid_dimensional_members``
-    returns for the statement's presentation tree (axis -> members).
+    ``to_dataframe(view="standard")`` returns ``standard_by_statement``'s frame
+    (or raises it, if an exception), defaulting to :func:`_default_standard`.
     """
     xbrl = MagicMock()
-    xbrl.find_statement.return_value = ([], "role", "Statement")
-    xbrl.presentation_trees = {"role": "tree"}
-    xbrl._get_valid_dimensional_members.return_value = valid_members or {}
+    standard_by_statement = standard_by_statement or {}
     for statement_type, getter in _GETTERS.items():
         statement = MagicMock()
         statement.canonical_type = statement_type
         frame = frames_by_statement.get(statement_type, pd.DataFrame())
-        statement.to_dataframe.return_value = frame
+        standard = standard_by_statement.get(statement_type, _default_standard(frame))
+
+        def to_dataframe(*, view, presentation, frame=frame, standard=standard):
+            if view != "standard":
+                return frame
+            if isinstance(standard, Exception):
+                raise standard
+            return standard
+
+        statement.to_dataframe.side_effect = to_dataframe
         statement.get_raw_data.return_value = frame.attrs.get("raw", [])
         getattr(xbrl.statements, getter).return_value = statement
     return xbrl
@@ -182,7 +199,8 @@ def test_build_one_raw_frame_with_newest_metadata(mock_periods: MagicMock) -> No
     for xbrl in (newest, older):
         xbrl.statements.cash_flow_statement.assert_called_once_with(view="detailed")
         assert _to_dataframe_mock(xbrl, "cashflow").call_args_list == [
-            call(view="detailed", presentation=False)
+            call(view="detailed", presentation=False),
+            call(view="standard", presentation=False),
         ]
         # Other statements are not touched while building cashflow.
         _to_dataframe_mock(xbrl, "income").assert_not_called()
@@ -336,49 +354,46 @@ def test_build_empty_when_no_periods(mock_periods: MagicMock) -> None:
     assert statement.project("summary").empty
 
 
+def _rows(frame: pd.DataFrame, positions: list[int]) -> pd.DataFrame:
+    return frame.iloc[positions].reset_index(drop=True)
+
+
 @patch("src.api.edgartools.source.determine_optimal_periods")
 def test_build_stores_in_standard_from_newest_filing(mock_periods: MagicMock) -> None:
-    """``in_standard`` replicates edgartools' standard view: non-dimensional
-    rows are in; dimensional rows need ``not is_breakdown`` and every axis's
-    member listed in the presentation tree (axes not listed never exclude).
-    Like other metadata it comes from the newest filing the row appears in."""
+    """``in_standard`` is membership in edgartools' own standard frame (matched
+    onto the detailed rows in order); like other metadata it comes from the
+    newest filing the row appears in."""
     product = ("srt:ProductOrServiceAxis", "us-gaap:ProductMember")
     iphone = ("srt:ProductOrServiceAxis", "aapl:IPhoneMember")
-    ppe = ("us-gaap:PropertyPlantAndEquipmentByTypeAxis", "us-gaap:LandMember")
+    newest_frame = _filing_df(
+        "2024-09-28 (FY)",
+        [
+            {"concept": "Rev", "value": 100.0},
+            {"concept": "Rev", "axes": [product], "value": 70.0},
+            {"concept": "Rev", "axes": [iphone], "value": 50.0},
+            {
+                "concept": "Rev",
+                "axes": [("Geo", "Us")],
+                "is_breakdown": True,
+                "value": 9.0,
+            },
+            {"concept": "Cost", "value": 40.0},
+        ],
+    )
+    older_frame = _filing_df(
+        "2023-09-30 (FY)",
+        [
+            {"concept": "Rev", "value": 90.0},
+            {"concept": "Rev", "axes": [iphone], "value": 45.0},
+            {"concept": "Old", "axes": [("X", "Y")], "value": 2.0},
+        ],
+    )
+    # edgartools' standard view drops iPhone (member filter) and Geo
+    # (breakdown) in the newest filing but keeps iPhone in the older one.
     newest = _mock_xbrl(
-        {
-            "income": _filing_df(
-                "2024-09-28 (FY)",
-                [
-                    {"concept": "Rev", "value": 100.0},
-                    {"concept": "Rev", "axes": [product], "value": 70.0},
-                    {"concept": "Rev", "axes": [iphone], "value": 50.0},
-                    {"concept": "Rev", "axes": [ppe], "value": 1.0},
-                    {
-                        "concept": "Rev",
-                        "axes": [("Geo", "Us")],
-                        "is_breakdown": True,
-                        "value": 9.0,
-                    },
-                ],
-            )
-        },
-        valid_members={"srt_ProductOrServiceAxis": {"us-gaap_ProductMember"}},
+        {"income": newest_frame}, {"income": _rows(newest_frame, [0, 1, 4])}
     )
-    older = _mock_xbrl(
-        {
-            "income": _filing_df(
-                "2023-09-30 (FY)",
-                [
-                    {"concept": "Rev", "value": 90.0},
-                    # Valid in the older filing, but the newest filing wins.
-                    {"concept": "Rev", "axes": [iphone], "value": 45.0},
-                    {"concept": "Old", "axes": [("X", "Y")], "value": 2.0},
-                ],
-            )
-        },
-        valid_members={"srt_ProductOrServiceAxis": {"aapl_IPhoneMember"}},
-    )
+    older = _mock_xbrl({"income": older_frame}, {"income": _rows(older_frame, [0, 1])})
     xbrls = MagicMock()
     xbrls.xbrl_list = [newest, older]
     mock_periods.return_value = [
@@ -388,53 +403,89 @@ def test_build_stores_in_standard_from_newest_filing(mock_periods: MagicMock) ->
 
     df = _build_statement_dataframe(xbrls, "income", max_periods=16)
 
-    newest.find_statement.assert_called_once_with("income")
-    newest._get_valid_dimensional_members.assert_called_once_with("tree")
-    # Still exactly one to_dataframe call per filing.
-    assert _to_dataframe_mock(newest, "income").call_count == 1
     flags = dict(zip(df["row_id"], df["in_standard"], strict=True))
     assert flags == {
         "Rev": True,
         "Rev|ProductOrServiceAxis=us-gaap:ProductMember": True,
         "Rev|ProductOrServiceAxis=aapl:IPhoneMember": False,
-        "Rev|PropertyPlantAndEquipmentByTypeAxis=us-gaap:LandMember": True,
         "Rev|Geo=Us": False,
-        "Old|X=Y": True,
+        "Cost": True,
+        "Old|X=Y": False,
     }
-
     standard = Statement(df, "income").project("standard")
     assert standard["row_id"].tolist() == [
         "Rev",
         "Rev|ProductOrServiceAxis=us-gaap:ProductMember",
-        "Rev|PropertyPlantAndEquipmentByTypeAxis=us-gaap:LandMember",
-        "Old|X=Y",
+        "Cost",
     ]
 
 
+@pytest.mark.parametrize(
+    "standard",
+    [
+        RuntimeError("edgartools failed"),
+        pd.DataFrame(),
+        "misaligned",
+    ],
+    ids=["raises", "empty", "misaligned"],
+)
 @patch("src.api.edgartools.source.determine_optimal_periods")
-def test_build_in_standard_unfiltered_when_tree_unresolved(
-    mock_periods: MagicMock,
+def test_build_in_standard_falls_back_to_default(
+    mock_periods: MagicMock, standard: object
 ) -> None:
-    xbrl = _mock_xbrl(
-        {
-            "income": _filing_df(
-                "2024-09-28 (FY)",
-                [{"concept": "Rev", "axes": [("A", "M")], "value": 1.0}],
-            )
-        },
-        valid_members={"A": {"Other"}},
+    """If edgartools' standard frame is unavailable or cannot be aligned, the
+    flags are left unset and ``Statement`` fills its default
+    (``not dimension or not is_breakdown``)."""
+    frame = _filing_df(
+        "2024-09-28 (FY)",
+        [
+            {"concept": "Rev", "value": 1.0},
+            {"concept": "Rev", "axes": [("A", "M")], "value": 1.0},
+            {"concept": "Rev", "axes": [("B", "N")], "is_breakdown": True},
+        ],
     )
-    xbrl.find_statement.return_value = ([], None, None)
+    if isinstance(standard, str):
+        standard = _rows(frame, [0]).assign(concept="NotInDetailed")
     xbrls = MagicMock()
-    xbrls.xbrl_list = [xbrl]
+    xbrls.xbrl_list = [_mock_xbrl({"income": frame}, {"income": standard})]
     mock_periods.return_value = [
         {"xbrl_index": 0, "end_date": "2024-09-28", "period_type": "duration"}
     ]
 
     df = _build_statement_dataframe(xbrls, "income", max_periods=16)
 
-    assert df["in_standard"].tolist() == [True]
-    xbrl._get_valid_dimensional_members.assert_not_called()
+    assert df["in_standard"].isna().all()
+    assert Statement(df, "income").frame["in_standard"].tolist() == [True, True, False]
+
+
+# --- _align -----------------------------------------------------------------
+
+
+def _eq(a: object, b: object) -> bool:
+    return a == b
+
+
+def test_align_matches_ordered_subsequence_skipping_gaps() -> None:
+    assert _align(["a", "c", "a"], ["a", "b", "c", "d", "a"], _eq) == [0, 2, 4]
+
+
+def test_align_repeated_items_match_in_order() -> None:
+    assert _align(["x", "x"], ["x", "y", "x"], _eq) == [0, 2]
+
+
+def test_align_empty_sub_records() -> None:
+    assert _align([], ["a"], _eq) == []
+
+
+@pytest.mark.parametrize(
+    ("sub", "sup"),
+    [(["z"], ["a", "b"]), (["b", "a"], ["a", "b"]), (["a", "a"], ["a"])],
+    ids=["missing", "out-of-order", "too-many"],
+)
+def test_align_returns_none_when_not_a_subsequence(
+    sub: list[str], sup: list[str]
+) -> None:
+    assert _align(sub, sup, _eq) is None
 
 
 # --- load_statement_set -----------------------------------------------------
@@ -522,9 +573,10 @@ def test_load_statement_set_fetches_builds_and_saves(
     company.get_filings.return_value.head.assert_called_once_with(expected_cap)
     assert all(c.kwargs["max_periods"] == expected_cap for c in mock_periods.mock_calls)
     for st in _GETTERS:
-        _to_dataframe_mock(xbrl, st).assert_called_once_with(
-            view="detailed", presentation=False
-        )
+        assert _to_dataframe_mock(xbrl, st).call_args_list == [
+            call(view="detailed", presentation=False),
+            call(view="standard", presentation=False),
+        ]
 
     mock_save_bundle.assert_called_once()
     save_kwargs = mock_save_bundle.call_args.kwargs
