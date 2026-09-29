@@ -27,6 +27,7 @@ RESIDUAL_COLUMNS: tuple[str, ...] = (
     "relative",
     "n_children",
     "n_nan_children",
+    "n_nan_weight_children",
 )
 
 
@@ -55,9 +56,17 @@ def calc_residuals(statement: Statement) -> pd.DataFrame:
       first (``#1``) is a parent, and only the first of a duplicated child
       concept is summed — ``parent_concept`` names a concept, not a row.
     - Periods where the parent value is NaN are skipped. NaN children count
-      as 0 and are counted in ``n_nan_children``. NaN ``weight`` counts as 1.
+      as 0 and are counted in ``n_nan_children``. A child whose ``weight`` is
+      NaN (unknown in every cached filing) is left out of the sum rather than
+      guessed, and counted in ``n_nan_weight_children``; a frame without a
+      ``weight`` column weighs every child 1.
     - ``relative = residual / |reported|`` (``±inf`` when reported is 0 and
       the residual is not, NaN when both are 0).
+    - Known, accepted residual: diluted weighted-average shares
+      (``WeightedAverageNumberOfDilutedSharesOutstanding``) always leaves a
+      residual equal to the dilutive effect, because edgartools takes its calc
+      tree from the EPS-note role (diluted = basic + incremental shares) and
+      the incremental-shares child is not on the income statement.
 
     Columns: :data:`RESIDUAL_COLUMNS`. Pure: no I/O, frame untouched.
     """
@@ -81,13 +90,15 @@ def calc_residuals(statement: Statement) -> pd.DataFrame:
         weights = pd.to_numeric(
             children.get("weight", pd.Series(1.0, index=children.index)),
             errors="coerce",
-        ).fillna(1.0)
+        )
+        n_nan_weight = int(weights.isna().sum())
         child_values = values.loc[children.index]
         for period in periods:
             reported = values.at[index, period]
             if np.isnan(reported):
                 continue
             column = child_values[period]
+            # NaN weight → NaN product, which ``sum`` skips.
             computed = float((column.fillna(0.0) * weights).sum())
             residual = float(reported - computed)
             if reported != 0:
@@ -108,6 +119,7 @@ def calc_residuals(statement: Statement) -> pd.DataFrame:
                     "relative": relative,
                     "n_children": len(children),
                     "n_nan_children": int(column.isna().sum()),
+                    "n_nan_weight_children": n_nan_weight,
                 }
             )
     return pd.DataFrame.from_records(records, columns=list(RESIDUAL_COLUMNS))

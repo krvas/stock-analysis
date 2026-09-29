@@ -181,21 +181,21 @@ def _align[T, U](
     return positions
 
 
-def _dimension_keys(statement, frame: pd.DataFrame) -> list[str | None] | None:
-    """Full ``dimension_key`` per row of ``frame`` (see ``statement.py``).
+def _raw_items(statement, frame: pd.DataFrame) -> list[dict] | None:
+    """The ``get_raw_data(view="detailed")`` item behind each row of ``frame``.
 
-    ``to_dataframe`` exposes only the primary axis/member of a multi-axis row;
-    every pair is in ``get_raw_data()``'s ``dimension_metadata``. edgartools
-    builds the frame from that raw data in order, dropping only XBRL
-    structural items (axes, domains, tables, root abstracts), so the frame is
-    an ordered subsequence of it (:func:`_align`, checking concept and the
-    frame's own dimension columns). Returns ``None`` (caller falls back to the
-    primary pair) if any frame row cannot be matched.
+    edgartools builds the frame from that raw data in order, dropping only
+    XBRL structural items (axes, domains, tables, root abstracts), so the frame
+    is an ordered subsequence of it (:func:`_align`, checking concept and the
+    frame's own dimension columns). Returns ``None`` on an edgartools error or
+    if any frame row cannot be matched; callers keep the frame's own values.
     """
     try:
         raw = list(statement.get_raw_data(view="detailed"))
     except Exception:  # noqa: BLE001 - edgartools raises assorted errors
-        logger.warning("get_raw_data failed; using primary dimension only")
+        logger.warning(
+            "get_raw_data failed; using primary dimension and edgartools' weight"
+        )
         return None
 
     positions = _align(
@@ -206,25 +206,49 @@ def _dimension_keys(statement, frame: pd.DataFrame) -> list[str | None] | None:
     if positions is None:
         logger.warning(
             "Could not align raw data with to_dataframe rows; "
-            "using primary dimension only"
+            "using primary dimension and edgartools' weight"
         )
         return None
+    return [raw[position] for position in positions]
 
-    keys: list[str | None] = []
-    for position in positions:
-        item = raw[position]
-        if not item.get("is_dimension"):
-            keys.append(None)
+
+def _dimension_key(item: dict) -> str | None:
+    """Full ``dimension_key`` of a raw item (see ``statement.py``).
+
+    ``to_dataframe`` exposes only the primary axis/member of a multi-axis row;
+    every pair is in the raw item's ``dimension_metadata``.
+    """
+    if not item.get("is_dimension"):
+        return None
+    return format_dimension_key(
+        [
+            (meta.get("dimension"), meta.get("member"))
+            for meta in item.get("dimension_metadata") or []
+        ]
+    )
+
+
+def _role_weights(frame: pd.DataFrame, items: Sequence[dict]) -> pd.Series:
+    """Calc ``weight`` per row of ``frame`` from this statement's own role.
+
+    ``to_dataframe`` fills ``weight`` from the concept's first fact, whose
+    weight can come from a different role's calc tree than the frame's
+    ``parent_concept`` (e.g. +1 from the income role for a concept that is −1
+    under the cash-flow role). Non-dimensional raw items carry the weight from
+    the same calc node as their ``calculation_parent`` (the frame's
+    ``parent_concept``). Dimensional raw items carry no weight; edgartools
+    treats weight and ``parent_concept`` as concept attributes, so they take
+    their concept's role weight. Rows whose concept has no raw weight keep the
+    frame's.
+    """
+    by_concept: dict[object, object] = {}
+    for item in items:
+        weight = item.get("weight")
+        if item.get("is_dimension") or weight is None or pd.isna(weight):
             continue
-        keys.append(
-            format_dimension_key(
-                [
-                    (meta.get("dimension"), meta.get("member"))
-                    for meta in item.get("dimension_metadata") or []
-                ]
-            )
-        )
-    return keys
+        by_concept.setdefault(item.get("concept"), weight)
+    role = pd.to_numeric(frame["concept"].map(by_concept), errors="coerce")
+    return role.where(role.notna(), frame["weight"])
 
 
 # Columns identifying one ``to_dataframe`` row across views of one filing.
@@ -285,7 +309,10 @@ def _filing_frame(xbrl, statement_type: StatementType) -> pd.DataFrame | None:
 
     Adds our ``dimension_key`` column (all axis/member pairs per row) and
     ``in_standard`` (edgartools' own ``view="standard"`` membership, see
-    :func:`_in_standard`).
+    :func:`_in_standard`), and replaces ``weight`` with this statement role's
+    calc weight (:func:`_role_weights`). Raw data is fetched and aligned once
+    (:func:`_raw_items`); if that fails, ``dimension_key`` falls back to the
+    primary pair and ``weight`` stays edgartools'.
     """
     getter = getattr(xbrl.statements, _STATEMENT_METHODS[statement_type])
     statement = getter(view="detailed")
@@ -295,8 +322,12 @@ def _filing_frame(xbrl, statement_type: StatementType) -> pd.DataFrame | None:
     if not isinstance(frame, pd.DataFrame) or frame.empty:
         return None
     frame = frame.copy()
-    keys = _dimension_keys(statement, frame)
-    frame["dimension_key"] = keys if keys is not None else None
+    items = _raw_items(statement, frame)
+    if items is None:
+        frame["dimension_key"] = None
+    else:
+        frame["dimension_key"] = [_dimension_key(item) for item in items]
+        frame["weight"] = _role_weights(frame, items)
     frame["in_standard"] = _in_standard(statement, frame)
     return frame
 
@@ -317,8 +348,10 @@ def _build_statement_dataframe(
     axis/member, from ``dimension_key``), with the 1-based occurrence of that
     id within the filing (so e.g. cash beginning/end of period, which share a
     concept, stay separate rows). Metadata (including ``in_standard``) comes
-    from the newest filing a row appears in (first seen wins); rows only in older
-    filings are appended after it. Values keep raw XBRL signs.
+    from the newest filing a row appears in (first seen wins), except
+    ``weight``, which is the newest non-NaN weight across filings (a filing
+    can list a calc child without a weight); rows only in older filings are
+    appended after it. Values keep raw XBRL signs.
     """
     period_metas = determine_optimal_periods(
         xbrls.xbrl_list,
@@ -360,6 +393,10 @@ def _build_statement_dataframe(
                 level = record.get("level")
                 rows_by_id[row_id]["level"] = 0 if pd.isna(level) else int(level)
                 values_by_id[row_id] = {}
+            elif pd.isna(rows_by_id[row_id]["weight"]):
+                # A newer filing may omit the calc weight (NaN); take the
+                # newest known one rather than leaving it unknown.
+                rows_by_id[row_id]["weight"] = record.get("weight")
 
             if period_column is not None:
                 value = record.get(period_column)

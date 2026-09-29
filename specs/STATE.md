@@ -108,10 +108,16 @@ picks filings/periods (`determine_optimal_periods`); each filing gets
 `to_dataframe(view="detailed", presentation=False)` per statement (the stored
 frame) plus `view="standard"` only to set `in_standard`: standard rows are an
 ordered subsequence of detailed rows, matched by `_align` (the same walk
-`_dimension_keys` uses against `get_raw_data()`); on failure `Statement`
-defaults it to `not dimension or not is_breakdown`. Rows
+`_raw_items` uses against `get_raw_data(view="detailed")`); on failure `Statement`
+defaults it to `not dimension or not is_breakdown`. The aligned raw items
+(fetched once per filing statement) give `dimension_key` and replace
+`weight`: edgartools' frame weight comes from the concept's first fact and can
+be another role's calc tree, the raw item's is this role's (same node as
+`parent_concept`); dimensional rows take their concept's role weight. If
+alignment fails, edgartools' weight is kept. Rows
 matched across filings by `get_row_id`; metadata from the newest filing a
-row appears in. Values stored with **raw** XBRL signs.
+row appears in, except `weight` = newest non-NaN across filings. Values
+stored with **raw** XBRL signs.
 Rebuilt on `schema_version` mismatch (`CACHE_SCHEMA_VERSION`), missing/corrupt
 files, or `latest_filing_date` older than
 `EDGARTOOLS_ANNUAL_CACHE_MAX_AGE_MONTHS` (12) /
@@ -131,7 +137,12 @@ client-side.
 prefix stripped, member QName kept), `#n` for repeats within one filing.
 `calc_residuals(statement)` (`src/models/calc_residuals.py`):
 `reported(parent) − Σ weight·child` over non-dimensional calc children (raw
-signs); `calc_residual_report` CLI runs it over the cache (read-only).
+signs); children with NaN weight are excluded and counted
+(`n_nan_weight_children`), never assumed +1. Known, accepted residual: diluted
+shares (`WeightedAverageNumberOfDilutedSharesOutstanding`) always has a
+residual equal to the dilutive effect (edgartools uses the EPS-note calc role;
+its incremental-shares child is not on the income statement).
+`calc_residual_report` CLI runs it over the cache (read-only).
 
 **Wizard.**
 

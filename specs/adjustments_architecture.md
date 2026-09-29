@@ -21,7 +21,7 @@ persisted. Reported data and adjustment prefs stay fully decoupled.
 | `standard_concept` is not unique in detailed views | up to 12 dupes (income), 36 (cashflow). The opex table's `row_id_col="standard_concept"` can collide |
 | Row sets depend on `num_periods` | AAPL annual_2 detailed income = 59 rows vs annual_10 = 113 |
 | Calc linkbase reproduces reported totals **on raw signs** | AAPL & MSFT latest 10-K, all 3 statements: every monetary parent == Σ(weight × child) with `to_dataframe(presentation=False)`; with the default `presentation=True`, all 3 CF subtotals fail. The only miss is the diluted share count (non-monetary, child not presented) |
-| `to_dataframe` exposes the calc tree | `parent_concept` = calculation parent, `parent_abstract_concept` = presentation parent, `weight` = calc weight for the statement role |
+| `to_dataframe` exposes the calc tree | `parent_concept` = calculation parent, `parent_abstract_concept` = presentation parent, `weight` = calc weight for the statement role (only on `get_raw_data()` items; `to_dataframe`'s `weight` comes from the concept's first fact and can be another role's, so the cache takes the raw item's) |
 
 ## 2. Pipeline (where adjustments live)
 
@@ -158,7 +158,8 @@ replaces the hand-authored "spine" from v1 entirely.
    - Where the tree is complete (the AAPL/MSFT case), the residual is 0, so it's a
      pure recompute.
    - It also absorbs parent/weight drift across years, since metadata comes from the
-     latest filing.
+     latest filing (weight: the newest non-NaN one). A child whose weight is still
+     NaN is excluded from the sum (and counted), not assumed +1.
 2. **Recompute only dirty ancestors.** Walk `parent_concept` upward from each
    overridden or inserted row. Untouched subtrees keep reported values, so gaps and
    non-monetary rows (share counts) are never recomputed.

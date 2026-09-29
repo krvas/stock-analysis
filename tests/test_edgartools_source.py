@@ -30,7 +30,9 @@ def _filing_df(period_column: str, rows: list[dict]) -> pd.DataFrame:
     A row's ``axes`` (list of ``(axis, member)``) makes it dimensional: like
     edgartools, the frame exposes only the first pair, while the matching
     ``get_raw_data`` item (kept in ``frame.attrs["raw"]``, with a structural
-    axis item in front) carries all of them in ``dimension_metadata``.
+    axis item in front) carries all of them in ``dimension_metadata``. A
+    row's ``raw_weight`` is that raw item's role-specific calc ``weight``
+    (``weight`` is the frame's, which edgartools fills from facts).
     """
     records = []
     raw: list[dict] = [{"concept": "us-gaap_StatementTable", "label": "[Table]"}]
@@ -48,6 +50,7 @@ def _filing_df(period_column: str, rows: list[dict]) -> pd.DataFrame:
                 "concept": row["concept"],
                 "is_dimension": bool(row.get("dimension", False)),
                 "full_dimension_label": None,
+                "weight": row.get("raw_weight"),
                 "dimension_metadata": [
                     {"dimension": axis, "member": member} for axis, member in axes
                 ]
@@ -343,6 +346,121 @@ def test_build_falls_back_to_primary_dimension_when_raw_misaligned(
     df = _build_statement_dataframe(xbrls, "income", max_periods=16)
 
     assert df["row_id"].tolist() == ["Rev|A=M"]
+
+
+@patch("src.api.edgartools.source.determine_optimal_periods")
+def test_build_takes_role_weight_from_raw_data(mock_periods: MagicMock) -> None:
+    """edgartools' frame ``weight`` comes from the concept's first fact (maybe
+    another role's calc tree); the aligned raw item's weight is this role's.
+    Dimensional rows take their concept's role weight; rows without a raw
+    weight keep the frame's. Raw data is fetched once per filing statement."""
+    frame = _filing_df(
+        "2024-09-28 (FY)",
+        [
+            {"concept": "OpCF", "value": 10.0, "weight": np.nan},
+            {
+                "concept": "Unrealized",
+                "value": 3.0,
+                "weight": 1.0,
+                "raw_weight": -1.0,
+                "parent_concept": "OpCF",
+            },
+            {
+                "concept": "Unrealized",
+                "axes": [("A", "M")],
+                "value": 2.0,
+                "weight": 1.0,
+            },
+            {
+                "concept": "Other",
+                "value": 13.0,
+                "weight": 1.0,
+                "parent_concept": "OpCF",
+            },
+        ],
+    )
+    xbrl = _mock_xbrl({"cashflow": frame})
+    xbrls = MagicMock()
+    xbrls.xbrl_list = [xbrl]
+    mock_periods.return_value = [
+        {"xbrl_index": 0, "end_date": "2024-09-28", "period_type": "duration"},
+        {"xbrl_index": 0, "end_date": "2023-09-30", "period_type": "duration"},
+    ]
+
+    df = _build_statement_dataframe(xbrls, "cashflow", max_periods=16)
+
+    statement = xbrl.statements.cash_flow_statement.return_value
+    statement.get_raw_data.assert_called_once_with(view="detailed")
+    weights = dict(zip(df["row_id"], df["weight"], strict=True))
+    assert pd.isna(weights.pop("OpCF"))
+    assert weights == {"Unrealized": -1.0, "Unrealized|A=M": -1.0, "Other": 1.0}
+
+
+@patch("src.api.edgartools.source.determine_optimal_periods")
+def test_build_keeps_frame_weight_when_raw_misaligned(
+    mock_periods: MagicMock, caplog: pytest.LogCaptureFixture
+) -> None:
+    frame = _filing_df(
+        "2024-09-28 (FY)",
+        [{"concept": "Rev", "value": 1.0, "weight": 1.0, "raw_weight": -1.0}],
+    )
+    frame.attrs["raw"] = [{"concept": "Other", "is_dimension": False, "weight": -1.0}]
+    xbrls = MagicMock()
+    xbrls.xbrl_list = [_mock_xbrl({"income": frame})]
+    mock_periods.return_value = [
+        {"xbrl_index": 0, "end_date": "2024-09-28", "period_type": "duration"}
+    ]
+
+    df = _build_statement_dataframe(xbrls, "income", max_periods=16)
+
+    assert df["weight"].tolist() == [1.0]
+    assert "Could not align raw data" in caplog.text
+
+
+@patch("src.api.edgartools.source.determine_optimal_periods")
+def test_build_weight_is_newest_non_nan_across_filings(
+    mock_periods: MagicMock,
+) -> None:
+    """A newer filing listing a calc child without a weight must not blank the
+    weight older filings give; every other column stays newest-filing."""
+    filings = [
+        ("2024-09-28", "Newest label", "credit", np.nan),
+        ("2023-09-30", "Middle label", "debit", -1.0),
+        ("2022-09-24", "Oldest label", "debit", 1.0),
+    ]
+    xbrls = MagicMock()
+    xbrls.xbrl_list = [
+        _mock_xbrl(
+            {
+                "cashflow": _filing_df(
+                    f"{end} (FY)",
+                    [
+                        {"concept": "Invest", "value": 1.0},
+                        {
+                            "concept": "Acq",
+                            "label": label,
+                            "balance": balance,
+                            "weight": weight,
+                            "parent_concept": "Invest",
+                            "value": 1.0,
+                        },
+                    ],
+                )
+            }
+        )
+        for end, label, balance, weight in filings
+    ]
+    mock_periods.return_value = [
+        {"xbrl_index": index, "end_date": end, "period_type": "duration"}
+        for index, (end, *_) in enumerate(filings)
+    ]
+
+    df = _build_statement_dataframe(xbrls, "cashflow", max_periods=16)
+
+    acq = df.set_index("row_id").loc["Acq"]
+    assert acq["weight"] == -1.0
+    assert acq["label"] == "Newest label"
+    assert acq["balance"] == "credit"
 
 
 @patch("src.api.edgartools.source.determine_optimal_periods")
