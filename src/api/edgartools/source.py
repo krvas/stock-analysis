@@ -10,10 +10,10 @@ from __future__ import annotations
 
 import logging
 import os
+from collections.abc import Callable, Sequence
 from datetime import date
 from typing import Literal
 
-import numpy as np
 import pandas as pd
 from edgar import Company
 from edgar.xbrl import XBRLS
@@ -40,7 +40,6 @@ from src.models.statement import (
     Statement,
     StatementSet,
     StatementType,
-    dimension_pairs,
     format_dimension_key,
     get_row_id,
 )
@@ -156,6 +155,32 @@ def _raw_item_matches(item: dict, record: dict) -> bool:
     )
 
 
+def _align[T, U](
+    sub_records: Sequence[T],
+    super_records: Sequence[U],
+    matches: Callable[[T, U], bool],
+) -> list[int] | None:
+    """Positions in ``super_records`` of each of ``sub_records``.
+
+    ``sub_records`` must be an ordered subsequence of ``super_records`` (the
+    same walk with some items dropped): each sub record is matched greedily to
+    the next super record for which ``matches(sub, super)`` holds. Returns
+    ``None`` if any sub record cannot be matched.
+    """
+    positions: list[int] = []
+    position = 0
+    for record in sub_records:
+        while position < len(super_records) and not matches(
+            record, super_records[position]
+        ):
+            position += 1
+        if position == len(super_records):
+            return None
+        positions.append(position)
+        position += 1
+    return positions
+
+
 def _dimension_keys(statement, frame: pd.DataFrame) -> list[str | None] | None:
     """Full ``dimension_key`` per row of ``frame`` (see ``statement.py``).
 
@@ -163,8 +188,8 @@ def _dimension_keys(statement, frame: pd.DataFrame) -> list[str | None] | None:
     every pair is in ``get_raw_data()``'s ``dimension_metadata``. edgartools
     builds the frame from that raw data in order, dropping only XBRL
     structural items (axes, domains, tables, root abstracts), so the frame is
-    an ordered subsequence of it: match greedily, checking concept and the
-    frame's own dimension columns. Returns ``None`` (caller falls back to the
+    an ordered subsequence of it (:func:`_align`, checking concept and the
+    frame's own dimension columns). Returns ``None`` (caller falls back to the
     primary pair) if any frame row cannot be matched.
     """
     try:
@@ -173,20 +198,21 @@ def _dimension_keys(statement, frame: pd.DataFrame) -> list[str | None] | None:
         logger.warning("get_raw_data failed; using primary dimension only")
         return None
 
+    positions = _align(
+        frame.to_dict(orient="records"),
+        raw,
+        lambda record, item: _raw_item_matches(item, record),
+    )
+    if positions is None:
+        logger.warning(
+            "Could not align raw data with to_dataframe rows; "
+            "using primary dimension only"
+        )
+        return None
+
     keys: list[str | None] = []
-    position = 0
-    for record in frame.to_dict(orient="records"):
-        while position < len(raw) and not _raw_item_matches(raw[position], record):
-            position += 1
-        if position == len(raw):
-            logger.warning(
-                "Could not align raw data with to_dataframe row %r; "
-                "using primary dimension only",
-                record.get("concept"),
-            )
-            return None
+    for position in positions:
         item = raw[position]
-        position += 1
         if not item.get("is_dimension"):
             keys.append(None)
             continue
@@ -201,71 +227,56 @@ def _dimension_keys(statement, frame: pd.DataFrame) -> list[str | None] | None:
     return keys
 
 
-def _standard_valid_members(xbrl, statement) -> dict[str, set[str]]:
-    """Axis -> members edgartools' standard view allows for ``statement``.
-
-    Replicates edgartools 5.47 ``XBRL.get_statement``: it resolves the
-    statement's role with ``XBRL.find_statement`` and passes
-    ``XBRL._get_valid_dimensional_members(presentation_tree)`` (private API —
-    re-check on edgartools upgrades) to ``_generate_line_items``, which for any
-    view but detailed drops dimensional facts whose member is not listed for
-    their axis. Keys/members are underscore-normalised QNames. ``{}`` (no
-    filtering, as in edgartools) when the role/tree cannot be resolved.
-    """
-    try:
-        statement_id = statement.canonical_type or statement.role_or_type
-        _, role, _ = xbrl.find_statement(statement_id)
-        trees = xbrl.presentation_trees
-        if not role or role not in trees:
-            return {}
-        return dict(xbrl._get_valid_dimensional_members(trees[role]))
-    except Exception:  # noqa: BLE001 - edgartools raises assorted errors
-        logger.warning("Could not read presentation members; in_standard unfiltered")
-        return {}
+# Columns identifying one ``to_dataframe`` row across views of one filing.
+_ROW_MATCH_COLUMNS: tuple[str, ...] = (
+    "concept",
+    "label",
+    "dimension",
+    "dimension_axis",
+    "dimension_member",
+    "dimension_label",
+)
 
 
-def _passes_member_filter(
-    pairs: list[tuple[str, str]], valid_members: dict[str, set[str]]
-) -> bool:
-    """edgartools' strict standard-view member check for one dimensional row.
-
-    Mirrors the ``is_valid_dimension`` loop in edgartools 5.47
-    ``XBRL._generate_line_items``: a fact is dropped if **any** of its axes is
-    in ``valid_members`` with a member not listed for it; axes absent from
-    ``valid_members`` never exclude. Facts of one row share all axis/member
-    pairs, so the check is per row.
-    """
-    for axis, member in pairs:
-        axis_key = str(axis).replace(":", "_")
-        member_key = str(member).replace(":", "_")
-        if axis_key in valid_members and member_key not in valid_members[axis_key]:
-            return False
-    return True
+def _rows_match(left: dict, right: dict) -> bool:
+    return all(_text(left.get(c)) == _text(right.get(c)) for c in _ROW_MATCH_COLUMNS)
 
 
-def _is_true(value: object) -> bool:
-    return isinstance(value, bool | np.bool_) and bool(value)
-
-
-def _in_standard(frame: pd.DataFrame, valid_members: dict[str, set[str]]) -> list:
+def _in_standard(statement, frame: pd.DataFrame) -> list[bool] | list[None]:
     """Whether edgartools' ``view="standard"`` keeps each row of ``frame``.
 
-    ``Statement._build_dataframe_from_raw_data`` keeps every non-dimensional
-    item and drops dimensional items where ``is_breakdown`` (same per-item
-    value as the detailed frame's column); ``get_statement`` has already
-    dropped dimensional facts failing the member filter. So a row is in
-    standard iff it is non-dimensional, or it is not a breakdown and passes
-    :func:`_passes_member_filter` on all of its axis/member pairs.
+    ``to_dataframe(view="standard")`` walks the same presentation tree as the
+    detailed frame and only drops rows (breakdown dimensions and dimensional
+    facts whose member is not in the presentation linkbase), so its rows are
+    an ordered subsequence of ``frame``'s: rows :func:`_align` matches are in
+    standard, the rest are not. On an edgartools error or failed alignment
+    every flag is ``None`` and :class:`~src.models.statement.Statement` fills
+    its default.
     """
-    flags = []
-    for record in frame.to_dict(orient="records"):
-        if not _is_true(record.get("dimension")):
-            flags.append(True)
-            continue
-        flags.append(
-            not _is_true(record.get("is_breakdown"))
-            and _passes_member_filter(dimension_pairs(record), valid_members)
+    unknown: list[None] = [None] * len(frame)
+    try:
+        standard = statement.to_dataframe(view="standard", presentation=False)
+    except Exception:  # noqa: BLE001 - edgartools raises assorted errors
+        logger.warning("Standard to_dataframe failed; in_standard left to default")
+        return unknown
+    if not isinstance(standard, pd.DataFrame) or standard.empty:
+        logger.warning("Standard to_dataframe returned no rows; default in_standard")
+        return unknown
+
+    positions = _align(
+        standard.to_dict(orient="records"),
+        frame.to_dict(orient="records"),
+        _rows_match,
+    )
+    if positions is None:
+        logger.warning(
+            "Could not align standard rows with detailed rows; "
+            "in_standard left to default"
         )
+        return unknown
+    flags = [False] * len(frame)
+    for position in positions:
+        flags[position] = True
     return flags
 
 
@@ -273,8 +284,8 @@ def _filing_frame(xbrl, statement_type: StatementType) -> pd.DataFrame | None:
     """One raw (``presentation=False``) detailed frame for one filing.
 
     Adds our ``dimension_key`` column (all axis/member pairs per row) and
-    ``in_standard`` (edgartools' standard-view membership, see
-    :func:`_in_standard`) without a second ``to_dataframe`` call.
+    ``in_standard`` (edgartools' own ``view="standard"`` membership, see
+    :func:`_in_standard`).
     """
     getter = getattr(xbrl.statements, _STATEMENT_METHODS[statement_type])
     statement = getter(view="detailed")
@@ -286,7 +297,7 @@ def _filing_frame(xbrl, statement_type: StatementType) -> pd.DataFrame | None:
     frame = frame.copy()
     keys = _dimension_keys(statement, frame)
     frame["dimension_key"] = keys if keys is not None else None
-    frame["in_standard"] = _in_standard(frame, _standard_valid_members(xbrl, statement))
+    frame["in_standard"] = _in_standard(statement, frame)
     return frame
 
 

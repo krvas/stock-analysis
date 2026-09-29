@@ -129,9 +129,10 @@ standard : in_standard
 detailed : all rows
 ```
 
-`in_standard` is an added column computed at cache build from each filing's
-detailed frame: `not dimension or (not is_breakdown and every axis/member passes
-edgartools' presentation-linkbase member filter)`. It cannot be derived from
+`in_standard` is an added column computed at cache build: a detailed row is in
+standard iff it matches a row of that filing's own
+`to_dataframe(view="standard")` (aligned in order; standard only drops rows).
+It cannot be derived from
 `dimension`/`is_breakdown` alone. Like other metadata it comes from the newest
 filing the row appears in; rows without it (e.g. inserted rows) default to
 `not dimension or not is_breakdown`.

@@ -104,8 +104,12 @@ only entry point. Cache key `(cik, period)`, no `num_periods`:
 `companies/{cik}/{period}/{income,balance,cashflow}.parquet` + `meta.json`
 (`schema_version`, `period`, `latest_filing_date`). Builds from up
 to `MAX_CACHE_YEARS` (16) 10-Ks or `MAX_CACHE_QUARTERS` (64) 10-Qs: XBRLS only
-picks filings/periods (`determine_optimal_periods`); each filing gets **one**
-`to_dataframe(view="detailed", presentation=False)` per statement. Rows
+picks filings/periods (`determine_optimal_periods`); each filing gets
+`to_dataframe(view="detailed", presentation=False)` per statement (the stored
+frame) plus `view="standard"` only to set `in_standard`: standard rows are an
+ordered subsequence of detailed rows, matched by `_align` (the same walk
+`_dimension_keys` uses against `get_raw_data()`); on failure `Statement`
+defaults it to `not dimension or not is_breakdown`. Rows
 matched across filings by `get_row_id`; metadata from the newest filing a
 row appears in. Values stored with **raw** XBRL signs.
 Rebuilt on `schema_version` mismatch (`CACHE_SCHEMA_VERSION`), missing/corrupt
@@ -116,9 +120,9 @@ files, or `latest_filing_date` older than
 
 Views are projections: `Statement.project(view, periods)` — summary =
 non-dimensional rows, standard = `in_standard` (edgartools' standard-view
-membership, computed at cache build), detailed = all; `preferred_sign`
-applied only here. `html_renderer.py` projects each statement to every view
-over `periods[:num_periods]`. Payload is nested Table JSON;
+membership, read from its standard frame at cache build), detailed = all;
+`preferred_sign` applied only here. `html_renderer.py` projects each
+statement to every view over `periods[:num_periods]`. Payload is nested Table JSON;
 `statement_view.js` toggles type/level and balance-sheet fund-flow
 client-side.
 
