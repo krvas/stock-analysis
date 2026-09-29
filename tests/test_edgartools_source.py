@@ -532,7 +532,6 @@ def test_load_statement_set_fetches_builds_and_saves(
     assert save_kwargs["period"] == period
     assert save_kwargs["latest_filing_date"] == date(2024, 11, 1)
     assert set(save_kwargs["frames"]) == {"income", "balance", "cashflow"}
-    assert tuple(save_kwargs["periods"]) == (period_date,)
     mock_touch_cache.assert_called_once()
 
 

@@ -42,7 +42,6 @@ def _cache(tmp_path: Path) -> Path:
             period="annual",
             latest_filing_date=today,
             frames={st: _frame(total_p2) for st in ("income", "balance", "cashflow")},
-            periods=[P1, P2],
             cache_dir=cache_dir,
         )
         touch_company_cache(cik=cik, ticker=ticker, cache_dir=cache_dir)

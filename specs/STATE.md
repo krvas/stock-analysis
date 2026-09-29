@@ -101,7 +101,7 @@ refactor. Finnhub is thin (quote snapshot, guessy statements).
 `load_statement_set(ticker, period) -> StatementSet` (`source.py`) is the
 only entry point. Cache key `(cik, period)`, no `num_periods`:
 `companies/{cik}/{period}/{income,balance,cashflow}.parquet` + `meta.json`
-(`schema_version`, `period`, `latest_filing_date`, `periods`). Builds from up
+(`schema_version`, `period`, `latest_filing_date`). Builds from up
 to `MAX_CACHE_YEARS` (16) 10-Ks or `MAX_CACHE_QUARTERS` (64) 10-Qs: XBRLS only
 picks filings/periods (`determine_optimal_periods`); each filing gets **one**
 `to_dataframe(view="detailed", presentation=False)` per statement. Rows
