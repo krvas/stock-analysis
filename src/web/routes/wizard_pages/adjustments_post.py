@@ -23,11 +23,13 @@ def _validate_opex_to_capex_body(
 ) -> tuple[list[dict[str, Any]], list[str]]:
     """Validate the opex-to-capex save payload.
 
-    Returns ``(rows_to_upsert, base_concepts_to_delete)``. Every posted row
-    is either checked (upsert) or unchecked (delete) -- there is no third
-    case. An unchecked row with a missing/blank id is skipped from the
-    delete list rather than raising, since there is no meaningful key to
-    delete without an id.
+    Returns ``(rows_to_upsert, row_ids_to_delete)``. Each posted ``id`` is a
+    row id as formed by :func:`src.models.statement.get_row_id` (the builder
+    keys the table by it); it is stored verbatim in ``base_concept`` and never
+    re-derived here. Every posted row is either checked (upsert) or unchecked
+    (delete) -- there is no third case. An unchecked row with a missing/blank
+    id is skipped from the delete list rather than raising, since there is
+    no meaningful key to delete without an id.
     """
     raw_rows = body.get("rows")
     if raw_rows is None:
@@ -39,18 +41,17 @@ def _validate_opex_to_capex_body(
         raise ValueError(str(exc)) from exc
 
     validated_rows: list[dict[str, Any]] = []
-    base_concepts_to_delete: list[str] = []
+    row_ids_to_delete: list[str] = []
     for index, item in enumerate(raw_rows):
         row_id = item["id"]
 
         if not table.get_cell(row_id, "capitalize"):
             if row_id and str(row_id).strip():
-                base_concepts_to_delete.append(str(row_id).strip())
+                row_ids_to_delete.append(str(row_id).strip())
             continue
 
         if not row_id or not str(row_id).strip():
             raise ValueError(f"rows[{index}].id is required when capitalize is true")
-        base_concept = str(row_id).strip()
 
         years = table.get_cell(row_id, "years")
         if years is None:
@@ -60,12 +61,12 @@ def _validate_opex_to_capex_body(
 
         validated_rows.append(
             {
-                "base_concept": base_concept,
+                "base_concept": str(row_id).strip(),
                 "years": float(years),
             }
         )
 
-    return validated_rows, base_concepts_to_delete
+    return validated_rows, row_ids_to_delete
 
 
 def opex_to_capex_post(ticker: str, body: dict[str, Any]) -> dict[str, Any]:
@@ -73,7 +74,7 @@ def opex_to_capex_post(ticker: str, body: dict[str, Any]) -> dict[str, Any]:
 
     Unchecked rows have their previously-saved preference (if any) deleted.
     """
-    raw_rows, base_concepts_to_delete = _validate_opex_to_capex_body(body)
+    raw_rows, row_ids_to_delete = _validate_opex_to_capex_body(body)
 
     records: list[dict[str, object]] = []
     for item in raw_rows:
@@ -89,7 +90,7 @@ def opex_to_capex_post(ticker: str, body: dict[str, Any]) -> dict[str, Any]:
             }
         )
 
-    if not records and not base_concepts_to_delete:
+    if not records and not row_ids_to_delete:
         return {"ok": True, "rows_written": 0, "rows_deleted": 0}
 
     rows_written = 0
@@ -100,10 +101,10 @@ def opex_to_capex_post(ticker: str, body: dict[str, Any]) -> dict[str, Any]:
             result = db.upsert_adjustment_preferences(df)
             rows_written = result.rows_written
 
-        if base_concepts_to_delete:
+        if row_ids_to_delete:
             delete_keys = [
-                (ticker, DEFAULT_EXCHANGE, OPEX_TO_CAPEX_ADJUSTMENT_TYPE, base_concept)
-                for base_concept in base_concepts_to_delete
+                (ticker, DEFAULT_EXCHANGE, OPEX_TO_CAPEX_ADJUSTMENT_TYPE, row_id)
+                for row_id in row_ids_to_delete
             ]
             delete_result = db.delete_adjustment_preferences(delete_keys)
             rows_deleted = delete_result.rows_deleted
