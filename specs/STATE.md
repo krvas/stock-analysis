@@ -42,8 +42,9 @@ src/pipelines/             CLIs (load_from_names, calc_residual_report)
 src/database/              schema.sql + tables.py; wizard.sql + wizard_tables.py
                            manager.py (BaseDatabaseManager, DatabaseManager)
                            wizard_manager.py, adjustments.py
-src/models/statement.py    Statement / StatementSet / get_row_id / calc_residuals
+src/models/statement.py    Statement / StatementSet / get_row_id
                            (pure domain: pandas only, no I/O)
+src/models/calc_residuals.py  calc_residuals (calc-linkbase residuals; pure)
 src/models/table.py        Table / ColumnSpec / LinkedGroupSpec  (FE↔BE contract)
 src/models/edgartools/html_renderer.py   DataFrames → Table.serialize() payload
 src/web/app.py             FastAPI; / → {statements, wizard, screener, docs}
@@ -124,9 +125,9 @@ client-side.
 `get_row_id` (only place ids are formed): `concept`, plus
 `|Axis=member` for every axis of a dimensional row (sorted by axis, axis
 prefix stripped, member QName kept), `#n` for repeats within one filing.
-`calc_residuals(statement)`: `reported(parent) − Σ weight·child` over
-non-dimensional calc children (raw signs); `calc_residual_report` CLI runs it
-over the cache (read-only).
+`calc_residuals(statement)` (`src/models/calc_residuals.py`):
+`reported(parent) − Σ weight·child` over non-dimensional calc children (raw
+signs); `calc_residual_report` CLI runs it over the cache (read-only).
 
 **Wizard.**
 
