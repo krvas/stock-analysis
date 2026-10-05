@@ -150,8 +150,9 @@ def collect_residuals(
                 )
                 continue
             for statement_type in STATEMENT_TYPES:
+                frame, calc_edges = bundle[statement_type]
                 residuals = calc_residuals(
-                    Statement(bundle[statement_type], statement_type)
+                    Statement(frame, statement_type, calc_edges=calc_edges)
                 )
                 residuals.insert(0, "statement", statement_type)
                 residuals.insert(0, "period_type", period)

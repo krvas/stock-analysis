@@ -1,11 +1,13 @@
 """LRU company cache for edgartools statement frames.
 
-One bundle per ``(cik, period)``: a raw detailed frame per statement type
-(income, balance, cashflow) covering up to ``MAX_CACHE_YEARS`` of filings, so
-any ``num_periods`` / view request is served by slicing and projecting the same
-bundle. Layout::
+One bundle per ``(cik, period)``: per statement type (income, balance,
+cashflow) a raw detailed frame covering up to ``MAX_CACHE_YEARS`` of filings,
+so any ``num_periods`` / view request is served by slicing and projecting the
+same bundle, plus its per-period calc edges (``Statement.calc_edges``: each
+period's calc tree from the filing its values came from). Layout::
 
-    companies/{cik}/{period}/{statement_type}.parquet
+    companies/{cik}/{period}/{statement_type}.parquet       # frame
+    companies/{cik}/{period}/{statement_type}_calc.parquet  # calc edges
     companies/{cik}/{period}/meta.json   # schema_version, period,
                                          # latest_filing_date
 
@@ -30,7 +32,7 @@ import shutil
 from collections.abc import Iterable, Mapping
 from datetime import UTC, date, datetime
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, NamedTuple
 
 import pandas as pd
 
@@ -45,12 +47,22 @@ from src.models.statement import STATEMENT_TYPES, StatementType
 logger = logging.getLogger(__name__)
 
 PeriodType = Literal["annual", "quarterly"]
-# Raw (unprojected, raw-sign) statement frame per statement type.
-PeriodBundle = dict[StatementType, pd.DataFrame]
+
+
+class StatementFrames(NamedTuple):
+    """One cached statement: what ``Statement(frame, type, calc_edges)`` takes."""
+
+    # Raw (unprojected, raw-sign) statement frame (``Statement.frame``).
+    frame: pd.DataFrame
+    # Per-period calc tree (``Statement.calc_edges``).
+    calc_edges: pd.DataFrame
+
+
+PeriodBundle = dict[StatementType, StatementFrames]
 
 # Bump when the on-disk bundle shape (or how a stored column is computed)
 # changes; mismatched bundles are rebuilt.
-CACHE_SCHEMA_VERSION = 6
+CACHE_SCHEMA_VERSION = 7
 
 _INDEX_FILENAME = "company_lru.json"
 
@@ -82,6 +94,15 @@ def _bundle_statement_path(
     statement_type: StatementType,
 ) -> Path:
     return _bundle_dir(cache_dir, cik, period) / f"{statement_type}.parquet"
+
+
+def _bundle_calc_path(
+    cache_dir: Path,
+    cik: int | str,
+    period: PeriodType,
+    statement_type: StatementType,
+) -> Path:
+    return _bundle_dir(cache_dir, cik, period) / f"{statement_type}_calc.parquet"
 
 
 def _normalize_tickers(tickers: Iterable[object]) -> list[str]:
@@ -225,7 +246,7 @@ def load_period_bundle(
 
     Unusable means: missing/invalid ``meta.json``, a ``schema_version`` other
     than :data:`CACHE_SCHEMA_VERSION`, stale, or a missing/corrupt statement
-    file. ``prune=False`` (read-only callers such as reports) returns None
+    or calc-edges file. ``prune=False`` (read-only callers such as reports) returns None
     without deleting anything.
     """
     cache_dir = Path(cache_dir) if cache_dir is not None else EDGARTOOLS_CACHE_DIR
@@ -273,15 +294,21 @@ def load_period_bundle(
 
     bundle: PeriodBundle = {}
     for statement_type in STATEMENT_TYPES:
-        path = _bundle_statement_path(cache_dir, cik, period, statement_type)
-        try:
-            bundle[statement_type] = pd.read_parquet(path)
-        except (OSError, ValueError) as exc:
-            # FileNotFoundError, or a truncated/corrupt parquet file
-            # (pyarrow's ArrowInvalid subclasses ValueError).
-            logger.warning("Unreadable period bundle file %s (%s)", path, exc)
-            discard()
-            return None
+        paths = (
+            _bundle_statement_path(cache_dir, cik, period, statement_type),
+            _bundle_calc_path(cache_dir, cik, period, statement_type),
+        )
+        frames: list[pd.DataFrame] = []
+        for path in paths:
+            try:
+                frames.append(pd.read_parquet(path))
+            except (OSError, ValueError) as exc:
+                # FileNotFoundError, or a truncated/corrupt parquet file
+                # (pyarrow's ArrowInvalid subclasses ValueError).
+                logger.warning("Unreadable period bundle file %s (%s)", path, exc)
+                discard()
+                return None
+        bundle[statement_type] = StatementFrames(*frames)
     return bundle
 
 
@@ -290,16 +317,16 @@ def save_period_bundle(
     cik: int | str,
     period: PeriodType,
     latest_filing_date: date,
-    frames: Mapping[StatementType, pd.DataFrame],
+    bundle: Mapping[StatementType, StatementFrames],
     cache_dir: Path | None = None,
 ) -> None:
-    """Write one raw frame per statement type plus ``meta.json``.
+    """Write each statement type's raw frame and calc edges plus ``meta.json``.
 
     ``meta.json`` is written last so a partially written bundle has no meta
     and is treated as missing.
     """
     cache_dir = Path(cache_dir) if cache_dir is not None else EDGARTOOLS_CACHE_DIR
-    missing = [st for st in STATEMENT_TYPES if st not in frames]
+    missing = [st for st in STATEMENT_TYPES if st not in bundle]
     if missing:
         raise ValueError(f"period bundle is missing statement(s): {missing}")
 
@@ -308,9 +335,9 @@ def save_period_bundle(
     bundle_dir.mkdir(parents=True, exist_ok=True)
 
     for statement_type in STATEMENT_TYPES:
-        frames[statement_type].to_parquet(
-            _bundle_statement_path(cache_dir, cik, period, statement_type)
-        )
+        frame, calc_edges = bundle[statement_type]
+        frame.to_parquet(_bundle_statement_path(cache_dir, cik, period, statement_type))
+        calc_edges.to_parquet(_bundle_calc_path(cache_dir, cik, period, statement_type))
 
     meta = {
         "schema_version": CACHE_SCHEMA_VERSION,

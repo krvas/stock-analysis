@@ -4,14 +4,16 @@ from __future__ import annotations
 
 from datetime import date
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, call, patch
 
 import numpy as np
 import pandas as pd
 import pytest
+from edgar.xbrl.exceptions import StatementNotFound
 
 from src.api.edgartools import source
-from src.api.edgartools.cache import is_period_bundle_stale
+from src.api.edgartools.cache import StatementFrames, is_period_bundle_stale
 from src.api.edgartools.source import (
     _align,
     _build_statement_dataframe,
@@ -19,7 +21,12 @@ from src.api.edgartools.source import (
     setup_edgartools,
 )
 from src.config import MAX_CACHE_QUARTERS, MAX_CACHE_YEARS
-from src.models.statement import EDGARTOOLS_METADATA_COLUMNS, Statement, StatementSet
+from src.models.statement import (
+    CALC_EDGE_COLUMNS,
+    EDGARTOOLS_METADATA_COLUMNS,
+    Statement,
+    StatementSet,
+)
 
 _GETTERS = {
     "income": "income_statement",
@@ -121,17 +128,38 @@ def _default_standard(frame: pd.DataFrame) -> pd.DataFrame:
     return frame.loc[~drop].reset_index(drop=True)
 
 
+def _role(statement_type: str) -> str:
+    return f"http://example.com/role/{statement_type}"
+
+
 def _mock_xbrl(
     frames_by_statement: dict[str, pd.DataFrame],
     standard_by_statement: dict[str, pd.DataFrame | Exception] | None = None,
+    calc_trees: dict[str, dict[str, tuple[str | None, float]]] | None = None,
 ) -> MagicMock:
     """A filing whose statements return the given frames.
 
     ``to_dataframe(view="standard")`` returns ``standard_by_statement``'s frame
     (or raises it, if an exception), defaulting to :func:`_default_standard`.
+    ``calc_trees`` maps a statement type to its role's calc nodes
+    (``{element_id: (parent, weight)}``, default empty); ``find_statement``
+    resolves each statement's canonical type to that role.
     """
     xbrl = MagicMock()
     standard_by_statement = standard_by_statement or {}
+    calc_trees = calc_trees or {}
+    xbrl.find_statement.side_effect = lambda key: ([], _role(key), key)
+    xbrl.calculation_trees = {
+        _role(statement_type): SimpleNamespace(
+            all_nodes={
+                element_id: SimpleNamespace(parent=parent, weight=weight)
+                for element_id, (parent, weight) in calc_trees.get(
+                    statement_type, {}
+                ).items()
+            }
+        )
+        for statement_type in _GETTERS
+    }
     for statement_type, getter in _GETTERS.items():
         statement = MagicMock()
         statement.canonical_type = statement_type
@@ -212,7 +240,7 @@ def test_build_one_raw_frame_with_newest_metadata(mock_periods: MagicMock) -> No
         {"xbrl_index": 1, "end_date": "2023-09-30", "period_type": "duration"},
     ]
 
-    df = _build_statement_dataframe(xbrls, "cashflow", max_periods=16)
+    df = _build_statement_dataframe(xbrls, "cashflow", max_periods=16).frame
 
     mock_periods.assert_called_once_with(
         xbrls.xbrl_list, "CashFlowStatement", max_periods=16
@@ -326,7 +354,7 @@ def test_build_keys_multi_axis_rows_by_every_axis(mock_periods: MagicMock) -> No
         {"xbrl_index": 1, "end_date": "2023-09-30", "period_type": "duration"},
     ]
 
-    df = _build_statement_dataframe(xbrls, "income", max_periods=16)
+    df = _build_statement_dataframe(xbrls, "income", max_periods=16).frame
 
     segment = "ConsolidationItemsAxis=us-gaap_OperatingSegmentsMember"
     americas = f"Rev|{segment}|SegmentsAxis=AmericasMember"
@@ -361,7 +389,7 @@ def test_build_falls_back_to_primary_dimension_when_raw_misaligned(
         {"xbrl_index": 0, "end_date": "2024-09-28", "period_type": "duration"}
     ]
 
-    df = _build_statement_dataframe(xbrls, "income", max_periods=16)
+    df = _build_statement_dataframe(xbrls, "income", max_periods=16).frame
 
     assert df["row_id"].tolist() == ["Rev|A=M"]
 
@@ -405,7 +433,7 @@ def test_build_takes_role_weight_from_raw_data(mock_periods: MagicMock) -> None:
         {"xbrl_index": 0, "end_date": "2023-09-30", "period_type": "duration"},
     ]
 
-    df = _build_statement_dataframe(xbrls, "cashflow", max_periods=16)
+    df = _build_statement_dataframe(xbrls, "cashflow", max_periods=16).frame
 
     statement = xbrl.statements.cash_flow_statement.return_value
     statement.get_raw_data.assert_called_once_with(view="detailed")
@@ -429,7 +457,7 @@ def test_build_keeps_frame_weight_when_raw_misaligned(
         {"xbrl_index": 0, "end_date": "2024-09-28", "period_type": "duration"}
     ]
 
-    df = _build_statement_dataframe(xbrls, "income", max_periods=16)
+    df = _build_statement_dataframe(xbrls, "income", max_periods=16).frame
 
     assert df["weight"].tolist() == [1.0]
     assert "Could not align raw data" in caplog.text
@@ -473,7 +501,7 @@ def test_build_weight_is_newest_non_nan_across_filings(
         for index, (end, *_) in enumerate(filings)
     ]
 
-    df = _build_statement_dataframe(xbrls, "cashflow", max_periods=16)
+    df = _build_statement_dataframe(xbrls, "cashflow", max_periods=16).frame
 
     acq = df.set_index("row_id").loc["Acq"]
     assert acq["weight"] == -1.0
@@ -484,10 +512,140 @@ def test_build_weight_is_newest_non_nan_across_filings(
 @patch("src.api.edgartools.source.determine_optimal_periods")
 def test_build_empty_when_no_periods(mock_periods: MagicMock) -> None:
     mock_periods.return_value = []
-    df = _build_statement_dataframe(MagicMock(), "income", max_periods=16)
+    df = _build_statement_dataframe(MagicMock(), "income", max_periods=16).frame
     statement = Statement(df, "income")
     assert statement.periods == []
     assert statement.project("summary").empty
+
+
+# Old tree: ProfitLoss under NetIncomeLoss; new tree: pretax income directly.
+_OLD_TREE = {
+    "us-gaap_NetIncomeLoss": (None, 1.0),
+    "us-gaap_ProfitLoss": ("us-gaap_NetIncomeLoss", 1.0),
+    "us-gaap_MinorityInterest": ("us-gaap_NetIncomeLoss", -1.0),
+}
+_NEW_TREE = {
+    "us-gaap_NetIncomeLoss": (None, 1.0),
+    "us-gaap_IncomeBeforeTax": ("us-gaap_NetIncomeLoss", 1.0),
+    "us-gaap_IncomeTaxExpenseBenefit": ("us-gaap_NetIncomeLoss", -1.0),
+    # Calc-only concept (not presented on the statement): still an edge.
+    "aapl_NotPresented": ("us-gaap_IncomeBeforeTax", 1.0),
+}
+
+
+def _edges(frame: pd.DataFrame, period: str) -> set[tuple[str, str, float]]:
+    rows = frame[frame["period"] == period]
+    return set(
+        zip(rows["concept"], rows["parent_concept"], rows["weight"], strict=True)
+    )
+
+
+@patch("src.api.edgartools.source.determine_optimal_periods")
+def test_build_gives_each_period_its_own_filings_calc_tree(
+    mock_periods: MagicMock,
+) -> None:
+    rows = [{"concept": "us-gaap_NetIncomeLoss", "value": 1.0}]
+    newest = _mock_xbrl(
+        {"income": _filing_df("2024-09-28 (FY)", rows)},
+        calc_trees={"income": _NEW_TREE},
+    )
+    older = _mock_xbrl(
+        {"income": _filing_df("2015-09-03 (FY)", rows)},
+        calc_trees={"income": _OLD_TREE},
+    )
+    xbrls = MagicMock()
+    xbrls.xbrl_list = [newest, older]
+    mock_periods.return_value = [
+        {"xbrl_index": 0, "end_date": "2024-09-28", "period_type": "duration"},
+        {"xbrl_index": 0, "end_date": "2023-09-30", "period_type": "duration"},
+        {"xbrl_index": 1, "end_date": "2015-09-03", "period_type": "duration"},
+    ]
+
+    built = _build_statement_dataframe(xbrls, "income", max_periods=16)
+
+    assert isinstance(built, StatementFrames)
+    edges = built.calc_edges
+    assert list(edges.columns) == list(CALC_EDGE_COLUMNS)
+    new_edges = {
+        ("us-gaap_IncomeBeforeTax", "us-gaap_NetIncomeLoss", 1.0),
+        ("us-gaap_IncomeTaxExpenseBenefit", "us-gaap_NetIncomeLoss", -1.0),
+        ("aapl_NotPresented", "us-gaap_IncomeBeforeTax", 1.0),
+    }
+    assert _edges(edges, "2024-09-28") == new_edges
+    # A filing contributing two periods gives both its tree.
+    assert _edges(edges, "2023-09-30") == new_edges
+    assert _edges(edges, "2015-09-03") == {
+        ("us-gaap_ProfitLoss", "us-gaap_NetIncomeLoss", 1.0),
+        ("us-gaap_MinorityInterest", "us-gaap_NetIncomeLoss", -1.0),
+    }
+    for xbrl in (newest, older):
+        xbrl.find_statement.assert_called_once_with("income")
+
+    statement = Statement(built.frame, "income", calc_edges=edges)
+    pd.testing.assert_frame_equal(statement.calc_edges, edges)
+
+
+@patch("src.api.edgartools.source.determine_optimal_periods")
+def test_build_normalizes_colon_element_ids(mock_periods: MagicMock) -> None:
+    tree = {
+        "us-gaap:NetIncomeLoss": (None, 1.0),
+        "us-gaap:ProfitLoss": ("us-gaap:NetIncomeLoss", 1.0),
+        "us-gaap_Tax": ("us-gaap:NetIncomeLoss", -1.0),
+    }
+    xbrl = _mock_xbrl(
+        {"income": _filing_df("2024-09-28 (FY)", [{"concept": "X", "value": 1.0}])},
+        calc_trees={"income": tree},
+    )
+    xbrls = MagicMock()
+    xbrls.xbrl_list = [xbrl]
+    mock_periods.return_value = [
+        {"xbrl_index": 0, "end_date": "2024-09-28", "period_type": "duration"}
+    ]
+
+    edges = _build_statement_dataframe(xbrls, "income", max_periods=16).calc_edges
+
+    assert _edges(edges, "2024-09-28") == {
+        ("us-gaap_ProfitLoss", "us-gaap_NetIncomeLoss", 1.0),
+        ("us-gaap_Tax", "us-gaap_NetIncomeLoss", -1.0),
+    }
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        StatementNotFound("IncomeStatement", 0.0, []),
+        "no-role",
+        "no-tree",
+    ],
+    ids=["not-found", "no-role", "no-tree"],
+)
+@patch("src.api.edgartools.source.determine_optimal_periods")
+def test_build_role_lookup_failure_gives_no_edges(
+    mock_periods: MagicMock, failure: object, caplog: pytest.LogCaptureFixture
+) -> None:
+    xbrl = _mock_xbrl(
+        {"income": _filing_df("2024-09-28 (FY)", [{"concept": "X", "value": 1.0}])},
+        calc_trees={"income": _NEW_TREE},
+    )
+    if isinstance(failure, Exception):
+        xbrl.find_statement.side_effect = failure
+    elif failure == "no-role":
+        xbrl.find_statement.side_effect = lambda key: ([], None, key)
+    else:
+        xbrl.calculation_trees = {}
+    xbrls = MagicMock()
+    xbrls.xbrl_list = [xbrl]
+    mock_periods.return_value = [
+        {"xbrl_index": 0, "end_date": "2024-09-28", "period_type": "duration"}
+    ]
+
+    with caplog.at_level("WARNING", logger="src.api.edgartools.source"):
+        built = _build_statement_dataframe(xbrls, "income", max_periods=16)
+
+    assert built.calc_edges.empty
+    assert list(built.calc_edges.columns) == list(CALC_EDGE_COLUMNS)
+    assert built.frame["row_id"].tolist() == ["X"]
+    assert any("calc" in r.getMessage().lower() for r in caplog.records)
 
 
 def _rows(frame: pd.DataFrame, positions: list[int]) -> pd.DataFrame:
@@ -537,7 +695,7 @@ def test_build_stores_in_standard_from_newest_filing(mock_periods: MagicMock) ->
         {"xbrl_index": 1, "end_date": "2023-09-30", "period_type": "duration"},
     ]
 
-    df = _build_statement_dataframe(xbrls, "income", max_periods=16)
+    df = _build_statement_dataframe(xbrls, "income", max_periods=16).frame
 
     flags = dict(zip(df["row_id"], df["in_standard"], strict=True))
     assert flags == {
@@ -588,7 +746,7 @@ def test_build_in_standard_falls_back_to_default(
         {"xbrl_index": 0, "end_date": "2024-09-28", "period_type": "duration"}
     ]
 
-    df = _build_statement_dataframe(xbrls, "income", max_periods=16)
+    df = _build_statement_dataframe(xbrls, "income", max_periods=16).frame
 
     assert df["in_standard"].isna().all()
     assert Statement(df, "income").frame["in_standard"].tolist() == [True, True, False]
@@ -738,7 +896,13 @@ def test_load_statement_set_fetches_builds_and_saves(
     assert save_kwargs["cik"] == 320193
     assert save_kwargs["period"] == period
     assert save_kwargs["latest_filing_date"] == date(2024, 11, 1)
-    assert set(save_kwargs["frames"]) == {"income", "balance", "cashflow"}
+    saved = save_kwargs["bundle"]
+    assert set(saved) == {"income", "balance", "cashflow"}
+    assert all(isinstance(frames, StatementFrames) for frames in saved.values())
+    pd.testing.assert_frame_equal(
+        saved[statement_type].calc_edges,
+        statement_set.get(statement_type).calc_edges,
+    )
     mock_touch_cache.assert_called_once()
 
 
@@ -804,7 +968,7 @@ def test_load_statement_set_freshness_date_uses_10k_for_quarterly(
     )
 
 
-def _cached_bundle() -> dict[str, pd.DataFrame]:
+def _cached_bundle() -> dict[str, StatementFrames]:
     raw = pd.DataFrame(
         {
             "concept": ["Revenue", "Capex", "Rev"],
@@ -822,7 +986,18 @@ def _cached_bundle() -> dict[str, pd.DataFrame]:
             "2022-09-24": [80.0, 3.0, 40.0],
         }
     )
-    return {st: Statement(raw, st).frame for st in ("income", "balance", "cashflow")}
+    edges = pd.DataFrame(
+        {
+            "period": ["2024-09-28", "2022-09-24"],
+            "concept": ["Capex", "Capex"],
+            "parent_concept": ["Revenue", "Revenue"],
+            "weight": [-1.0, 1.0],
+        }
+    )
+    return {
+        st: StatementFrames(Statement(raw, st).frame, edges)
+        for st in ("income", "balance", "cashflow")
+    }
 
 
 @patch.dict("os.environ", {"EDGAR_IDENTITY": "ScreenerApp/1.0 test@example.com"})
@@ -844,6 +1019,9 @@ def test_load_statement_set_returns_cached_without_sec_fetch(
     statement_set = load_statement_set("AAPL", "annual")
 
     assert statement_set.periods == ("2024-09-28", "2023-09-30", "2022-09-24")
+    pd.testing.assert_frame_equal(
+        statement_set.income.calc_edges, _cached_bundle()["income"].calc_edges
+    )
     mock_load_bundle.assert_called_once_with(
         cik="320193",
         period="annual",

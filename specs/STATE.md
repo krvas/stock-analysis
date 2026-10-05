@@ -105,8 +105,11 @@ only touches `_cache`/`_tcache`, never our `companies/` bundles).
 
 `load_statement_set(ticker, period) -> StatementSet` (`source.py`) is the
 only entry point. Cache key `(cik, period)`, no `num_periods`:
-`companies/{cik}/{period}/{income,balance,cashflow}.parquet` + `meta.json`
-(`schema_version`, `period`, `latest_filing_date`). Builds from up
+`companies/{cik}/{period}/{income,balance,cashflow}.parquet` +
+`{statement}_calc.parquet` + `meta.json` (`schema_version`, `period`,
+`latest_filing_date`); `load_period_bundle` returns `{statement:
+StatementFrames(frame, calc_edges)}`, and a missing calc file makes the
+bundle unusable. Builds from up
 to `MAX_CACHE_YEARS` (16) 10-Ks or `MAX_CACHE_QUARTERS` (64) 10-Qs: XBRLS only
 picks filings/periods (`determine_optimal_periods`); each filing gets
 `to_dataframe(view="detailed", presentation=False)` per statement (the stored
@@ -121,7 +124,14 @@ be another role's calc tree, the raw item's is this role's (same node as
 alignment fails, edgartools' weight is kept. Rows
 matched across filings by `get_row_id`; metadata from the newest filing a
 row appears in, except `weight` = newest non-NaN across filings. Values
-stored with **raw** XBRL signs.
+stored with **raw** XBRL signs. Because filers restructure calc trees, those
+`parent_concept` / `weight` columns are newest-filing metadata only:
+`Statement.calc_edges` (long frame `period, concept, parent_concept, weight`,
+stored as `{statement}_calc.parquet`) gives each period every arc of the
+statement role's calc tree (`xbrl.find_statement` → `calculation_trees`, no
+cross-role fallback) of the filing that period's values came from; calc code
+must use it. Without stored edges, `Statement` broadcasts the frame's own
+tree to every period. `children` / `calc_residuals` don't use it yet.
 Rebuilt on `schema_version` mismatch (`CACHE_SCHEMA_VERSION`), missing/corrupt
 files, or `latest_filing_date` older than
 `EDGARTOOLS_ANNUAL_CACHE_MAX_AGE_MONTHS` (12) /
