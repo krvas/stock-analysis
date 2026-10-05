@@ -12,6 +12,8 @@ bundle. Layout::
 Bundles are rebuilt when ``meta.json`` carries a different
 :data:`CACHE_SCHEMA_VERSION`, when files are missing or unreadable, and when
 the stored latest filing date is more than the period-specific cache age old.
+For quarterly bundles that date is the newer of the latest 10-Q and the latest
+10-K (set by the caller), so a bundle stays fresh after a fiscal-year 10-K.
 
 Companies are evicted least-recently-touched first beyond
 ``EDGARTOOLS_COMPANY_CACHE_SIZE``. Tickers listed in the index's

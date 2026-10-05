@@ -11,6 +11,7 @@ import pandas as pd
 import pytest
 
 from src.api.edgartools import source
+from src.api.edgartools.cache import is_period_bundle_stale
 from src.api.edgartools.source import (
     _align,
     _build_statement_dataframe,
@@ -632,15 +633,30 @@ def _patch_fetch(
     mock_periods: MagicMock,
     xbrl: MagicMock,
     period_meta: dict,
+    *,
+    filing_dates: dict[str, str | None] | None = None,
 ) -> MagicMock:
+    """Mock ``Company``; ``filing_dates`` maps form -> latest filing date
+    (``None`` = no filings of that form). Every form defaults to 2024-11-01."""
     xbrls = MagicMock()
     xbrls.xbrl_list = [xbrl]
     mock_xbrls_cls.from_filings.return_value = xbrls
     company = MagicMock()
     company.cik = 320193
-    filings = MagicMock()
-    filings.end_date = "2024-11-01"
-    company.get_filings.return_value.head.return_value = filings
+    filing_dates = filing_dates or {}
+    filings_by_form: dict[str, MagicMock] = {}
+
+    def get_filings(*, form: str, amendments: bool) -> MagicMock:
+        if form not in filings_by_form:
+            filings = MagicMock()
+            latest = filing_dates.get(form, "2024-11-01")
+            filings.end_date = latest
+            filings.__iter__.return_value = iter([])
+            filings.head.return_value = filings
+            filings_by_form[form] = filings
+        return filings_by_form[form]
+
+    company.get_filings.side_effect = get_filings
     mock_company_cls.return_value = company
     mock_periods.return_value = [{"xbrl_index": 0, **period_meta}]
     return company
@@ -704,8 +720,12 @@ def test_load_statement_set_fetches_builds_and_saves(
 
     expected_form = "10-K" if period == "annual" else "10-Q"
     expected_cap = MAX_CACHE_YEARS if period == "annual" else MAX_CACHE_QUARTERS
-    company.get_filings.assert_called_once_with(form=expected_form, amendments=False)
-    company.get_filings.return_value.head.assert_called_once_with(expected_cap)
+    assert company.get_filings.call_args_list[0] == call(
+        form=expected_form, amendments=False
+    )
+    company.get_filings(
+        form=expected_form, amendments=False
+    ).head.assert_called_once_with(expected_cap)
     assert all(c.kwargs["max_periods"] == expected_cap for c in mock_periods.mock_calls)
     for st in _GETTERS:
         assert _to_dataframe_mock(xbrl, st).call_args_list == [
@@ -720,6 +740,68 @@ def test_load_statement_set_fetches_builds_and_saves(
     assert save_kwargs["latest_filing_date"] == date(2024, 11, 1)
     assert set(save_kwargs["frames"]) == {"income", "balance", "cashflow"}
     mock_touch_cache.assert_called_once()
+
+
+FRESHNESS_CASES = [
+    # (period, latest 10-K, latest 10-Q, stored freshness date, stale on
+    # 2026-10-05); quarterly max age 3 months, annual 12.
+    ("quarterly", "2026-08-20", "2026-05-01", date(2026, 8, 20), False),
+    ("quarterly", "2025-08-20", "2026-05-01", date(2026, 5, 1), True),
+    ("quarterly", None, "2026-05-01", date(2026, 5, 1), True),
+    ("annual", "2025-08-20", "2026-09-01", date(2025, 8, 20), True),
+    ("annual", "2026-08-20", "2026-05-01", date(2026, 8, 20), False),
+]
+
+
+@pytest.mark.parametrize(
+    ("period", "latest_10k", "latest_10q", "expected", "stale"), FRESHNESS_CASES
+)
+@patch.dict("os.environ", {"EDGAR_IDENTITY": "ScreenerApp/1.0 test@example.com"})
+@patch("src.api.edgartools.source.touch_company_cache")
+@patch("src.api.edgartools.source.save_period_bundle")
+@patch("src.api.edgartools.source.load_period_bundle")
+@patch("src.api.edgartools.source.find_cached_cik")
+@patch("src.api.edgartools.source.determine_optimal_periods")
+@patch("src.api.edgartools.source.XBRLS")
+@patch("src.api.edgartools.source.Company")
+def test_load_statement_set_freshness_date_uses_10k_for_quarterly(
+    mock_company_cls: MagicMock,
+    mock_xbrls_cls: MagicMock,
+    mock_periods: MagicMock,
+    mock_find_cached_cik: MagicMock,
+    mock_load_bundle: MagicMock,
+    mock_save_bundle: MagicMock,
+    mock_touch_cache: MagicMock,
+    period: str,
+    latest_10k: str | None,
+    latest_10q: str,
+    expected: date,
+    stale: bool,
+) -> None:
+    """Quarterly bundles store the newer of the latest 10-K and 10-Q dates
+    (a year-end 10-K replaces the Q4 10-Q); annual stores the latest 10-K."""
+    mock_find_cached_cik.return_value = None
+    mock_load_bundle.return_value = None
+    period_meta = {"end_date": "2026-03-31", "period_type": "duration"}
+    rows = [{"concept": "Revenue", "label": "Revenue", "value": 1.0}]
+    xbrl = _mock_xbrl({st: _filing_df("2026-03-31 (Q)", rows) for st in _GETTERS})
+    _patch_fetch(
+        mock_company_cls,
+        mock_xbrls_cls,
+        mock_periods,
+        xbrl,
+        period_meta,
+        filing_dates={"10-K": latest_10k, "10-Q": latest_10q},
+    )
+
+    load_statement_set("MU", period)
+
+    stored = mock_save_bundle.call_args.kwargs["latest_filing_date"]
+    assert stored == expected
+    assert (
+        is_period_bundle_stale(stored, period=period, reference=date(2026, 10, 5))
+        is stale
+    )
 
 
 def _cached_bundle() -> dict[str, pd.DataFrame]:
