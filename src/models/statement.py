@@ -476,14 +476,33 @@ class Statement:
             mask &= ~bool_flag(df, "dimension")
         return df[mask].copy()
 
-    def children(self, row_id: str) -> pd.DataFrame:
-        """Non-dimensional calc children of ``row_id`` (via ``parent_concept``)."""
+    def children(self, row_id: str, period: str) -> pd.DataFrame:
+        """Non-dimensional calc children of ``row_id`` in ``period``'s calc tree.
+
+        Returns the frame rows (frame order, all columns) whose concept is a
+        child of ``row_id``'s concept in ``period``'s :attr:`calc_edges`, with
+        the ``weight`` column set to that period's edge weight (added if the
+        frame has none; the frame's own newest-filing ``weight`` is not used).
+        A child concept presented twice yields both rows. Calc children the
+        statement does not present (no non-dimensional row) are not returned.
+
+        Raises ``KeyError`` for an unknown ``row_id`` or ``period``.
+        """
         df = self._frame
         concept = df["concept"].iloc[self._row_index(row_id)]
-        if "parent_concept" not in df.columns:
-            return df.iloc[0:0].copy()
-        mask = df["parent_concept"].eq(concept) & ~bool_flag(df, "dimension")
-        return df[mask].copy()
+        if period not in self.periods:
+            raise KeyError(f"unknown period '{period}' in {self.statement_type}")
+        edges = self._calc_edges
+        edges = edges[
+            (edges["period"] == period) & (edges["parent_concept"] == concept)
+        ]
+        weight_by_concept = dict(zip(edges["concept"], edges["weight"], strict=True))
+        mask = df["concept"].isin(weight_by_concept.keys()) & ~bool_flag(
+            df, "dimension"
+        )
+        children = df[mask].copy()
+        children["weight"] = children["concept"].map(weight_by_concept).astype(float)
+        return children
 
     def insert(self, row: Mapping[str, Any], after: str | None = None) -> Statement:
         """Return a new statement with ``row`` inserted after ``after`` (else appended).

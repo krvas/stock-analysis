@@ -145,22 +145,59 @@ def test_calc_residuals_empty_without_calc_tree() -> None:
         "relative",
         "n_children",
         "n_nan_children",
-        "n_nan_weight_children",
+        "n_missing_children",
     ]
 
 
-def test_calc_residuals_excludes_and_counts_nan_weight_children() -> None:
+def test_calc_residuals_counts_missing_children() -> None:
+    # The calc tree has a child (C) the statement does not present.
     frame = pd.DataFrame(
         [
-            _row("Total", "Total", **{P1: 10.0}),
+            _row("Total", "Total", **{P1: 12.0}),
             _row("A", "A", parent_concept="Total", **{P1: 10.0}),
-            _row("B", "B", parent_concept="Total", weight=None, **{P1: 5.0}),
         ]
     )
-    residuals = calc_residuals(Statement(frame, "income"))
+    edges = pd.DataFrame(
+        {
+            "period": [P1, P1],
+            "concept": ["A", "C"],
+            "parent_concept": ["Total", "Total"],
+            "weight": [1.0, 1.0],
+        }
+    )
+    residuals = calc_residuals(Statement(frame, "income", calc_edges=edges))
 
     row = residuals.iloc[0]
     assert row["computed"] == 10.0
-    assert row["residual"] == 0.0
-    assert row["n_children"] == 2
-    assert row["n_nan_weight_children"] == 1
+    assert row["residual"] == 2.0
+    assert row["n_children"] == 1
+    assert row["n_missing_children"] == 1
+
+
+def test_calc_residuals_use_each_periods_own_tree() -> None:
+    # P1's filing: Total = A - B. P2's (older) filing: Total = A + C, and B
+    # is not in its tree. The frame's own columns (newest tree) are ignored.
+    frame = pd.DataFrame(
+        [
+            _row("Total", "Total", **{P1: 6.0, P2: 9.0}),
+            _row("A", "A", parent_concept="Total", **{P1: 10.0, P2: 5.0}),
+            _row("B", "B", parent_concept="Total", weight=-1.0, **{P1: 4.0, P2: 7.0}),
+            _row("C", "C", **{P1: 1.0, P2: 4.0}),
+        ]
+    )
+    edges = pd.DataFrame(
+        {
+            "period": [P1, P1, P2, P2],
+            "concept": ["A", "B", "A", "C"],
+            "parent_concept": ["Total", "Total", "Total", "Total"],
+            "weight": [1.0, -1.0, 1.0, 1.0],
+        }
+    )
+    residuals = calc_residuals(Statement(frame, "income", calc_edges=edges))
+
+    assert _residual_by(residuals) == {("Total", P1): 0.0, ("Total", P2): 0.0}
+    assert residuals["period"].tolist() == [P1, P2]
+    assert residuals["computed"].tolist() == [6.0, 9.0]
+    # Applying the newest tree to P2 would have given 5 - 7 = -2.
+    newest = calc_residuals(Statement(frame, "income")).set_index("period")
+    assert newest.loc[P2, "residual"] == 11.0

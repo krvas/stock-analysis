@@ -20,7 +20,7 @@ persisted. Reported data and adjustment prefs stay fully decoupled.
 | Tier is derivable from the detailed frame plus one stored flag | edgartools 5.47 `Statement` filtering: summary drops every `dimension` row; detailed keeps all; standard drops rows where `is_breakdown` **and** dimensional rows whose member is not in the statement's presentation linkbase (`XBRL._get_valid_dimensional_members`, a filter detailed skips; e.g. AAPL iPhone/Mac/iPad on income). The cache stores that as `in_standard`; it matches `to_dataframe(view="standard")` row-for-row on 417 AAPL/MU/SNDK (filing, statement) pairs |
 | `standard_concept` is not unique in detailed views | up to 12 dupes (income), 36 (cashflow). The opex table's `row_id_col="standard_concept"` can collide |
 | Row sets depend on `num_periods` | AAPL annual_2 detailed income = 59 rows vs annual_10 = 113 |
-| Calc linkbase reproduces reported totals **on raw signs** | AAPL & MSFT latest 10-K, all 3 statements: every monetary parent == Σ(weight × child) with `to_dataframe(presentation=False)`; with the default `presentation=True`, all 3 CF subtotals fail. The only miss is the diluted share count (non-monetary, child not presented) |
+| Calc linkbase reproduces reported totals **on raw signs** | AAPL & MSFT latest 10-K, all 3 statements: every monetary parent == Σ(weight × child) with `to_dataframe(presentation=False)`; with the default `presentation=True`, all 3 CF subtotals fail. The only miss was the diluted share count (an EPS-note-role arc; per-period statement-role edges, §6.1, don't include it) |
 | `to_dataframe` exposes the calc tree | `parent_concept` = calculation parent, `parent_abstract_concept` = presentation parent, `weight` = calc weight for the statement role (only on `get_raw_data()` items; `to_dataframe`'s `weight` comes from the concept's first fact and can be another role's, so the cache takes the raw item's) |
 
 ## 2. Pipeline (where adjustments live)
@@ -73,6 +73,11 @@ edgartools ──(cache build, once)──► parquet: 3 Statement frames per (c
   - alongside `concept`, `label`, `standard_concept`, `level`
 
   Per-row metadata is taken from the most recent filing the row appears in.
+  **Exception: calc edges.** Filers restructure calc trees over the years, so
+  each period also keeps the statement role's calc tree of the filing its values
+  came from (`Statement.calc_edges`, cached as `{statement}_calc.parquet`); the
+  frame's `parent_concept`/`weight` are newest-filing metadata only, never used
+  for calc math.
 - **Raw signs in cache.** Store raw values. Apply `preferred_sign` only at
   projection for display, so the numbers on screen are unchanged. The recompute
   needs raw signs (see the table in §1).
@@ -105,7 +110,10 @@ edgartools ──(cache build, once)──► parquet: 3 Statement frames per (c
 - No per-statement subclasses. `statement_type` is an attribute.
 - Methods:
   - `find(concept=… | standard_concept=…)`
-  - `children(row_id)` (via `parent_concept`)
+  - `children(row_id, period)` (via that period's `calc_edges`; `weight` = the
+    edge weight)
+- `calc_edges`: long frame `period, concept, parent_concept, weight`, one calc
+  tree per period (§3)
   - `insert(row, after=)`
   - `with_values(row_id, values)`
   - `project(view, periods) -> DataFrame`, which applies `preferred_sign` for
@@ -150,21 +158,26 @@ row) like today's toggle.
 calc tree is complete enough on real filings (§1), and it
 replaces the hand-authored "spine" from v1 entirely.
 
-1. **Residual per parent × period.** At load, compute
-   `residual = reported(parent) − Σ weight·child` over non-dimensional children.
-   Recompute uses `Σ weight·child + residual`.
+1. **Residual per parent × period, on that period's own calc tree.** At load,
+   compute `residual_p(P) = reported_p(P) − Σ_{c∈children_p(P)} w_p(c)·v_p(c)` over
+   non-dimensional children, where `children_p` / `w_p` come from period `p`'s
+   `calc_edges`: the statement-role calc tree of the filing `p`'s values came from
+   (§3). Recompute uses `Σ w_p·child + residual_p`.
    - With zero specs this reproduces reported values exactly, even where a filer's
      calc tree is incomplete.
-   - Where the tree is complete (the AAPL/MSFT case), the residual is 0, so it's a
-     pure recompute.
-   - It also absorbs parent/weight drift across years, since metadata comes from the
-     latest filing (weight: the newest non-NaN one). A child whose weight is still
-     NaN is excluded from the sum (and counted), not assumed +1.
-2. **Recompute only dirty ancestors.** Walk `parent_concept` upward from each
-   overridden or inserted row. Untouched subtrees keep reported values, so gaps and
-   non-monetary rows (share counts) are never recomputed.
+   - Residuals are expected to be 0 on real filings. Non-zero ones mean an
+     incomplete filer tree or calc children the statement doesn't present
+     (counted in `n_missing_children`).
+   - Per-period trees are what avoid drift across years. A single (newest) tree
+     applied to old periods would still reproduce zero-spec totals via the
+     residual, but would route adjustment deltas along the wrong edges.
+2. **Recompute only dirty ancestors, per period.** For each period `p`, walk
+   `parent_p` upward from each overridden or inserted row and recompute
+   `v_p(P) = Σ_{c∈children_p(P)} w_p(c)·v_p(c) + residual_p(P)`. Untouched subtrees
+   keep reported values, so gaps and non-monetary rows (share counts) are never
+   recomputed.
 3. **Dimensional rows are excluded** from sums. They're parallel breakdowns, and a
-   concept's `parent_concept` is shared with its dimensional rows. If an
+   concept's calc edge is shared with its dimensional rows. If an
    adjustment overrides a concept that has dimensional rows, those rows are flagged
    stale rather than silently kept.
 4. **Cross-statement links aren't in the calc linkbase.** The engine syncs the same
@@ -186,9 +199,13 @@ For each capitalized row R with life N:
   - `amort_t = Σ_{k=1..N} spend_{t−k}/N` (convention TBD, §9)
   - `net_asset_t = Σ unamortized`
   - Periods with fewer than N years of history are flagged partial.
+Inserted rows' parents (and weights) are resolved per period from that period's
+calc tree, since trees differ across years (e.g. `AssetsNoncurrent` exists only in
+some years' trees).
+
 - **IS:**
   - Override R → 0 (row kept, `origin` marked).
-  - Insert `Depreciation (R)`: parent = R's `parent_concept` (opex subtotal),
+  - Insert `Depreciation (R)`: parent = R's calc parent (opex subtotal),
     weight = R's weight, tag `da`.
   - Recompute flows up to OperatingIncome → Pretax → NetIncome.
 - **BS:**
@@ -236,7 +253,8 @@ For each capitalized row R with life N:
   - Leave open for now. This will have to be a separate feature with its own handling.
 5. **Where the BS asset row hangs:** `AssetsNoncurrent` if the filer reports it,
    else `Assets`. Is it acceptable to add a missing subtotal?
-  - Don't add a missing subtotal.
+  - Don't add a missing subtotal. Resolve the parent per period: a filer may have
+    `AssetsNoncurrent` in some years' calc trees and not others.
 6. **Prefs schema:** `value DOUBLE` is too narrow for later types. `params JSON`?
    There are no migrations today.
   - Keep it as is for now.
@@ -266,7 +284,8 @@ For each capitalized row R with life N:
 - Projection parity: `project(view)` with display signs equals today's
   summary/standard/detailed parquet frames, for all cached tickers.
 - Calc reconciliation report: residual distribution across all cached tickers ×
-  periods. Most parents should be 0; list the non-zero ones.
+  periods, each period on its own calc tree. Parents should be 0; list the
+  non-zero ones (with `n_missing_children`).
 - `apply(base, [])` == reported, bit-for-bit.
 - `get_row_id` is unique per statement for every cached bundle.
 - Opex-to-capex on AAPL:
