@@ -125,7 +125,8 @@ stored with **raw** XBRL signs.
 Rebuilt on `schema_version` mismatch (`CACHE_SCHEMA_VERSION`), missing/corrupt
 files, or `latest_filing_date` older than
 `EDGARTOOLS_ANNUAL_CACHE_MAX_AGE_MONTHS` (12) /
-`EDGARTOOLS_QUARTERLY_CACHE_MAX_AGE_MONTHS` (3). Company LRU size
+`EDGARTOOLS_QUARTERLY_CACHE_MAX_AGE_MONTHS` (3) (quarterly: newer of latest
+10-Q and latest 10-K, so a year-end 10-K keeps it fresh). Company LRU size
 `EDGARTOOLS_COMPANY_CACHE_SIZE` (10), index `company_lru.json`. Pinned
 tickers (`set_pinned_tickers`, stored in `company_lru.json`) are exempt from
 LRU eviction and don't count toward the size; staleness still applies.

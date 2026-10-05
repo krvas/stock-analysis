@@ -480,6 +480,24 @@ def _latest_filing_date(filings) -> date:
     return max(filing_dates)
 
 
+def _freshness_date(company, period: PeriodType, filings) -> date:
+    """The ``latest_filing_date`` stored for staleness checks.
+
+    Annual: the newest 10-K. Quarterly: the newer of the newest 10-Q and the
+    newest 10-K, since a fiscal year's fourth quarter is reported in a 10-K,
+    not a 10-Q; using the 10-Q alone would mark the bundle stale (and rebuild
+    it on every load) until the next 10-Q.
+    """
+    latest = _latest_filing_date(filings)
+    if period == "quarterly":
+        annual = company.get_filings(form=FORM_BY_PERIOD["annual"], amendments=False)
+        try:
+            latest = max(latest, _latest_filing_date(annual))
+        except ValueError:  # no 10-Ks
+            pass
+    return latest
+
+
 def _statement_set(bundle: PeriodBundle) -> StatementSet:
     statements = {
         statement_type: Statement(bundle[statement_type], statement_type)
@@ -535,7 +553,7 @@ def load_statement_set(ticker: str, period: PeriodType) -> StatementSet:
     filings = company.get_filings(form=FORM_BY_PERIOD[period], amendments=False).head(
         max_periods
     )
-    latest_filing_date = _latest_filing_date(filings)
+    latest_filing_date = _freshness_date(company, period, filings)
     xbrls = XBRLS.from_filings(filings, filter_amendments=True)
 
     bundle: PeriodBundle = {}
