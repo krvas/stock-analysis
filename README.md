@@ -78,6 +78,26 @@ edgartools' own HTTP cache of downloaded filing documents lives in
 next statements load. Override sizes via those env vars when storage or
 freshness needs differ. Filings are fetched directly from the SEC on cache miss.
 
+### Tests
+
+```bash
+pytest            # unit tests (offline)
+pytest -m data    # data test over real SEC filings (needs EDGAR_IDENTITY)
+```
+
+The data test needs `tests/data_test_tickers.txt`, which is gitignored, so
+create it after cloning: one ticker per line, `#` starts a comment, e.g.
+
+```text
+AAPL
+MU
+SNDK
+```
+
+Without the file the data test is skipped. Listed tickers are pinned in the
+company cache (never evicted, and they don't count toward
+`EDGARTOOLS_COMPANY_CACHE_SIZE`) and loaded through the app's own cache.
+
 ### DatabaseManager
 
 ```python
