@@ -20,6 +20,7 @@ from src.api.edgartools.cache import (
     is_period_bundle_stale,
     load_period_bundle,
     pinned_tickers,
+    read_period_bundle,
     save_period_bundle,
     set_pinned_tickers,
     touch_company_cache,
@@ -279,6 +280,59 @@ def test_stale_bundle_is_kept_when_not_pruning(tmp_path: Path) -> None:
     )
     assert loaded is None
     assert (cache_dir / "companies" / "320193" / "quarterly" / "meta.json").exists()
+
+
+def test_read_period_bundle_returns_fresh_bundle_with_filing_date(
+    tmp_path: Path,
+) -> None:
+    cache_dir = tmp_path / "edgartools_cache"
+    _save(cache_dir)
+
+    cached = read_period_bundle(
+        cik=320193, period="annual", cache_dir=cache_dir, reference=date(2025, 1, 1)
+    )
+
+    assert cached is not None
+    assert cached.stale is False
+    assert cached.latest_filing_date == date(2024, 11, 1)
+    pd.testing.assert_frame_equal(cached.bundle["income"].calc_edges, _calc_edges())
+
+
+def test_read_period_bundle_keeps_and_returns_stale_bundle(tmp_path: Path) -> None:
+    cache_dir = tmp_path / "edgartools_cache"
+    _save(cache_dir, period="quarterly", latest_filing_date=date(2024, 1, 1))
+
+    cached = read_period_bundle(
+        cik=320193, period="quarterly", cache_dir=cache_dir, reference=date(2024, 4, 2)
+    )
+
+    assert cached is not None
+    assert cached.stale is True
+    assert cached.latest_filing_date == date(2024, 1, 1)
+    assert set(cached.bundle) == {"income", "balance", "cashflow"}
+    assert (cache_dir / "companies" / "320193" / "quarterly" / "meta.json").exists()
+
+
+@pytest.mark.parametrize("damage", ["schema", "meta", "corrupt", "missing"])
+def test_read_period_bundle_discards_unusable_stale_bundle(
+    tmp_path: Path, damage: str
+) -> None:
+    cache_dir = tmp_path / "edgartools_cache"
+    _save(cache_dir, latest_filing_date=date(2020, 1, 1))
+    bundle_dir = cache_dir / "companies" / "320193" / "annual"
+    if damage == "schema":
+        meta = json.loads((bundle_dir / "meta.json").read_text())
+        meta["schema_version"] = CACHE_SCHEMA_VERSION + 1
+        (bundle_dir / "meta.json").write_text(json.dumps(meta))
+    elif damage == "meta":
+        (bundle_dir / "meta.json").write_text("{not json")
+    elif damage == "corrupt":
+        (bundle_dir / "income_calc.parquet").write_bytes(b"not parquet")
+    else:
+        (bundle_dir / "balance.parquet").unlink()
+
+    assert read_period_bundle(cik=320193, period="annual", cache_dir=cache_dir) is None
+    assert not bundle_dir.exists()
 
 
 def test_is_period_bundle_stale_respects_three_month_threshold() -> None:
