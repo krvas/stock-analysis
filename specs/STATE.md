@@ -133,12 +133,16 @@ cross-role fallback) of the filing that period's values came from; calc code
 must use it. Without stored edges, `Statement` broadcasts the frame's own
 tree to every period. `Statement.children(row_id, period)` returns the
 non-dimensional child rows in that period's edges, `weight` = edge weight.
-Rebuilt on `schema_version` mismatch (`CACHE_SCHEMA_VERSION`), missing/corrupt
-files, or `latest_filing_date` older than
+Rebuilt on `schema_version` mismatch (`CACHE_SCHEMA_VERSION`) or
+missing/corrupt files. A bundle whose `latest_filing_date` is older than
 `EDGARTOOLS_ANNUAL_CACHE_MAX_AGE_MONTHS` (12) /
 `EDGARTOOLS_QUARTERLY_CACHE_MAX_AGE_MONTHS` (3) (quarterly: newer of latest
-10-Q and latest 10-K, so a year-end 10-K keeps it fresh). Company LRU size
-`EDGARTOOLS_COMPANY_CACHE_SIZE` (10), index `company_lru.json`. Pinned
+10-Q and latest 10-K, so a year-end 10-K keeps it fresh) is stale
+(`read_period_bundle` returns it with `stale=True`; `load_period_bundle`
+treats it as unusable): `load_statement_set` then fetches the filing list and
+rebuilds only if SEC has a newer filing (freshness date ≠ stored); otherwise
+it serves the cached bundle. Fresh bundles make no SEC request. Company LRU
+size `EDGARTOOLS_COMPANY_CACHE_SIZE` (10), index `company_lru.json`. Pinned
 tickers (`set_pinned_tickers`, stored in `company_lru.json`) are exempt from
 LRU eviction and don't count toward the size; staleness still applies.
 

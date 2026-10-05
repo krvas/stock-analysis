@@ -71,7 +71,9 @@ from that one bundle. The app keeps the `EDGARTOOLS_COMPANY_CACHE_SIZE` most
 recently viewed companies (default 10) and deletes older company caches
 automatically. Bundles whose latest filing is older than
 `EDGARTOOLS_ANNUAL_CACHE_MAX_AGE_MONTHS` (default 12) or
-`EDGARTOOLS_QUARTERLY_CACHE_MAX_AGE_MONTHS` (default 3) are refetched.
+`EDGARTOOLS_QUARTERLY_CACHE_MAX_AGE_MONTHS` (default 3) are stale: loading
+one checks SEC's filing list and rebuilds the bundle only if a newer filing
+exists; otherwise it is served from the cache.
 edgartools' own HTTP cache of downloaded filing documents lives in
 `data/edgartools_cache/_tcache`; once it is over `EDGARTOOLS_HTTP_CACHE_MAX_MB`
 (default 300), it is cleared completely (edgartools' `clear_cache`) before the

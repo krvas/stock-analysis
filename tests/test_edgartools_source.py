@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from datetime import date
+import json
+from datetime import UTC, date, datetime
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, call, patch
@@ -13,7 +14,14 @@ import pytest
 from edgar.xbrl.exceptions import StatementNotFound
 
 from src.api.edgartools import source
-from src.api.edgartools.cache import StatementFrames, is_period_bundle_stale
+from src.api.edgartools.cache import (
+    CachedPeriodBundle,
+    StatementFrames,
+    _load_index,
+    is_period_bundle_stale,
+    save_period_bundle,
+    touch_company_cache,
+)
 from src.api.edgartools.source import (
     _align,
     _build_statement_dataframe,
@@ -838,7 +846,7 @@ STATEMENT_CASES = [
 @patch.dict("os.environ", {"EDGAR_IDENTITY": "ScreenerApp/1.0 test@example.com"})
 @patch("src.api.edgartools.source.touch_company_cache")
 @patch("src.api.edgartools.source.save_period_bundle")
-@patch("src.api.edgartools.source.load_period_bundle")
+@patch("src.api.edgartools.source.read_period_bundle")
 @patch("src.api.edgartools.source.find_cached_cik")
 @patch("src.api.edgartools.source.determine_optimal_periods")
 @patch("src.api.edgartools.source.XBRLS")
@@ -923,7 +931,7 @@ FRESHNESS_CASES = [
 @patch.dict("os.environ", {"EDGAR_IDENTITY": "ScreenerApp/1.0 test@example.com"})
 @patch("src.api.edgartools.source.touch_company_cache")
 @patch("src.api.edgartools.source.save_period_bundle")
-@patch("src.api.edgartools.source.load_period_bundle")
+@patch("src.api.edgartools.source.read_period_bundle")
 @patch("src.api.edgartools.source.find_cached_cik")
 @patch("src.api.edgartools.source.determine_optimal_periods")
 @patch("src.api.edgartools.source.XBRLS")
@@ -1003,7 +1011,7 @@ def _cached_bundle() -> dict[str, StatementFrames]:
 @patch.dict("os.environ", {"EDGAR_IDENTITY": "ScreenerApp/1.0 test@example.com"})
 @patch("src.api.edgartools.source.touch_company_cache")
 @patch("src.api.edgartools.source.save_period_bundle")
-@patch("src.api.edgartools.source.load_period_bundle")
+@patch("src.api.edgartools.source.read_period_bundle")
 @patch("src.api.edgartools.source.find_cached_cik")
 @patch("src.api.edgartools.source.Company")
 def test_load_statement_set_returns_cached_without_sec_fetch(
@@ -1014,7 +1022,9 @@ def test_load_statement_set_returns_cached_without_sec_fetch(
     mock_touch_cache: MagicMock,
 ) -> None:
     mock_find_cached_cik.return_value = "320193"
-    mock_load_bundle.return_value = _cached_bundle()
+    mock_load_bundle.return_value = CachedPeriodBundle(
+        _cached_bundle(), date(2024, 11, 1), stale=False
+    )
 
     statement_set = load_statement_set("AAPL", "annual")
 
@@ -1035,6 +1045,149 @@ def test_load_statement_set_returns_cached_without_sec_fetch(
         cache_dir=mock_touch_cache.call_args.kwargs["cache_dir"],
         max_companies=mock_touch_cache.call_args.kwargs["max_companies"],
     )
+
+
+# --- stale bundles: rebuilt only when SEC has a newer filing ----------------
+# These use the real cache module on the autouse fixture's tmp_path cache dir.
+
+_TODAY = datetime.now(UTC).date()
+_STALE_DATE = date(_TODAY.year - 2, 1, 2)  # stale for annual and quarterly
+
+
+def _seed_cache(cache_dir: Path, period: str, latest_filing_date: date) -> None:
+    save_period_bundle(
+        cik=320193,
+        period=period,
+        latest_filing_date=latest_filing_date,
+        bundle=_cached_bundle(),
+        cache_dir=cache_dir,
+    )
+    touch_company_cache(cik=320193, ticker="AAPL", cache_dir=cache_dir)
+
+
+def _last_accessed(cache_dir: Path) -> str:
+    return _load_index(cache_dir)["companies"]["320193"]["last_accessed"]
+
+
+def _stored_filing_date(cache_dir: Path, period: str) -> str:
+    meta = cache_dir / "companies" / "320193" / period / "meta.json"
+    return json.loads(meta.read_text())["latest_filing_date"]
+
+
+@pytest.fixture
+def _sec(tmp_path):
+    """Patch SEC access for load_statement_set; yields the mocks."""
+    with (
+        patch.dict(
+            "os.environ", {"EDGAR_IDENTITY": "ScreenerApp/1.0 test@example.com"}
+        ),
+        patch.object(source, "Company") as company_cls,
+        patch.object(source, "XBRLS") as xbrls_cls,
+        patch.object(source, "determine_optimal_periods") as periods,
+    ):
+        yield SimpleNamespace(company=company_cls, xbrls=xbrls_cls, periods=periods)
+
+
+def _patch_sec_filings(sec, filing_dates: dict[str, str | None]) -> MagicMock:
+    rows = [{"concept": "Revenue", "label": "Revenue", "value": 1.0}]
+    xbrl = _mock_xbrl({st: _filing_df("2026-03-31 (Q)", rows) for st in _GETTERS})
+    return _patch_fetch(
+        sec.company,
+        sec.xbrls,
+        sec.periods,
+        xbrl,
+        {"end_date": "2026-03-31", "period_type": "duration"},
+        filing_dates=filing_dates,
+    )
+
+
+def test_fresh_bundle_makes_no_sec_calls(tmp_path, _sec) -> None:
+    _seed_cache(tmp_path, "annual", _TODAY)
+
+    statement_set = load_statement_set("AAPL", "annual")
+
+    assert statement_set.periods == ("2024-09-28", "2023-09-30", "2022-09-24")
+    _sec.company.assert_not_called()
+    _sec.xbrls.from_filings.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("period", "filing_dates"),
+    [
+        ("annual", {"10-K": _STALE_DATE.isoformat()}),
+        # Freshness date is the latest 10-K, newer than the latest 10-Q.
+        (
+            "quarterly",
+            {"10-K": _STALE_DATE.isoformat(), "10-Q": "2000-01-01"},
+        ),
+        ("quarterly", {"10-K": "2000-01-01", "10-Q": _STALE_DATE.isoformat()}),
+    ],
+)
+def test_stale_bundle_without_newer_filing_is_served_from_cache(
+    tmp_path, _sec, period: str, filing_dates: dict[str, str]
+) -> None:
+    _seed_cache(tmp_path, period, _STALE_DATE)
+    before = _last_accessed(tmp_path)
+    company = _patch_sec_filings(_sec, filing_dates)
+
+    statement_set = load_statement_set("AAPL", period)
+
+    assert statement_set.periods == ("2024-09-28", "2023-09-30", "2022-09-24")
+    assert company.get_filings.call_args_list[0] == call(
+        form=source.FORM_BY_PERIOD[period], amendments=False
+    )
+    _sec.xbrls.from_filings.assert_not_called()
+    _sec.periods.assert_not_called()
+    assert _stored_filing_date(tmp_path, period) == _STALE_DATE.isoformat()
+    assert _last_accessed(tmp_path) > before
+
+
+@pytest.mark.parametrize(
+    ("period", "filing_dates", "expected"),
+    [
+        ("annual", {"10-K": "2026-09-01"}, "2026-09-01"),
+        ("quarterly", {"10-K": "2000-01-01", "10-Q": "2026-08-01"}, "2026-08-01"),
+        # A year-end 10-K is the newer filing for a quarterly bundle.
+        (
+            "quarterly",
+            {"10-K": "2026-09-01", "10-Q": _STALE_DATE.isoformat()},
+            "2026-09-01",
+        ),
+    ],
+)
+def test_stale_bundle_with_newer_filing_is_rebuilt(
+    tmp_path, _sec, period: str, filing_dates: dict[str, str], expected: str
+) -> None:
+    _seed_cache(tmp_path, period, _STALE_DATE)
+    _patch_sec_filings(_sec, filing_dates)
+
+    statement_set = load_statement_set("AAPL", period)
+
+    assert statement_set.periods == ("2026-03-31",)
+    _sec.xbrls.from_filings.assert_called_once()
+    assert _stored_filing_date(tmp_path, period) == expected
+
+
+@pytest.mark.parametrize("damage", ["schema", "corrupt"])
+def test_unusable_bundle_is_rebuilt_even_without_newer_filing(
+    tmp_path, _sec, damage: str
+) -> None:
+    _seed_cache(tmp_path, "annual", _STALE_DATE)
+    bundle_dir = tmp_path / "companies" / "320193" / "annual"
+    if damage == "schema":
+        meta_path = bundle_dir / "meta.json"
+        meta = json.loads(meta_path.read_text())
+        meta["schema_version"] = -1
+        meta_path.write_text(json.dumps(meta))
+    else:
+        (bundle_dir / "income.parquet").write_bytes(b"not parquet")
+    _patch_sec_filings(_sec, {"10-K": _STALE_DATE.isoformat()})
+
+    statement_set = load_statement_set("AAPL", "annual")
+
+    assert statement_set.periods == ("2026-03-31",)
+    _sec.xbrls.from_filings.assert_called_once()
+    assert _stored_filing_date(tmp_path, "annual") == _STALE_DATE.isoformat()
 
 
 @patch.dict("os.environ", {"EDGAR_IDENTITY": "ScreenerApp/1.0 test@example.com"})

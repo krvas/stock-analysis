@@ -11,11 +11,13 @@ period's calc tree from the filing its values came from). Layout::
     companies/{cik}/{period}/meta.json   # schema_version, period,
                                          # latest_filing_date
 
-Bundles are rebuilt when ``meta.json`` carries a different
-:data:`CACHE_SCHEMA_VERSION`, when files are missing or unreadable, and when
-the stored latest filing date is more than the period-specific cache age old.
-For quarterly bundles that date is the newer of the latest 10-Q and the latest
-10-K (set by the caller), so a bundle stays fresh after a fiscal-year 10-K.
+Bundles are discarded when ``meta.json`` carries a different
+:data:`CACHE_SCHEMA_VERSION` and when files are missing or unreadable. A
+bundle is stale when the stored latest filing date is more than the
+period-specific cache age old (:func:`read_period_bundle` reports it; the
+caller rebuilds it only if SEC has a newer filing). For quarterly bundles that
+date is the newer of the latest 10-Q and the latest 10-K (set by the caller),
+so a bundle stays fresh after a fiscal-year 10-K.
 
 Companies are evicted least-recently-touched first beyond
 ``EDGARTOOLS_COMPANY_CACHE_SIZE``. Tickers listed in the index's
@@ -234,20 +236,32 @@ def delete_period_bundle(
             logger.warning("Failed to delete period bundle %s: %s", bundle_dir, exc)
 
 
-def load_period_bundle(
+class CachedPeriodBundle(NamedTuple):
+    """A readable bundle with its ``meta.json`` freshness information."""
+
+    bundle: PeriodBundle
+    # ``meta.json``'s ``latest_filing_date`` (the freshness date it was built at).
+    latest_filing_date: date
+    # Whether ``latest_filing_date`` is older than the period's max cache age.
+    stale: bool
+
+
+def read_period_bundle(
     *,
     cik: int | str,
     period: PeriodType,
     cache_dir: Path | None = None,
     reference: date | None = None,
     prune: bool = True,
-) -> PeriodBundle | None:
-    """Load a cached bundle, or None (deleting it) if unusable.
+) -> CachedPeriodBundle | None:
+    """Load a cached bundle even if it is stale, or None (deleting it) if unusable.
 
     Unusable means: missing/invalid ``meta.json``, a ``schema_version`` other
-    than :data:`CACHE_SCHEMA_VERSION`, stale, or a missing/corrupt statement
-    or calc-edges file. ``prune=False`` (read-only callers such as reports) returns None
-    without deleting anything.
+    than :data:`CACHE_SCHEMA_VERSION`, or a missing/corrupt statement or
+    calc-edges file. A bundle whose stored ``latest_filing_date`` is too old
+    is returned with ``stale=True`` and left on disk, so the caller can check
+    whether a newer filing exists before rebuilding it. ``prune=False``
+    (read-only callers such as reports) returns None without deleting anything.
     """
     cache_dir = Path(cache_dir) if cache_dir is not None else EDGARTOOLS_CACHE_DIR
 
@@ -282,16 +296,6 @@ def load_period_bundle(
         discard()
         return None
 
-    if is_period_bundle_stale(latest_filing_date, period=period, reference=reference):
-        logger.info(
-            "Period bundle stale for CIK %s (%s); latest filing %s",
-            cik,
-            period,
-            latest_filing_date,
-        )
-        discard()
-        return None
-
     bundle: PeriodBundle = {}
     for statement_type in STATEMENT_TYPES:
         paths = (
@@ -309,7 +313,43 @@ def load_period_bundle(
                 discard()
                 return None
         bundle[statement_type] = StatementFrames(*frames)
-    return bundle
+
+    stale = is_period_bundle_stale(
+        latest_filing_date, period=period, reference=reference
+    )
+    if stale:
+        logger.info(
+            "Period bundle stale for CIK %s (%s); latest filing %s",
+            cik,
+            period,
+            latest_filing_date,
+        )
+    return CachedPeriodBundle(bundle, latest_filing_date, stale)
+
+
+def load_period_bundle(
+    *,
+    cik: int | str,
+    period: PeriodType,
+    cache_dir: Path | None = None,
+    reference: date | None = None,
+    prune: bool = True,
+) -> PeriodBundle | None:
+    """Load a fresh cached bundle, or None (deleting it) if unusable or stale.
+
+    :func:`read_period_bundle`, except that a stale bundle is treated as
+    unusable too. ``prune=False`` returns None without deleting anything.
+    """
+    cached = read_period_bundle(
+        cik=cik, period=period, cache_dir=cache_dir, reference=reference, prune=prune
+    )
+    if cached is None:
+        return None
+    if cached.stale:
+        if prune:
+            delete_period_bundle(cik=cik, period=period, cache_dir=cache_dir)
+        return None
+    return cached.bundle
 
 
 def save_period_bundle(

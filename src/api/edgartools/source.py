@@ -24,10 +24,11 @@ from edgar.xbrl import XBRLS
 from edgar.xbrl.stitching.periods import determine_optimal_periods
 
 from src.api.edgartools.cache import (
+    CachedPeriodBundle,
     PeriodBundle,
     StatementFrames,
     find_cached_cik,
-    load_period_bundle,
+    read_period_bundle,
     save_period_bundle,
     touch_company_cache,
 )
@@ -605,41 +606,55 @@ def _touch(cik: int | str, ticker: str) -> None:
     )
 
 
-def _load_cached_set(
-    *, cik: int | str, ticker: str, period: PeriodType
-) -> StatementSet | None:
-    bundle = load_period_bundle(cik=cik, period=period, cache_dir=EDGARTOOLS_CACHE_DIR)
-    if bundle is None:
-        return None
+def _read_cached(cik: int | str, period: PeriodType) -> CachedPeriodBundle | None:
+    return read_period_bundle(cik=cik, period=period, cache_dir=EDGARTOOLS_CACHE_DIR)
+
+
+def _serve_cached(
+    cached: CachedPeriodBundle, *, cik: int | str, ticker: str
+) -> StatementSet:
     _touch(cik, ticker)
-    return _statement_set(bundle)
+    return _statement_set(cached.bundle)
 
 
 def load_statement_set(ticker: str, period: PeriodType) -> StatementSet:
     """Return all cached periods of all three statements for ``ticker``.
 
-    Served from the ``(cik, period)`` cache when fresh; otherwise fetches up to
+    Served from the ``(cik, period)`` cache when fresh (no SEC request). A
+    stale bundle costs one filing-list request: it is still served if SEC has
+    no newer filing than the one it was built from. Otherwise fetches up to
     ``MAX_CACHE_YEARS`` 10-Ks (annual) or ``MAX_CACHE_QUARTERS`` 10-Qs
     (quarterly), builds, and caches the raw detailed frames.
     """
     setup_edgartools()
 
+    cached = None
     cached_cik = find_cached_cik(EDGARTOOLS_CACHE_DIR, ticker)
     if cached_cik is not None:
-        cached = _load_cached_set(cik=cached_cik, ticker=ticker, period=period)
-        if cached is not None:
-            return cached
+        cached = _read_cached(cached_cik, period)
+        if cached is not None and not cached.stale:
+            return _serve_cached(cached, cik=cached_cik, ticker=ticker)
 
     company = Company(ticker)
-    cached = _load_cached_set(cik=company.cik, ticker=ticker, period=period)
-    if cached is not None:
-        return cached
+    if cached is None or int(cached_cik) != int(company.cik):
+        cached = _read_cached(company.cik, period)
+        if cached is not None and not cached.stale:
+            return _serve_cached(cached, cik=company.cik, ticker=ticker)
 
     max_periods = MAX_PERIODS_BY_PERIOD[period]
     filings = company.get_filings(form=FORM_BY_PERIOD[period], amendments=False).head(
         max_periods
     )
     latest_filing_date = _freshness_date(company, period, filings)
+    if cached is not None and cached.latest_filing_date == latest_filing_date:
+        logger.info(
+            "No filing newer than %s for %s (%s); serving the stale cached bundle",
+            latest_filing_date,
+            ticker,
+            period,
+        )
+        return _serve_cached(cached, cik=company.cik, ticker=ticker)
+
     xbrls = XBRLS.from_filings(filings, filter_amendments=True)
 
     bundle: PeriodBundle = {}
