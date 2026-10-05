@@ -80,7 +80,7 @@ def test_collect_summarize_and_list_non_zero(tmp_path: Path) -> None:
     details = non_zero_residuals(residuals, tolerance=0.5)
     assert set(details["ticker"]) == {"BBB"}
     assert details["residual"].tolist() == [10.0, 10.0, 10.0]
-    assert (details["n_nan_weight_children"] == 0).all()
+    assert (details["n_missing_children"] == 0).all()
     assert set(details["period"]) == {P2}
 
 
@@ -106,13 +106,13 @@ def test_non_zero_sorted_by_abs_relative(tmp_path: Path) -> None:
             "relative": [0.1, -0.5, float("nan")],
             "n_children": [1, 1, 1],
             "n_nan_children": [0, 0, 0],
-            "n_nan_weight_children": [0, 1, 0],
+            "n_missing_children": [0, 1, 0],
         }
     )
     details = non_zero_residuals(residuals, tolerance=0.5)
 
     assert details["row_id"].tolist() == ["b", "a"]
-    assert details["n_nan_weight_children"].tolist() == [1, 0]
+    assert details["n_missing_children"].tolist() == [1, 0]
 
 
 INCOME_ROLE = "CONSOLIDATED STATEMENTS OF OPERATIONS"

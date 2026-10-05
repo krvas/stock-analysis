@@ -215,14 +215,34 @@ def test_find_by_concept_excludes_dimensional_by_default() -> None:
     assert len(statement.find(concept="Revenues", include_dimensional=True)) == 3
 
 
-def test_children_via_parent_concept_excludes_dimensional_rows() -> None:
-    children = _income().children("GrossProfit")
+def test_children_via_calc_edges_excludes_dimensional_rows() -> None:
+    children = _income().children("GrossProfit", P1)
     assert children["row_id"].tolist() == ["Revenues", "CostOfRevenue"]
+    assert children["weight"].tolist() == [1.0, -1.0]
 
 
-def test_children_unknown_row_raises() -> None:
+def test_children_use_the_periods_own_tree_and_edge_weight() -> None:
+    edges = pd.DataFrame(
+        {
+            "period": [P1, P1, P2],
+            "concept": ["Revenues", "CostOfRevenue", "CostOfRevenue"],
+            "parent_concept": ["GrossProfit", "GrossProfit", "GrossProfit"],
+            # P2's filing weighs CostOfRevenue +1 (frame column says -1).
+            "weight": [1.0, -1.0, 1.0],
+        }
+    )
+    statement = Statement(_income_frame(), "income", calc_edges=edges)
+
+    p2 = statement.children("GrossProfit", P2)
+    assert p2["row_id"].tolist() == ["CostOfRevenue"]
+    assert p2["weight"].tolist() == [1.0]
+    assert statement.children("GrossProfit", P3).empty
+
+
+@pytest.mark.parametrize(("row_id", "period"), [("Nope", P1), ("GrossProfit", "x")])
+def test_children_unknown_row_or_period_raises(row_id: str, period: str) -> None:
     with pytest.raises(KeyError):
-        _income().children("Nope")
+        _income().children(row_id, period)
 
 
 # --- projection --------------------------------------------------------------

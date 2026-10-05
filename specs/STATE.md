@@ -131,7 +131,8 @@ stored as `{statement}_calc.parquet`) gives each period every arc of the
 statement role's calc tree (`xbrl.find_statement` → `calculation_trees`, no
 cross-role fallback) of the filing that period's values came from; calc code
 must use it. Without stored edges, `Statement` broadcasts the frame's own
-tree to every period. `children` / `calc_residuals` don't use it yet.
+tree to every period. `Statement.children(row_id, period)` returns the
+non-dimensional child rows in that period's edges, `weight` = edge weight.
 Rebuilt on `schema_version` mismatch (`CACHE_SCHEMA_VERSION`), missing/corrupt
 files, or `latest_filing_date` older than
 `EDGARTOOLS_ANNUAL_CACHE_MAX_AGE_MONTHS` (12) /
@@ -152,13 +153,14 @@ client-side.
 `get_row_id` (only place ids are formed): `concept`, plus
 `|Axis=member` for every axis of a dimensional row (sorted by axis, axis
 prefix stripped, member QName kept), `#n` for repeats within one filing.
-`calc_residuals(statement)` (`src/models/calc_residuals.py`):
-`reported(parent) − Σ weight·child` over non-dimensional calc children (raw
-signs); children with NaN weight are excluded and counted
-(`n_nan_weight_children`), never assumed +1. Known, accepted residual: diluted
-shares (`WeightedAverageNumberOfDilutedSharesOutstanding`) always has a
-residual equal to the dilutive effect (edgartools uses the EPS-note calc role;
-its incremental-shares child is not on the income statement).
+`calc_residuals(statement)` (`src/models/calc_residuals.py`): per period,
+`reported(parent) − Σ weight·child` on that period's own `calc_edges` (raw
+signs; edge weights; first non-dimensional row per concept). NaN child values
+count 0 (`n_nan_children`); calc children with no non-dimensional row are
+counted in `n_missing_children`.
+Expected 0 on real filings (data test: AAPL/MU/SNDK all 0); the old diluted
+shares residual is gone (edges come from the statement role only, not the
+EPS-note role).
 `calc_residual_report` CLI runs it over the cache (read-only).
 
 **Wizard.**
