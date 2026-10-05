@@ -8,6 +8,14 @@ other column is a period column (ISO date string, newest first). Values are
 stored with **raw** XBRL signs; ``preferred_sign`` is applied only in
 :meth:`Statement.project`.
 
+The calc tree is per period: :attr:`Statement.calc_edges` is a long frame
+(``period, concept, parent_concept, weight``) holding, for each period, the
+calc tree of the filing that period's values came from. Filers restructure
+their calc trees over the years, so the frame's own ``parent_concept`` /
+``weight`` columns (edgartools-mirror metadata from the newest filing a row
+appears in) must not be used for calc math across periods; calc code uses
+``calc_edges``.
+
 Pure domain module: pandas only, no edgartools import, no I/O.
 See ``specs/adjustments_architecture.md`` §3–§5.
 """
@@ -91,6 +99,9 @@ PROJECTION_METADATA_COLUMNS: tuple[str, ...] = (
 )
 
 REPORTED_ORIGIN = "reported"
+
+# Columns of :attr:`Statement.calc_edges`, in order.
+CALC_EDGE_COLUMNS: tuple[str, ...] = ("period", "concept", "parent_concept", "weight")
 
 _TOTAL_LABEL_RE = re.compile(r"\btotal\b", re.IGNORECASE)
 
@@ -272,6 +283,73 @@ def _presentation_ancestors(df: pd.DataFrame, rows: pd.Series) -> set[str]:
     return ancestors
 
 
+def _derived_calc_edges(df: pd.DataFrame, periods: Sequence[str]) -> pd.DataFrame:
+    """Calc edges of a single-filing statement, from the frame's own columns.
+
+    Every non-dimensional row with a ``parent_concept`` and a known
+    ``weight`` (1 when the frame has no ``weight`` column) becomes an edge in
+    every period; a concept presented twice keeps its first row's edge.
+    Rows whose ``weight`` is NaN are left out (edges never carry NaN).
+    """
+    if "parent_concept" not in df.columns or not periods:
+        return _empty_calc_edges()
+    rows = df[~bool_flag(df, "dimension")]
+    parents = rows["parent_concept"].map(_clean_str)
+    if "weight" in rows.columns:
+        weights = pd.to_numeric(rows["weight"], errors="coerce").astype(float)
+    else:
+        weights = pd.Series(1.0, index=rows.index)
+    edges = pd.DataFrame(
+        {
+            "concept": rows["concept"].map(_clean_str),
+            "parent_concept": parents,
+            "weight": weights,
+        }
+    )
+    edges = edges.dropna().drop_duplicates("concept", keep="first")
+    return _normalize_calc_edges(
+        pd.concat(
+            [edges.assign(period=period) for period in periods], ignore_index=True
+        )
+    )
+
+
+def _empty_calc_edges() -> pd.DataFrame:
+    return _normalize_calc_edges(pd.DataFrame(columns=list(CALC_EDGE_COLUMNS)))
+
+
+def _normalize_calc_edges(edges: pd.DataFrame) -> pd.DataFrame:
+    """``edges`` restricted to :data:`CALC_EDGE_COLUMNS`, fresh index, ``str``
+    id columns (missing values stay missing) and float ``weight``."""
+    out = edges.loc[:, list(CALC_EDGE_COLUMNS)].reset_index(drop=True).copy()
+    for col in ("period", "concept", "parent_concept"):
+        out[col] = out[col].astype(str)
+    out["weight"] = pd.to_numeric(out["weight"], errors="coerce").astype(float)
+    return out
+
+
+def _validated_calc_edges(edges: pd.DataFrame, periods: Sequence[str]) -> pd.DataFrame:
+    """Check and normalize a caller-supplied :attr:`Statement.calc_edges`."""
+    missing = [col for col in CALC_EDGE_COLUMNS if col not in edges.columns]
+    if missing:
+        raise ValueError(f"calc_edges is missing column(s): {missing}")
+    out = _normalize_calc_edges(edges)
+    for col in CALC_EDGE_COLUMNS:
+        if out[col].isna().any():
+            raise ValueError(f"calc_edges has missing {col!r} value(s)")
+    unknown = sorted(set(out["period"]) - set(periods))
+    if unknown:
+        raise ValueError(f"calc_edges has unknown period(s): {unknown}")
+    duplicated = out[out.duplicated(["period", "concept"], keep=False)]
+    if not duplicated.empty:
+        first = duplicated.iloc[0]
+        raise ValueError(
+            "calc_edges has more than one parent for "
+            f"{first['concept']!r} in {first['period']!r}"
+        )
+    return out
+
+
 def _check_unique_row_ids(row_ids: pd.Series) -> None:
     duplicated = row_ids[row_ids.duplicated(keep=False)]
     if not duplicated.empty:
@@ -285,11 +363,22 @@ def _check_unique_row_ids(row_ids: pd.Series) -> None:
 class Statement:
     """One financial statement (income, balance or cashflow).
 
-    Treat instances as immutable: :attr:`frame` must not be mutated, and every
-    transforming method returns a new :class:`Statement`.
+    Treat instances as immutable: :attr:`frame` and :attr:`calc_edges` must
+    not be mutated, and every transforming method returns a new
+    :class:`Statement`.
+
+    ``calc_edges`` is the per-period calc tree (see the module doc and
+    :attr:`calc_edges`). When omitted it is derived from the frame's
+    ``parent_concept`` / ``weight`` columns, broadcast to every period: the
+    semantics of a statement built from a single filing.
     """
 
-    def __init__(self, frame: pd.DataFrame, statement_type: StatementType) -> None:
+    def __init__(
+        self,
+        frame: pd.DataFrame,
+        statement_type: StatementType,
+        calc_edges: pd.DataFrame | None = None,
+    ) -> None:
         if statement_type not in STATEMENT_TYPES:
             raise ValueError(f"unknown statement_type '{statement_type}'")
 
@@ -327,6 +416,12 @@ class Statement:
 
         self._frame = df
         self.statement_type: StatementType = statement_type
+        periods = self.periods
+        self._calc_edges = (
+            _derived_calc_edges(df, periods)
+            if calc_edges is None
+            else _validated_calc_edges(calc_edges, periods)
+        )
 
     def __repr__(self) -> str:
         return (
@@ -338,6 +433,18 @@ class Statement:
     def frame(self) -> pd.DataFrame:
         """Underlying frame (raw signs). Do not mutate."""
         return self._frame
+
+    @property
+    def calc_edges(self) -> pd.DataFrame:
+        """Per-period calc tree (raw signs). Do not mutate.
+
+        Columns :data:`CALC_EDGE_COLUMNS`: one row per ``(period, concept)``
+        with a calc parent in the statement role's calc tree of the filing
+        that ``period``'s values came from (``weight`` ±1 etc., never NaN).
+        Concept-level, not row-level: dimensional rows share their concept's
+        edge. Includes calc-tree concepts the statement does not present.
+        """
+        return self._calc_edges
 
     @property
     def periods(self) -> list[str]:
@@ -384,6 +491,10 @@ class Statement:
         ``row`` must supply ``concept`` and ``origin`` (e.g.
         ``"adjustment:opex_to_capex"``); ``row_id`` is derived via
         :func:`get_row_id` when absent and must not already exist.
+
+        :attr:`calc_edges` is carried over unchanged: the inserted row gets no
+        calc edges here (wiring inserted rows into the calc tree is the
+        adjustments engine's job).
         """
         if _clean_str(row.get("origin")) is None:
             raise ValueError("inserted rows must supply an 'origin'")
@@ -412,11 +523,14 @@ class Statement:
             c for c in record if c not in self._frame.columns
         ]
         return Statement(
-            pd.DataFrame.from_records(records, columns=columns), self.statement_type
+            pd.DataFrame.from_records(records, columns=columns),
+            self.statement_type,
+            calc_edges=self._calc_edges,
         )
 
     def with_values(self, row_id: str, values: Mapping[str, float]) -> Statement:
-        """Return a new statement with ``row_id``'s period values replaced."""
+        """Return a new statement with ``row_id``'s period values replaced
+        (:attr:`calc_edges` carried over)."""
         position = self._row_index(row_id)
         unknown = sorted(set(values) - set(self.periods))
         if unknown:
@@ -428,7 +542,7 @@ class Statement:
             ):
                 df[period] = df[period].astype(float)
             df.loc[position, period] = value
-        return Statement(df, self.statement_type)
+        return Statement(df, self.statement_type, calc_edges=self._calc_edges)
 
     def project(
         self,

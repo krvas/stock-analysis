@@ -8,6 +8,7 @@ import pandas as pd
 import pytest
 
 from src.models.statement import (
+    CALC_EDGE_COLUMNS,
     PROJECTION_METADATA_COLUMNS,
     DuplicateRowIdError,
     Statement,
@@ -387,6 +388,116 @@ def test_with_values_returns_new_statement() -> None:
         base.with_values("ResearchAndDevelopmentExpense", {"1999-12-31": 1.0})
     with pytest.raises(KeyError):
         base.with_values("Nope", {P1: 1.0})
+
+
+# --- calc_edges --------------------------------------------------------------
+
+
+def _edge_set(edges: pd.DataFrame, period: str) -> set[tuple[str, str, float]]:
+    rows = edges[edges["period"] == period]
+    return set(
+        zip(rows["concept"], rows["parent_concept"], rows["weight"], strict=True)
+    )
+
+
+def _per_period_edges() -> pd.DataFrame:
+    """P1 and P2 from a filing where CostOfRevenue rolls into GrossProfit; P3
+    from an older one where it rolled into OperatingIncome."""
+    return pd.DataFrame(
+        {
+            "period": [P1, P1, P2, P3],
+            "concept": ["Revenues", "CostOfRevenue", "Revenues", "CostOfRevenue"],
+            "parent_concept": [
+                "GrossProfit",
+                "GrossProfit",
+                "GrossProfit",
+                "OperatingIncome",
+            ],
+            "weight": [1.0, -1.0, 1.0, -1.0],
+        }
+    )
+
+
+def test_calc_edges_default_broadcasts_frame_tree_to_every_period() -> None:
+    frame = _income_frame()
+    # A NaN-weight child carries no edge; a duplicated concept keeps its first.
+    frame.loc[frame["concept"] == "ResearchAndDevelopmentExpense", "parent_concept"] = (
+        "OperatingExpenses"
+    )
+    frame.loc[frame["concept"] == "ResearchAndDevelopmentExpense", "weight"] = None
+    extra = _row("CostOfRevenue", "Cost again", parent_concept="Other", weight=1.0)
+    frame = pd.concat([frame, pd.DataFrame([extra])], ignore_index=True)
+    frame["row_id"] = [
+        *(get_row_id(row) for _, row in frame.iloc[:-1].iterrows()),
+        "CostOfRevenue#2",
+    ]
+
+    edges = Statement(frame, "income").calc_edges
+
+    assert list(edges.columns) == list(CALC_EDGE_COLUMNS)
+    expected = {
+        ("Revenues", "GrossProfit", 1.0),
+        ("CostOfRevenue", "GrossProfit", -1.0),
+    }
+    for period in (P1, P2, P3):
+        assert _edge_set(edges, period) == expected
+    assert len(edges) == 3 * len(expected)
+
+
+def test_calc_edges_default_empty_without_parent_column() -> None:
+    frame = _income_frame().drop(columns=["parent_concept"])
+    edges = Statement(frame, "income").calc_edges
+    assert edges.empty
+    assert list(edges.columns) == list(CALC_EDGE_COLUMNS)
+
+
+def test_calc_edges_given_are_kept_per_period() -> None:
+    statement = Statement(_income_frame(), "income", calc_edges=_per_period_edges())
+    assert _edge_set(statement.calc_edges, P3) == {
+        ("CostOfRevenue", "OperatingIncome", -1.0)
+    }
+    assert _edge_set(statement.calc_edges, P2) == {("Revenues", "GrossProfit", 1.0)}
+    # The frame's own (newest-filing) columns are untouched metadata.
+    cost = statement.find(concept="CostOfRevenue").iloc[0]
+    assert cost["parent_concept"] == "GrossProfit"
+
+
+@pytest.mark.parametrize(
+    ("change", "match"),
+    [
+        (lambda e: e.drop(columns=["weight"]), "missing column"),
+        (lambda e: e.assign(weight=[1.0, None, 1.0, -1.0]), "missing 'weight'"),
+        (
+            lambda e: e.assign(parent_concept=["GrossProfit", None, "G", "O"]),
+            "missing 'parent_concept'",
+        ),
+        (lambda e: e.assign(period=[P1, P1, P2, "1999-12-31"]), "unknown period"),
+        (
+            lambda e: e.assign(concept=["Revenues", "Revenues", "Revenues", "C"]),
+            "more than one parent",
+        ),
+    ],
+    ids=["no-weight-column", "nan-weight", "nan-parent", "unknown-period", "dup"],
+)
+def test_calc_edges_validation(change, match: str) -> None:
+    with pytest.raises(ValueError, match=match):
+        Statement(_income_frame(), "income", calc_edges=change(_per_period_edges()))
+
+
+def test_calc_edges_carried_by_with_values_and_insert() -> None:
+    base = Statement(_income_frame(), "income", calc_edges=_per_period_edges())
+    changed = base.with_values("ResearchAndDevelopmentExpense", {P1: 0.0})
+    inserted = base.insert(
+        {
+            "concept": "DepreciationRnD",
+            "parent_concept": "OperatingExpenses",
+            "origin": "adjustment:opex_to_capex",
+        }
+    )
+    for statement in (changed, inserted):
+        pd.testing.assert_frame_equal(statement.calc_edges, base.calc_edges)
+    # Inserted rows get no edges yet (adjustments engine work).
+    assert "DepreciationRnD" not in set(inserted.calc_edges["concept"])
 
 
 # --- StatementSet ------------------------------------------------------------

@@ -10,7 +10,11 @@ from typing import ClassVar
 import pandas as pd
 import pytest
 
-from src.api.edgartools.cache import save_period_bundle, touch_company_cache
+from src.api.edgartools.cache import (
+    StatementFrames,
+    save_period_bundle,
+    touch_company_cache,
+)
 from src.models.statement import Statement
 from src.pipelines import calc_residual_report as report
 from src.pipelines.calc_residual_report import (
@@ -46,11 +50,13 @@ def _cache(tmp_path: Path) -> Path:
     cache_dir = tmp_path / "edgartools_cache"
     today = datetime.now(UTC).date()
     for cik, ticker, total_p2 in ((1, "AAA", 3.0), (2, "BBB", 13.0)):
+        statement = Statement(_frame(total_p2), "income")
+        frames = StatementFrames(statement.frame, statement.calc_edges)
         save_period_bundle(
             cik=cik,
             period="annual",
             latest_filing_date=today,
-            frames={st: _frame(total_p2) for st in ("income", "balance", "cashflow")},
+            bundle=dict.fromkeys(("income", "balance", "cashflow"), frames),
             cache_dir=cache_dir,
         )
         touch_company_cache(cik=cik, ticker=ticker, cache_dir=cache_dir)

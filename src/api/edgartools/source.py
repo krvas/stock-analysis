@@ -2,8 +2,10 @@
 
 :func:`load_statement_set` is the entry point: it returns a
 :class:`~src.models.statement.StatementSet` holding one raw detailed frame per
-statement, built from up to ``MAX_CACHE_YEARS`` of filings and cached per
-``(cik, period)``. Views and period windows are projections of that set.
+statement plus its per-period calc edges (each period's calc tree from the
+filing its values came from), built from up to ``MAX_CACHE_YEARS`` of filings
+and cached per ``(cik, period)``. Views and period windows are projections of
+that set.
 """
 
 from __future__ import annotations
@@ -13,7 +15,7 @@ import os
 from collections.abc import Callable, Sequence
 from datetime import date
 from pathlib import Path
-from typing import Literal
+from typing import Literal, NamedTuple
 
 import edgar.httpclient
 import pandas as pd
@@ -23,6 +25,7 @@ from edgar.xbrl.stitching.periods import determine_optimal_periods
 
 from src.api.edgartools.cache import (
     PeriodBundle,
+    StatementFrames,
     find_cached_cik,
     load_period_bundle,
     save_period_bundle,
@@ -37,6 +40,7 @@ from src.config import (
     load_project_dotenv,
 )
 from src.models.statement import (
+    CALC_EDGE_COLUMNS,
     EDGARTOOLS_METADATA_COLUMNS,
     STATEMENT_METADATA_COLUMNS,
     STATEMENT_TYPES,
@@ -348,8 +352,61 @@ def _in_standard(statement, frame: pd.DataFrame) -> list[bool] | list[None]:
     return flags
 
 
-def _filing_frame(xbrl, statement_type: StatementType) -> pd.DataFrame | None:
-    """One raw (``presentation=False``) detailed frame for one filing.
+# One calc-tree edge: (concept, parent_concept, weight).
+_CalcEdge = tuple[str, str, float]
+
+
+def _concept_id(element_id: str) -> str:
+    """``element_id`` in our ``concept`` form: ``us-gaap:X`` → ``us-gaap_X``.
+
+    edgartools 5.47 keys calc nodes as ``us-gaap_X`` already; the colon QName
+    form is normalized too in case a filing or version uses it.
+    """
+    prefix, colon, local = element_id.partition(":")
+    return f"{prefix}_{local}" if colon else element_id
+
+
+def _role_calc_edges(xbrl, statement) -> list[_CalcEdge]:
+    """Every arc of the calc tree of ``statement``'s own role in one filing.
+
+    Resolves the role the way edgartools' ``Statement.extension_arcs`` does
+    (``find_statement`` on the canonical type, else ``role_or_type``) and
+    emits ``(concept, parent_concept, weight)`` for each calc node with a
+    parent, including concepts the statement does not present. No cross-role
+    fallback: another role's tree (e.g. the EPS note's) is never used. On an
+    edgartools error or a role without a calc tree, logs a warning and
+    returns no edges.
+    """
+    lookup_key = statement.canonical_type or statement.role_or_type
+    try:
+        _, role_uri, _ = xbrl.find_statement(lookup_key)
+    except Exception:  # noqa: BLE001 - StatementNotFound and assorted errors
+        logger.warning("Calc role lookup failed for %r; no calc edges", lookup_key)
+        return []
+    tree = xbrl.calculation_trees.get(role_uri) if role_uri else None
+    if tree is None:
+        logger.warning("No calc tree for role %r (%r)", role_uri, lookup_key)
+        return []
+    edges: list[_CalcEdge] = []
+    for element_id, node in tree.all_nodes.items():
+        if node.parent is None or node.weight is None:
+            continue
+        edges.append(
+            (_concept_id(element_id), _concept_id(node.parent), float(node.weight))
+        )
+    return edges
+
+
+class _FilingStatement(NamedTuple):
+    """One filing's statement: its detailed frame and its role's calc edges."""
+
+    frame: pd.DataFrame
+    calc_edges: list[_CalcEdge]
+
+
+def _filing_frame(xbrl, statement_type: StatementType) -> _FilingStatement | None:
+    """One raw (``presentation=False``) detailed frame for one filing, plus
+    the statement role's calc edges (:func:`_role_calc_edges`).
 
     Adds our ``dimension_key`` column (all axis/member pairs per row) and
     ``in_standard`` (edgartools' own ``view="standard"`` membership, see
@@ -373,15 +430,16 @@ def _filing_frame(xbrl, statement_type: StatementType) -> pd.DataFrame | None:
         frame["dimension_key"] = [_dimension_key(item) for item in items]
         frame["weight"] = _role_weights(frame, items)
     frame["in_standard"] = _in_standard(statement, frame)
-    return frame
+    return _FilingStatement(frame, _role_calc_edges(xbrl, statement))
 
 
 def _build_statement_dataframe(
     xbrls: XBRLS,
     statement_type: StatementType,
     max_periods: int,
-) -> pd.DataFrame:
-    """Build one multi-period raw detailed frame for ``statement_type``.
+) -> StatementFrames:
+    """Build one multi-period raw detailed frame for ``statement_type`` and
+    its per-period calc edges.
 
     XBRLS's stitched ``to_dataframe()`` drops dimensional rows, so we use XBRLS
     only for filing selection and period alignment
@@ -396,6 +454,12 @@ def _build_statement_dataframe(
     ``weight``, which is the newest non-NaN weight across filings (a filing
     can list a calc child without a weight); rows only in older filings are
     appended after it. Values keep raw XBRL signs.
+
+    The frame's ``parent_concept`` / ``weight`` are therefore the newest
+    filing's calc tree; filers restructure calc trees over the years, so each
+    period also gets the calc edges (``period, concept, parent_concept,
+    weight``) of the filing its values came from — the one
+    ``determine_optimal_periods`` assigned it.
     """
     period_metas = determine_optimal_periods(
         xbrls.xbrl_list,
@@ -403,22 +467,28 @@ def _build_statement_dataframe(
         max_periods=max_periods,
     )
     if not period_metas:
-        return _empty_statement_frame()
+        return StatementFrames(_empty_statement_frame(), _calc_edges_frame([]))
 
     period_labels = [str(_period_date(meta)) for meta in period_metas]
     rows_by_id: dict[str, dict] = {}
     values_by_id: dict[str, dict[str, object]] = {}
-    frames_by_index: dict[int, pd.DataFrame | None] = {}
+    filings_by_index: dict[int, _FilingStatement | None] = {}
+    edge_records: list[tuple[str, str, str, float]] = []
+    periods_with_edges: set[str] = set()
 
     for meta, period_label in zip(period_metas, period_labels, strict=True):
         xbrl_index = meta["xbrl_index"]
-        if xbrl_index not in frames_by_index:
-            frames_by_index[xbrl_index] = _filing_frame(
+        if xbrl_index not in filings_by_index:
+            filings_by_index[xbrl_index] = _filing_frame(
                 xbrls.xbrl_list[xbrl_index], statement_type
             )
-        filing_df = frames_by_index[xbrl_index]
-        if filing_df is None:
+        filing = filings_by_index[xbrl_index]
+        if filing is None:
             continue
+        filing_df = filing.frame
+        if period_label not in periods_with_edges:
+            periods_with_edges.add(period_label)
+            edge_records.extend((period_label, *edge) for edge in filing.calc_edges)
         period_column = _column_for_period_date(filing_df, _period_date(meta))
 
         occurrences: dict[str, int] = {}
@@ -448,8 +518,11 @@ def _build_statement_dataframe(
                 if period_label not in values or values[period_label] is None:
                     values[period_label] = None if pd.isna(value) else value
 
+    calc_edges = _calc_edges_frame(edge_records)
     if not rows_by_id:
-        return _empty_statement_frame()
+        return StatementFrames(
+            _empty_statement_frame(), calc_edges.iloc[0:0].reset_index(drop=True)
+        )
 
     row_ids = list(rows_by_id)
     data: dict[str, list] = {"row_id": row_ids}
@@ -465,7 +538,16 @@ def _build_statement_dataframe(
             ),
             errors="coerce",
         ).astype(float)
-    return pd.DataFrame(data)
+    return StatementFrames(pd.DataFrame(data), calc_edges)
+
+
+def _calc_edges_frame(
+    records: Sequence[tuple[str, str, str, float]],
+) -> pd.DataFrame:
+    """Long calc-edges frame (``Statement.calc_edges`` columns)."""
+    return pd.DataFrame.from_records(
+        list(records), columns=list(CALC_EDGE_COLUMNS)
+    ).astype({"period": str, "concept": str, "parent_concept": str, "weight": float})
 
 
 def _latest_filing_date(filings) -> date:
@@ -500,7 +582,11 @@ def _freshness_date(company, period: PeriodType, filings) -> date:
 
 def _statement_set(bundle: PeriodBundle) -> StatementSet:
     statements = {
-        statement_type: Statement(bundle[statement_type], statement_type)
+        statement_type: Statement(
+            bundle[statement_type].frame,
+            statement_type,
+            calc_edges=bundle[statement_type].calc_edges,
+        )
         for statement_type in STATEMENT_TYPES
     }
     all_periods = {p for s in statements.values() for p in s.periods}
@@ -559,15 +645,17 @@ def load_statement_set(ticker: str, period: PeriodType) -> StatementSet:
     bundle: PeriodBundle = {}
     for statement_type in STATEMENT_TYPES:
         raw = _build_statement_dataframe(xbrls, statement_type, max_periods)
-        # Statement adds tags/origin/is_total and validates row_id uniqueness.
-        bundle[statement_type] = Statement(raw, statement_type).frame
+        # Statement adds tags/origin/is_total and validates row_id uniqueness
+        # and the calc edges.
+        statement = Statement(raw.frame, statement_type, calc_edges=raw.calc_edges)
+        bundle[statement_type] = StatementFrames(statement.frame, statement.calc_edges)
     statement_set = _statement_set(bundle)
 
     save_period_bundle(
         cik=company.cik,
         period=period,
         latest_filing_date=latest_filing_date,
-        frames=bundle,
+        bundle=bundle,
         cache_dir=EDGARTOOLS_CACHE_DIR,
     )
     _touch(company.cik, ticker)
