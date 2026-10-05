@@ -29,6 +29,12 @@ include = ["src*"]
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]
+# Data tests read real SEC filings into the app cache; run them with
+# `pytest -m data` (a later -m overrides this one).
+addopts = "-m 'not data'"
+markers = [
+    "data: real-SEC-data tests over the shared edgartools cache (pytest -m data)",
+]
 
 [tool.ruff.lint]
 # B008: FastAPI's idiomatic Query()/Depends() defaults are correct usage, not bugs.
