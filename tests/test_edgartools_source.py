@@ -3,16 +3,19 @@
 from __future__ import annotations
 
 from datetime import date
+from pathlib import Path
 from unittest.mock import MagicMock, call, patch
 
 import numpy as np
 import pandas as pd
 import pytest
 
+from src.api.edgartools import source
 from src.api.edgartools.source import (
     _align,
     _build_statement_dataframe,
     load_statement_set,
+    setup_edgartools,
 )
 from src.config import MAX_CACHE_QUARTERS, MAX_CACHE_YEARS
 from src.models.statement import EDGARTOOLS_METADATA_COLUMNS, Statement, StatementSet
@@ -22,6 +25,20 @@ _GETTERS = {
     "balance": "balance_sheet",
     "cashflow": "cash_flow_statement",
 }
+
+
+@pytest.fixture(autouse=True)
+def _isolated_edgartools_cache(monkeypatch, tmp_path) -> None:
+    """Keep setup_edgartools (run by load_statement_set) off the real data/
+    cache: our cache dir and edgartools' data dir point at tmp_path, and
+    HTTP_MGR already caches there so it is not rebuilt."""
+    monkeypatch.setenv("EDGAR_LOCAL_DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(source, "EDGARTOOLS_CACHE_DIR", tmp_path)
+    monkeypatch.setattr(
+        source.edgar.httpclient,
+        "HTTP_MGR",
+        MagicMock(cache_dir=str(tmp_path / "_tcache")),
+    )
 
 
 def _filing_df(period_column: str, rows: list[dict]) -> pd.DataFrame:
@@ -758,3 +775,82 @@ def test_load_statement_set_returns_cached_without_sec_fetch(
         cache_dir=mock_touch_cache.call_args.kwargs["cache_dir"],
         max_companies=mock_touch_cache.call_args.kwargs["max_companies"],
     )
+
+
+@patch.dict("os.environ", {"EDGAR_IDENTITY": "ScreenerApp/1.0 test@example.com"})
+def test_setup_edgartools_points_http_cache_at_app_cache_dir(
+    monkeypatch, tmp_path
+) -> None:
+    monkeypatch.setattr(source, "EDGARTOOLS_CACHE_DIR", tmp_path)
+    monkeypatch.setattr(source, "load_project_dotenv", lambda: None)
+    http = source.edgar.httpclient
+    import_time = MagicMock(
+        cache_mode="FileCache", cache_dir=str(tmp_path / "home" / "_tcache")
+    )
+    monkeypatch.setattr(http, "HTTP_MGR", import_time)
+
+    setup_edgartools()
+    ours = http.HTTP_MGR
+    try:
+        assert ours is not import_time
+        import_time.close.assert_called_once()
+        assert ours.cache_mode == "FileCache"
+        assert Path(ours.cache_dir).resolve() == (tmp_path / "_tcache").resolve()
+
+        setup_edgartools()
+        assert http.HTTP_MGR is ours
+    finally:
+        ours.close()
+
+
+def _write_app_cache(cache_dir: Path, http_cache_bytes: int) -> list[Path]:
+    """Write an edgartools HTTP cache entry plus our own cache files."""
+    host = cache_dir / "_tcache" / "www.sec.gov"
+    host.mkdir(parents=True)
+    (host / "doc").write_bytes(b"x" * http_cache_bytes)
+    (host / "doc.meta").write_bytes(b"{}")
+    ours = [
+        cache_dir / "companies" / "320193" / "annual.parquet",
+        cache_dir / "company_lru.json",
+    ]
+    for path in ours:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"ours")
+    return ours
+
+
+@patch.dict("os.environ", {"EDGAR_IDENTITY": "ScreenerApp/1.0 test@example.com"})
+def test_setup_edgartools_clears_http_cache_over_limit(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(source, "EDGARTOOLS_HTTP_CACHE_MAX_MB", 1)
+    monkeypatch.setattr(source, "load_project_dotenv", lambda: None)
+    ours = _write_app_cache(tmp_path, 1_100_000)
+
+    setup_edgartools()
+
+    tcache = tmp_path / "_tcache"
+    assert not tcache.exists() or not any(p.is_file() for p in tcache.rglob("*"))
+    assert all(path.read_bytes() == b"ours" for path in ours)
+
+
+def test_clear_http_cache_if_over_keeps_cache_under_limit(tmp_path) -> None:
+    ours = _write_app_cache(tmp_path, 400)
+
+    source._clear_http_cache_if_over(max_bytes=1_000)
+
+    assert (tmp_path / "_tcache" / "www.sec.gov" / "doc").stat().st_size == 400
+    assert (tmp_path / "_tcache" / "www.sec.gov" / "doc.meta").exists()
+    assert all(path.exists() for path in ours)
+
+
+def test_clear_http_cache_if_over_uses_edgartools_clear_cache(monkeypatch) -> None:
+    clear = MagicMock(
+        side_effect=[
+            {"files_deleted": 2, "bytes_freed": 501, "errors": 0},
+            {"files_deleted": 2, "bytes_freed": 501, "errors": 0},
+        ]
+    )
+    monkeypatch.setattr(source, "clear_cache", clear)
+
+    source._clear_http_cache_if_over(max_bytes=500)
+
+    assert clear.call_args_list == [call(dry_run=True), call(dry_run=False)]
