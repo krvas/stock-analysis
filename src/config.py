@@ -49,6 +49,13 @@ EDGARTOOLS_ANNUAL_CACHE_MAX_AGE_MONTHS = max(
     1,
     int(os.environ.get("EDGARTOOLS_ANNUAL_CACHE_MAX_AGE_MONTHS", "12")),
 )
+# edgartools' own HTTP cache (filing documents, under EDGARTOOLS_CACHE_DIR/_tcache):
+# once it is over this size, setup clears it completely (edgartools' clear_cache).
+# Override with EDGARTOOLS_HTTP_CACHE_MAX_MB env var.
+EDGARTOOLS_HTTP_CACHE_MAX_MB = max(
+    1,
+    int(os.environ.get("EDGARTOOLS_HTTP_CACHE_MAX_MB", "300")),
+)
 # Years of filing history cached per company: annual bundles hold up to this
 # many 10-Ks, quarterly bundles up to 4x as many 10-Qs. Requests slice the
 # periods they need from the cached bundle.

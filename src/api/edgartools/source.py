@@ -12,10 +12,12 @@ import logging
 import os
 from collections.abc import Callable, Sequence
 from datetime import date
+from pathlib import Path
 from typing import Literal
 
+import edgar.httpclient
 import pandas as pd
-from edgar import Company
+from edgar import Company, clear_cache
 from edgar.xbrl import XBRLS
 from edgar.xbrl.stitching.periods import determine_optimal_periods
 
@@ -29,6 +31,7 @@ from src.api.edgartools.cache import (
 from src.config import (
     EDGARTOOLS_CACHE_DIR,
     EDGARTOOLS_COMPANY_CACHE_SIZE,
+    EDGARTOOLS_HTTP_CACHE_MAX_MB,
     MAX_CACHE_QUARTERS,
     MAX_CACHE_YEARS,
     load_project_dotenv,
@@ -86,11 +89,52 @@ _EDGARTOOLS_EXTRA_COLUMNS = frozenset({"unit", "point_in_time"})
 _NON_PERIOD_COLUMNS = STATEMENT_METADATA_COLUMNS | _EDGARTOOLS_EXTRA_COLUMNS
 
 
+def _clear_http_cache_if_over(max_bytes: int) -> None:
+    """Clear edgartools' HTTP cache completely once it is larger than ``max_bytes``.
+
+    Uses edgartools' own ``clear_cache``: a dry run reports the cache size,
+    a real run deletes every file in the ``_cache`` / ``_tcache`` directories
+    of ``EDGAR_LOCAL_DATA_DIR`` and nothing else (our ``companies/`` bundles
+    and ``company_lru.json`` are left alone).
+    """
+    size = clear_cache(dry_run=True)["bytes_freed"]
+    if size <= max_bytes:
+        return
+    result = clear_cache(dry_run=False)
+    logger.info(
+        "Cleared edgartools HTTP cache: %d files (%.1f MB)",
+        result["files_deleted"],
+        result["bytes_freed"] / 1_000_000,
+    )
+
+
 def _configure_edgartools_cache() -> None:
-    """Point edgartools at our cache directory and allow network fetches."""
+    """Point edgartools at our cache directory, allow network fetches, and cap
+    edgartools' HTTP cache.
+
+    edgartools' HTTP cache keeps every filing document it downloads, forever.
+    It stays on (refetches hit the cache instead of the SEC) but lives in
+    ``EDGARTOOLS_CACHE_DIR/_tcache`` and is cleared completely here (via
+    edgartools' ``clear_cache``) once it is over
+    ``EDGARTOOLS_HTTP_CACHE_MAX_MB``. edgartools 5.47 builds its module-level ``HTTP_MGR`` at import, before
+    ``EDGAR_LOCAL_DATA_DIR`` is set (so under ``~/.edgar/_tcache``), and every
+    request looks it up at call time, so it is replaced once with a cached one
+    built after the env var is set (same rate limit and SSL/HTTP settings via
+    ``get_http_mgr``). Re-check on edgartools upgrades.
+    """
     EDGARTOOLS_CACHE_DIR.mkdir(parents=True, exist_ok=True)
     os.environ["EDGAR_LOCAL_DATA_DIR"] = str(EDGARTOOLS_CACHE_DIR)
     os.environ["EDGAR_ALLOW_NETWORK_FALLBACK"] = "True"
+    http_cache_dir = EDGARTOOLS_CACHE_DIR / "_tcache"
+    http = edgar.httpclient
+    current_dir = http.HTTP_MGR.cache_dir
+    if current_dir is None or Path(current_dir).resolve() != http_cache_dir.resolve():
+        http.HTTP_MGR.close()
+        http.HTTP_MGR = http.get_http_mgr(
+            cache_enabled=True,
+            request_per_sec_limit=http.get_edgar_rate_limit_per_sec(),
+        )
+    _clear_http_cache_if_over(EDGARTOOLS_HTTP_CACHE_MAX_MB * 1_000_000)
 
 
 def setup_edgartools() -> None:
