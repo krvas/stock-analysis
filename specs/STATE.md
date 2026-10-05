@@ -277,7 +277,10 @@ NYI: every other wizard sub-page; wizard UI ↔ DuckDB; screener; analytics;
 finfetch.
 
 Tests cover clients, DBs, edgartools, Table, wizard DB. No web tests. Cache
-miss hits live SEC.
+miss hits live SEC. `pytest -m data` (deselected by default)
+runs the calc-residual check on real filings for the tickers in the gitignored
+`tests/data_test_tickers.txt` (pinned in the company LRU, loaded through the
+app cache).
 
 ## 7. Debt agents should not paper over
 

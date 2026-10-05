@@ -25,6 +25,7 @@ data/processed/*.html
 data/duckdb/*.duckdb
 data/duckdb/*.wal
 data/edgartools_cache/*
+tests/data_test_tickers.txt
 
 # IDE
 .idea/
