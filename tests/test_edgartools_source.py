@@ -560,6 +560,46 @@ def test_build_10q_period_takes_the_ytd_column_matching_its_duration(
     assert df.loc[0, "2026-09-30"] == 30.0
 
 
+@pytest.mark.parametrize(
+    ("column", "warns"), [("2026-09-30", True), ("2025-12-31", False)]
+)
+@patch("src.api.edgartools.source.determine_optimal_periods")
+def test_build_warns_when_filing_has_no_column_for_its_period(
+    mock_periods: MagicMock,
+    column: str,
+    warns: bool,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    frame = _filing_df(
+        column, [{"concept": "us-gaap_Revenues", "label": "Revenue", "value": 1.0}]
+    )
+    xbrls = MagicMock()
+    xbrls.xbrl_list = [_mock_xbrl({"income": frame})]
+    mock_periods.return_value = [
+        {
+            "xbrl_index": 0,
+            "start_date": "2025-01-01",
+            "end_date": "2025-12-31",
+            "duration_days": 364,
+            "period_type": "duration",
+        }
+    ]
+    # Parametrization: "2025-12-31" matches the period; "2026-09-30" does not.
+    with caplog.at_level("WARNING", logger=source.logger.name):
+        _build_statement_dataframe(xbrls, "income", max_periods=8)
+
+    messages = [
+        r.getMessage() for r in caplog.records if "matches period" in r.getMessage()
+    ]
+    if warns:
+        assert len(messages) == 1
+        assert "income" in messages[0]
+        assert "2025-12-31" in messages[0]
+        assert "filing 0" in messages[0]
+    else:
+        assert messages == []
+
+
 # Old tree: ProfitLoss under NetIncomeLoss; new tree: pretax income directly.
 _OLD_TREE = {
     "us-gaap_NetIncomeLoss": (None, 1.0),
