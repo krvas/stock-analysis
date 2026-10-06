@@ -491,6 +491,14 @@ def _build_statement_dataframe(
             periods_with_edges.add(period_label)
             edge_records.extend((period_label, *edge) for edge in filing.calc_edges)
         period_column = _column_for_period_date(filing_df, _period_date(meta))
+        if period_column is None:
+            logger.warning(
+                "No %s column in filing %s matches period %s; "
+                "every value for that period will be empty",
+                statement_type,
+                xbrl_index,
+                period_label,
+            )
 
         occurrences: dict[str, int] = {}
         for record in filing_df.to_dict(orient="records"):
