@@ -49,7 +49,7 @@ EDGARTOOLS_ANNUAL_CACHE_MAX_AGE_MONTHS = max(
     1,
     int(os.environ.get("EDGARTOOLS_ANNUAL_CACHE_MAX_AGE_MONTHS", "12")),
 )
-# edgartools' own HTTP cache (filing documents, under EDGARTOOLS_CACHE_DIR/_tcache):
+# edgartools' own HTTP cache directories (under EDGARTOOLS_CACHE_DIR):
 # once it is over this size, setup clears it completely (edgartools' clear_cache).
 # Override with EDGARTOOLS_HTTP_CACHE_MAX_MB env var.
 EDGARTOOLS_HTTP_CACHE_MAX_MB = max(

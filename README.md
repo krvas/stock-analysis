@@ -74,8 +74,8 @@ automatically. Bundles whose latest filing is older than
 `EDGARTOOLS_QUARTERLY_CACHE_MAX_AGE_MONTHS` (default 3) are stale: loading
 one checks SEC's filing list and rebuilds the bundle only if a newer filing
 exists; otherwise it is served from the cache.
-edgartools' own HTTP cache of downloaded filing documents lives in
-`data/edgartools_cache/_tcache`; once it is over `EDGARTOOLS_HTTP_CACHE_MAX_MB`
+edgartools' own HTTP cache of downloaded filing documents is capped: once the
+`_cache`/`_tcache` directories under `data/edgartools_cache` are over `EDGARTOOLS_HTTP_CACHE_MAX_MB`
 (default 300), it is cleared completely (edgartools' `clear_cache`) before the
 next statements load. Override sizes via those env vars when storage or
 freshness needs differ. Filings are fetched directly from the SEC on cache miss.
