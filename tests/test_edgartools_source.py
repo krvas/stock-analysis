@@ -46,15 +46,9 @@ _GETTERS = {
 @pytest.fixture(autouse=True)
 def _isolated_edgartools_cache(monkeypatch, tmp_path) -> None:
     """Keep setup_edgartools (run by load_statement_set) off the real data/
-    cache: our cache dir and edgartools' data dir point at tmp_path, and
-    HTTP_MGR already caches there so it is not rebuilt."""
+    cache: our cache dir and edgartools' data dir point at tmp_path."""
     monkeypatch.setenv("EDGAR_LOCAL_DATA_DIR", str(tmp_path))
     monkeypatch.setattr(source, "EDGARTOOLS_CACHE_DIR", tmp_path)
-    monkeypatch.setattr(
-        source.edgar.httpclient,
-        "HTTP_MGR",
-        MagicMock(cache_dir=str(tmp_path / "_tcache")),
-    )
 
 
 def _filing_df(period_column: str, rows: list[dict]) -> pd.DataFrame:
@@ -1262,32 +1256,6 @@ def test_unusable_bundle_is_rebuilt_even_without_newer_filing(
     assert statement_set.periods == ("2026-03-31",)
     _sec.xbrls.from_filings.assert_called_once()
     assert _stored_filing_date(tmp_path, "annual") == _STALE_DATE.isoformat()
-
-
-@patch.dict("os.environ", {"EDGAR_IDENTITY": "ScreenerApp/1.0 test@example.com"})
-def test_setup_edgartools_points_http_cache_at_app_cache_dir(
-    monkeypatch, tmp_path
-) -> None:
-    monkeypatch.setattr(source, "EDGARTOOLS_CACHE_DIR", tmp_path)
-    monkeypatch.setattr(source, "load_project_dotenv", lambda: None)
-    http = source.edgar.httpclient
-    import_time = MagicMock(
-        cache_mode="FileCache", cache_dir=str(tmp_path / "home" / "_tcache")
-    )
-    monkeypatch.setattr(http, "HTTP_MGR", import_time)
-
-    setup_edgartools()
-    ours = http.HTTP_MGR
-    try:
-        assert ours is not import_time
-        import_time.close.assert_called_once()
-        assert ours.cache_mode == "FileCache"
-        assert Path(ours.cache_dir).resolve() == (tmp_path / "_tcache").resolve()
-
-        setup_edgartools()
-        assert http.HTTP_MGR is ours
-    finally:
-        ours.close()
 
 
 def _write_app_cache(cache_dir: Path, http_cache_bytes: int) -> list[Path]:

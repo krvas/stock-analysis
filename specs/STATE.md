@@ -98,9 +98,9 @@ refactor. Finnhub is thin (quote snapshot, guessy statements).
 (default annual, 10; clamped to `MAX_CACHE_*` and to cached periods). Needs
 `EDGAR_IDENTITY`. 3 statements (income, balance, cashflow) × 3 views
 (summary, standard, detailed). edgartools' own HTTP cache (filing
-documents) lives in `data/edgartools_cache/_tcache` (`setup_edgartools`
-re-points it there); once it is over `EDGARTOOLS_HTTP_CACHE_MAX_MB` (default
-300), setup clears it completely with edgartools' own `clear_cache` (which
+documents): once the `_cache`/`_tcache` directories under
+`data/edgartools_cache` are over `EDGARTOOLS_HTTP_CACHE_MAX_MB` (default
+300), setup clears them completely with edgartools' own `clear_cache` (which
 only touches `_cache`/`_tcache`, never our `companies/` bundles).
 
 `load_statement_set(ticker, period) -> StatementSet` (`source.py`) is the
