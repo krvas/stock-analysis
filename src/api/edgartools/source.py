@@ -34,8 +34,7 @@ from src.config import (
     EDGARTOOLS_CACHE_DIR,
     EDGARTOOLS_COMPANY_CACHE_SIZE,
     EDGARTOOLS_HTTP_CACHE_MAX_MB,
-    MAX_CACHE_QUARTERS,
-    MAX_CACHE_YEARS,
+    MAX_PERIODS_BY_PERIOD,
     load_project_dotenv,
 )
 from src.models.statement import (
@@ -56,7 +55,6 @@ PeriodType = Literal["annual", "quarterly"]
 
 __all__ = [
     "FORM_BY_PERIOD",
-    "MAX_PERIODS_BY_PERIOD",
     "PeriodType",
     "StatementType",
     "load_statement_set",
@@ -78,12 +76,6 @@ _STATEMENT_XBRL_TYPES: dict[StatementType, str] = {
 FORM_BY_PERIOD: dict[PeriodType, str] = {
     "annual": "10-K",
     "quarterly": "10-Q",
-}
-
-# Max filings (and periods) cached per bundle.
-MAX_PERIODS_BY_PERIOD: dict[PeriodType, int] = {
-    "annual": MAX_CACHE_YEARS,
-    "quarterly": MAX_CACHE_QUARTERS,
 }
 
 # Non-metadata, non-period columns edgartools can emit (only when requested via
