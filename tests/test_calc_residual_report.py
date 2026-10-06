@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 from types import SimpleNamespace
 from typing import ClassVar
@@ -300,3 +300,68 @@ def test_run_report_default_does_not_touch_network(
     details = pd.read_csv(csv_path)
     assert "viewer_difference" not in details.columns
     assert len(details) == 3
+
+
+def test_run_report_compare_viewer_with_empty_cache(
+    tmp_path: Path, fake_edgar, caplog: pytest.LogCaptureFixture
+) -> None:
+    csv_path = tmp_path / "out.csv"
+    report.run_report(
+        None, ("annual",), 0.5, csv_path, True, cache_dir=tmp_path / "empty"
+    )
+
+    assert fake_edgar.calls == []
+    assert csv_path.exists()
+
+
+def test_stale_bundle_is_still_reported(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    cache_dir = tmp_path / "edgartools_cache"
+    statement = Statement(_frame(3.0), "income")
+    frames = StatementFrames(statement.frame, statement.calc_edges)
+    save_period_bundle(
+        cik=1,
+        period="annual",
+        latest_filing_date=date(2000, 1, 1),
+        bundle=dict.fromkeys(("income", "balance", "cashflow"), frames),
+        cache_dir=cache_dir,
+    )
+    touch_company_cache(cik=1, ticker="AAA", cache_dir=cache_dir)
+
+    residuals = collect_residuals(None, ("annual",), cache_dir)
+
+    assert set(residuals["ticker"]) == {"AAA"}
+    assert "stale" in caplog.text
+
+
+def test_bad_statement_is_skipped_with_warning(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    real = report.calc_residuals
+
+    def flaky(statement: Statement) -> pd.DataFrame:
+        if statement.statement_type == "balance":
+            raise ValueError("duplicate row ids")
+        return real(statement)
+
+    monkeypatch.setattr(report, "calc_residuals", flaky)
+    residuals = collect_residuals(None, ("annual",), _cache(tmp_path))
+
+    assert set(residuals["statement"]) == {"income", "cashflow"}
+    assert "duplicate row ids" in caplog.text
+
+
+def test_viewer_missing_scaling_and_malformed_result(
+    fake_edgar, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    viewer = _Viewer([("Total", "UNKNOWN ROLE", 5, 5)])
+    good = viewer.validate()[0]
+    viewer.validate = lambda tolerance=0.5: [{**good}, {"role": INCOME_ROLE}]
+    monkeypatch.setitem(FILINGS, "AAA", [(P1, viewer)])
+
+    result = collect_viewer_validations("AAA", "annual")
+
+    assert result["viewer_expected"].tolist() == [5]
+    assert "No currency scaling" in caplog.text
+    assert "Malformed SEC viewer result" in caplog.text
