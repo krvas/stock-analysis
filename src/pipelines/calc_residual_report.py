@@ -6,8 +6,9 @@ For every cached (ticker, period type, statement), computes
 plus every non-zero residual, sorted by absolute relative residual.
 
 By default reads cached bundles only — never fetches from SEC and never
-modifies the cache (``load_period_bundle(prune=False)``): missing, stale or
-invalid bundles are logged and skipped, not deleted.
+modifies the cache (``read_period_bundle(prune=False)``): missing or invalid
+bundles are logged and skipped, not deleted. Stale bundles are still reported
+on (the app serves them too), with a warning.
 
 ``--compare-viewer`` additionally fetches each company's filings from SEC and
 compares our residuals with edgartools' SEC-viewer calc validation
@@ -36,7 +37,7 @@ from src.api.edgartools.cache import (
     PeriodType,
     cached_companies,
     find_cached_cik,
-    load_period_bundle,
+    read_period_bundle,
 )
 from src.api.edgartools.source import (
     FORM_BY_PERIOD,
@@ -44,7 +45,7 @@ from src.api.edgartools.source import (
     setup_edgartools,
 )
 from src.config import EDGARTOOLS_CACHE_DIR
-from src.models.calc_residuals import calc_residuals
+from src.models.calc_residuals import RESIDUAL_COLUMNS, calc_residuals
 from src.models.statement import STATEMENT_TYPES, Statement
 
 logger = logging.getLogger(__name__)
@@ -141,25 +142,45 @@ def collect_residuals(
         _companies(tickers, cache_dir).items(), key=lambda i: i[1]
     ):
         for period in periods:
-            bundle = load_period_bundle(
+            cached = read_period_bundle(
                 cik=cik, period=period, cache_dir=cache_dir, prune=False
             )
-            if bundle is None:
+            if cached is None:
                 logger.warning(
                     "No usable %s bundle for %s (CIK %s); skipping", period, ticker, cik
                 )
                 continue
-            for statement_type in STATEMENT_TYPES:
-                frame, calc_edges = bundle[statement_type]
-                residuals = calc_residuals(
-                    Statement(frame, statement_type, calc_edges=calc_edges)
+            if cached.stale:
+                logger.warning(
+                    "%s bundle for %s (CIK %s) is stale (latest filing %s); "
+                    "reporting on it anyway",
+                    period,
+                    ticker,
+                    cik,
+                    cached.latest_filing_date,
                 )
+            for statement_type in STATEMENT_TYPES:
+                try:
+                    frame, calc_edges = cached.bundle[statement_type]
+                    residuals = calc_residuals(
+                        Statement(frame, statement_type, calc_edges=calc_edges)
+                    )
+                except ValueError as exc:
+                    logger.warning(
+                        "Bad %s %s bundle for %s (CIK %s): %s; skipping",
+                        period,
+                        statement_type,
+                        ticker,
+                        cik,
+                        exc,
+                    )
+                    continue
                 residuals.insert(0, "statement", statement_type)
                 residuals.insert(0, "period_type", period)
                 residuals.insert(0, "ticker", ticker)
                 frames.append(residuals)
     if not frames:
-        return pd.DataFrame(columns=["ticker", "period_type", "statement"])
+        return pd.DataFrame(columns=[*_GROUP_KEYS, *RESIDUAL_COLUMNS])
     return pd.concat(frames, ignore_index=True)
 
 
@@ -222,24 +243,45 @@ def collect_viewer_validations(
                 for report in viewer.financial_statements
             }
             results = viewer.validate(tolerance=tolerance)
-        except Exception:  # noqa: BLE001 - edgartools raises assorted errors
-            logger.warning("SEC viewer validation failed for %s; skipping", label)
-            continue
-        for result in results:
-            scale = scaling.get(result["role"], 1)
-            records.append(
-                {
-                    "ticker": ticker.upper(),
-                    "period_type": period,
-                    "statement": _viewer_statement(result["role"]),
-                    "concept": result["parent"].id,
-                    "period": str(filing.period_of_report),
-                    "viewer_expected": result["expected"] * scale,
-                    "viewer_computed": result["computed"] * scale,
-                    "viewer_difference": result["difference"] * scale,
-                    "viewer_valid": bool(result["valid"]),
-                }
+        except Exception as exc:
+            logger.warning(
+                "SEC viewer validation failed for %s (%s: %s); skipping",
+                label,
+                type(exc).__name__,
+                exc,
+                exc_info=True,
             )
+            continue
+        missing_roles: set[str] = set()
+        for result in results:
+            try:
+                role = result["role"]
+                if role not in scaling and role not in missing_roles:
+                    missing_roles.add(role)
+                    logger.warning(
+                        "No currency scaling for role %r in %s; assuming 1", role, label
+                    )
+                scale = scaling.get(role, 1)
+                records.append(
+                    {
+                        "ticker": ticker.upper(),
+                        "period_type": period,
+                        "statement": _viewer_statement(role),
+                        "concept": result["parent"].id,
+                        "period": str(filing.period_of_report),
+                        "viewer_expected": result["expected"] * scale,
+                        "viewer_computed": result["computed"] * scale,
+                        "viewer_difference": result["difference"] * scale,
+                        "viewer_valid": bool(result["valid"]),
+                    }
+                )
+            except Exception as exc:  # noqa: BLE001 - malformed viewer result
+                logger.warning(
+                    "Malformed SEC viewer result for %s (%s: %s); skipping it",
+                    label,
+                    type(exc).__name__,
+                    exc,
+                )
     return pd.DataFrame(records, columns=list(VIEWER_COLUMNS))
 
 
