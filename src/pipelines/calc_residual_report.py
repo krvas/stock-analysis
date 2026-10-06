@@ -41,10 +41,9 @@ from src.api.edgartools.cache import (
 )
 from src.api.edgartools.source import (
     FORM_BY_PERIOD,
-    MAX_PERIODS_BY_PERIOD,
     setup_edgartools,
 )
-from src.config import EDGARTOOLS_CACHE_DIR
+from src.config import EDGARTOOLS_CACHE_DIR, MAX_PERIODS_BY_PERIOD
 from src.models.calc_residuals import RESIDUAL_COLUMNS, calc_residuals
 from src.models.statement import STATEMENT_TYPES, Statement
 

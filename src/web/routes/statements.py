@@ -6,17 +6,11 @@ from fastapi import APIRouter, Query, Request
 from fastapi.responses import HTMLResponse
 
 from src.api.edgartools.source import PeriodType, load_statement_set
-from src.config import MAX_CACHE_QUARTERS, MAX_CACHE_YEARS
+from src.config import MAX_CACHE_QUARTERS, MAX_PERIODS_BY_PERIOD
 from src.models.edgartools.html_renderer import build_statement_payload
 from src.web.templating import templates
 
 router = APIRouter(tags=["statements"])
-
-# Most periods the cache holds per period type (see load_statement_set).
-MAX_PERIODS_BY_PERIOD: dict[PeriodType, int] = {
-    "annual": MAX_CACHE_YEARS,
-    "quarterly": MAX_CACHE_QUARTERS,
-}
 
 
 def clamp_num_periods(num_periods: int, period: PeriodType, available: int) -> int:
