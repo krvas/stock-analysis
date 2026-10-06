@@ -526,6 +526,40 @@ def test_build_empty_when_no_periods(mock_periods: MagicMock) -> None:
     assert statement.project("summary").empty
 
 
+@patch("src.api.edgartools.source.determine_optimal_periods")
+def test_build_10q_period_takes_the_ytd_column_matching_its_duration(
+    mock_periods: MagicMock,
+) -> None:
+    """A 10-Q frame has a 3-month and a nine-month column ending on the same
+    date (edgartools labels them ``<end> (Q3)`` and ``<end> (YTD)``). The
+    period meta describes the nine-month span (start_date..end_date, 272
+    days), so the stored value must come from the YTD column, not from
+    whichever same-end-date column comes first (here the 3-month one)."""
+    frame = _filing_df(
+        "2026-09-30 (Q3)",
+        [{"concept": "us-gaap_Revenues", "label": "Revenue", "value": 10.0}],
+    )
+    frame["2026-09-30 (YTD)"] = 30.0
+    assert list(frame.columns).index("2026-09-30 (Q3)") < list(frame.columns).index(
+        "2026-09-30 (YTD)"
+    )
+    xbrls = MagicMock()
+    xbrls.xbrl_list = [_mock_xbrl({"income": frame})]
+    mock_periods.return_value = [
+        {
+            "xbrl_index": 0,
+            "start_date": "2026-01-01",
+            "end_date": "2026-09-30",
+            "duration_days": 272,
+            "period_type": "duration",
+        }
+    ]
+
+    df = _build_statement_dataframe(xbrls, "income", max_periods=8).frame
+
+    assert df.loc[0, "2026-09-30"] == 30.0
+
+
 # Old tree: ProfitLoss under NetIncomeLoss; new tree: pretax income directly.
 _OLD_TREE = {
     "us-gaap_NetIncomeLoss": (None, 1.0),
@@ -1267,3 +1301,52 @@ def test_clear_http_cache_if_over_uses_edgartools_clear_cache(monkeypatch) -> No
     source._clear_http_cache_if_over(max_bytes=500)
 
     assert clear.call_args_list == [call(dry_run=True), call(dry_run=False)]
+
+
+# --- failure handling in load_statement_set ---------------------------------
+
+
+def _bundle_meta(cache_dir: Path, period: str) -> Path:
+    return cache_dir / "companies" / "320193" / period / "meta.json"
+
+
+def test_empty_build_is_not_cached_and_raises(tmp_path, _sec) -> None:
+    """When all three statements build empty (no periods), load_statement_set
+    raises ValueError instead of returning an empty set, writes no bundle,
+    and the next call retries the build rather than serving an empty cache."""
+    period = "annual"
+    company = _patch_sec_filings(_sec, {"10-K": "2026-09-01"})
+    _sec.periods.return_value = []
+
+    with pytest.raises(ValueError):
+        load_statement_set("AAPL", period)
+
+    assert not _bundle_meta(tmp_path, period).exists()
+    assert (
+        source.read_period_bundle(cik=company.cik, period=period, cache_dir=tmp_path)
+        is None
+    )
+
+    with pytest.raises(ValueError):
+        load_statement_set("AAPL", period)
+    assert _sec.xbrls.from_filings.call_count == 2
+
+
+def test_stale_bundle_is_served_when_sec_is_unreachable(
+    tmp_path, _sec, caplog: pytest.LogCaptureFixture
+) -> None:
+    """With a stale but readable bundle cached and SEC unreachable
+    (``Company`` raises ConnectionError), load_statement_set logs a warning
+    and returns the stale bundle's StatementSet; with a cold cache the error
+    still propagates."""
+    _sec.company.side_effect = ConnectionError("SEC unreachable")
+    with pytest.raises(ConnectionError):
+        load_statement_set("MSFT", "annual")  # cold cache: nothing to serve
+
+    _seed_cache(tmp_path, "annual", _STALE_DATE)
+    with caplog.at_level("WARNING", logger=source.logger.name):
+        statement_set = load_statement_set("AAPL", "annual")
+
+    assert statement_set.periods == ("2024-09-28", "2023-09-30", "2022-09-24")
+    assert any(r.levelname == "WARNING" for r in caplog.records)
+    _sec.xbrls.from_filings.assert_not_called()
