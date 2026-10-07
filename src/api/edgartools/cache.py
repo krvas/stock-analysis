@@ -1,9 +1,29 @@
-"""LRU company cache for edgartools statement views.
+"""LRU company cache for edgartools statement frames.
 
-Caches all statement types (income, balance, cashflow) and detail levels for a
-given ``(cik, period, num_periods)`` bundle so browsing one company reuses a
-single SEC fetch. Bundles are invalidated when the stored latest filing date is
-more than the period-specific cache age old.
+One bundle per ``(cik, period)``: per statement type (income, balance,
+cashflow) a raw detailed frame covering up to ``MAX_CACHE_YEARS`` of filings,
+so any ``num_periods`` / view request is served by slicing and projecting the
+same bundle, plus its per-period calc edges (``Statement.calc_edges``: each
+period's calc tree from the filing its values came from). Layout::
+
+    companies/{cik}/{period}/{statement_type}.parquet       # frame
+    companies/{cik}/{period}/{statement_type}_calc.parquet  # calc edges
+    companies/{cik}/{period}/meta.json   # schema_version, period,
+                                         # latest_filing_date
+
+Bundles are discarded when ``meta.json`` carries a different
+:data:`CACHE_SCHEMA_VERSION` and when files are missing or unreadable. A
+bundle is stale when the stored latest filing date is more than the
+period-specific cache age old (:func:`read_cache_entry` reports it; the
+caller rebuilds it only if SEC has a newer filing). For quarterly bundles that
+date is the newer of the latest 10-Q and the latest 10-K (set by the caller),
+so a bundle stays fresh after a fiscal-year 10-K.
+
+Companies are evicted least-recently-touched first beyond
+``EDGARTOOLS_COMPANY_CACHE_SIZE``. Tickers listed in the index's
+``pinned_tickers`` (set with :func:`set_pinned_tickers`) are never evicted and
+do not count toward that size; their bundles are still rebuilt by the
+staleness/schema rules above like any other.
 """
 
 from __future__ import annotations
@@ -11,9 +31,11 @@ from __future__ import annotations
 import json
 import logging
 import shutil
+from collections.abc import Iterable
+from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from pathlib import Path
-from typing import Literal
+from typing import Any
 
 import pandas as pd
 
@@ -23,17 +45,39 @@ from src.config import (
     EDGARTOOLS_COMPANY_CACHE_SIZE,
     EDGARTOOLS_QUARTERLY_CACHE_MAX_AGE_MONTHS,
 )
+from src.models.statement import (
+    STATEMENT_TYPES,
+    PeriodType,
+    Statement,
+    StatementSet,
+)
 
 logger = logging.getLogger(__name__)
 
-StatementType = Literal["income", "balance", "cashflow"]
-PeriodType = Literal["annual", "quarterly"]
-ViewName = Literal["summary", "standard", "detailed"]
-PeriodBundle = dict[StatementType, dict[ViewName, pd.DataFrame]]
+# Bump when the on-disk bundle shape (or how a stored column is computed)
+# changes; mismatched bundles are rebuilt.
+CACHE_SCHEMA_VERSION = 7
 
 _INDEX_FILENAME = "company_lru.json"
-_STATEMENT_TYPES: tuple[StatementType, ...] = ("income", "balance", "cashflow")
-_VIEWS: tuple[ViewName, ...] = ("summary", "standard", "detailed")
+
+
+@dataclass(frozen=True)
+class CachedStatementSet:
+    """A readable cached statement set with its ``meta.json`` freshness date."""
+
+    statement_set: StatementSet
+    # ``meta.json``'s ``latest_filing_date`` (the freshness date it was built at).
+    latest_filing_date: date
+    period: PeriodType
+    # Date staleness is judged against (None: today).
+    reference: date | None = None
+
+    @property
+    def stale(self) -> bool:
+        """Whether ``latest_filing_date`` is older than the period's max cache age."""
+        return is_entry_stale(
+            self.latest_filing_date, period=self.period, reference=self.reference
+        )
 
 
 def _utc_now_iso() -> str:
@@ -48,52 +92,49 @@ def _company_dir(cache_dir: Path, cik: int | str) -> Path:
     return cache_dir / "companies" / _cik_key(cik)
 
 
-def _bundle_dir(
-    cache_dir: Path,
-    cik: int | str,
-    period: PeriodType,
-    num_periods: int,
-) -> Path:
-    return _company_dir(cache_dir, cik) / f"{period}_{num_periods}"
+def _entry_dir(cache_dir: Path, cik: int | str, period: PeriodType) -> Path:
+    return _company_dir(cache_dir, cik) / period
 
 
-def _bundle_meta_path(
-    cache_dir: Path,
-    cik: int | str,
-    period: PeriodType,
-    num_periods: int,
-) -> Path:
-    return _bundle_dir(cache_dir, cik, period, num_periods) / "meta.json"
+def _entry_meta_path(cache_dir: Path, cik: int | str, period: PeriodType) -> Path:
+    return _entry_dir(cache_dir, cik, period) / "meta.json"
 
 
-def _bundle_view_path(
-    cache_dir: Path,
-    cik: int | str,
-    period: PeriodType,
-    num_periods: int,
-    statement_type: StatementType,
-    view: ViewName,
-) -> Path:
-    filename = f"{statement_type}_{view}.parquet"
-    return _bundle_dir(cache_dir, cik, period, num_periods) / filename
+def _entry_file(cache_dir: Path, cik: int | str, period: PeriodType, name: str) -> Path:
+    return _entry_dir(cache_dir, cik, period) / name
 
 
-def _load_index(cache_dir: Path) -> dict[str, dict]:
+def _normalize_tickers(tickers: Iterable[object]) -> list[str]:
+    return sorted({str(t).strip().upper() for t in tickers if str(t).strip()})
+
+
+def _load_index(cache_dir: Path) -> dict[str, Any]:
+    """The LRU index: ``companies`` (``{cik: entry}``) and ``pinned_tickers``.
+
+    A missing/corrupt file yields an empty index; a missing or invalid
+    ``pinned_tickers`` is treated as empty.
+    """
     path = _index_path(cache_dir)
     if not path.exists():
-        return {"companies": {}}
+        return {"companies": {}, "pinned_tickers": []}
     try:
         with path.open("r", encoding="utf-8") as handle:
             data = json.load(handle)
     except (OSError, json.JSONDecodeError):
         logger.warning("Corrupt edgartools LRU index at %s; starting fresh", path)
-        return {"companies": {}}
+        return {"companies": {}, "pinned_tickers": []}
     if not isinstance(data, dict) or not isinstance(data.get("companies"), dict):
-        return {"companies": {}}
+        return {"companies": {}, "pinned_tickers": []}
+    pinned = data.get("pinned_tickers")
+    if not isinstance(pinned, list):
+        if pinned is not None:
+            logger.warning("Invalid pinned_tickers in %s; ignoring", path)
+        pinned = []
+    data["pinned_tickers"] = _normalize_tickers(t for t in pinned if isinstance(t, str))
     return data
 
 
-def _save_index(cache_dir: Path, index: dict[str, dict]) -> None:
+def _save_index(cache_dir: Path, index: dict[str, Any]) -> None:
     cache_dir.mkdir(parents=True, exist_ok=True)
     path = _index_path(cache_dir)
     tmp_path = path.with_suffix(".tmp")
@@ -101,6 +142,24 @@ def _save_index(cache_dir: Path, index: dict[str, dict]) -> None:
         json.dump(index, handle, indent=2, sort_keys=True)
         handle.write("\n")
     tmp_path.replace(path)
+
+
+def get_pinned_tickers(cache_dir: Path | None = None) -> frozenset[str]:
+    """Tickers exempt from company LRU eviction (uppercased)."""
+    cache_dir = Path(cache_dir) if cache_dir is not None else EDGARTOOLS_CACHE_DIR
+    return frozenset(_load_index(cache_dir)["pinned_tickers"])
+
+
+def set_pinned_tickers(tickers: Iterable[str], cache_dir: Path | None = None) -> None:
+    """Replace the pinned-ticker list (see module doc).
+
+    A ticker may be pinned before its company has an index entry; the pin
+    takes effect once the company is touched. Pinning evicts nothing.
+    """
+    cache_dir = Path(cache_dir) if cache_dir is not None else EDGARTOOLS_CACHE_DIR
+    index = _load_index(cache_dir)
+    index["pinned_tickers"] = _normalize_tickers(tickers)
+    _save_index(cache_dir, index)
 
 
 def _cik_key(cik: int | str) -> str:
@@ -111,34 +170,34 @@ def _parse_iso_date(value: str) -> date:
     return date.fromisoformat(str(value)[:10])
 
 
-def _add_months(value: date, months: int) -> date:
-    month_index = value.month - 1 + months
-    year = value.year + month_index // 12
-    month = month_index % 12 + 1
-    if month == 12:
-        next_month = date(year + 1, 1, 1)
-    else:
-        next_month = date(year, month + 1, 1)
-    last_day = (next_month - date(year, month, 1)).days
-    return date(year, month, min(value.day, last_day))
-
-
-def is_period_bundle_stale(
+def is_entry_stale(
     latest_filing_date: date,
     *,
     period: PeriodType = "quarterly",
     reference: date | None = None,
-    max_age_months: int | None = None,
 ) -> bool:
-    """Return True when ``latest_filing_date`` is more than ``max_age_months`` old."""
+    """Return True when ``latest_filing_date`` is older than the period's max
+    cache age (months, clipped to month end)."""
     reference = reference or datetime.now(UTC).date()
-    if max_age_months is None:
-        max_age_months = (
-            EDGARTOOLS_ANNUAL_CACHE_MAX_AGE_MONTHS
-            if period == "annual"
-            else EDGARTOOLS_QUARTERLY_CACHE_MAX_AGE_MONTHS
-        )
-    return reference > _add_months(latest_filing_date, max_age_months)
+    max_age_months = (
+        EDGARTOOLS_ANNUAL_CACHE_MAX_AGE_MONTHS
+        if period == "annual"
+        else EDGARTOOLS_QUARTERLY_CACHE_MAX_AGE_MONTHS
+    )
+    expires = (
+        pd.Timestamp(latest_filing_date) + pd.DateOffset(months=max_age_months)
+    ).date()
+    return reference > expires
+
+
+def get_cached_company_list(cache_dir: Path) -> dict[str, str]:
+    """``{cik: ticker}`` for every company in the LRU index (index only; bundles
+    may still be missing or stale)."""
+    return {
+        cik: entry["ticker"]
+        for cik, entry in _load_index(cache_dir)["companies"].items()
+        if entry.get("ticker")
+    }
 
 
 def find_cached_cik(cache_dir: Path, ticker: str) -> str | None:
@@ -149,116 +208,146 @@ def find_cached_cik(cache_dir: Path, ticker: str) -> str | None:
     return None
 
 
-def delete_period_bundle(
+def delete_cache_entry(
     *,
     cik: int | str,
     period: PeriodType,
-    num_periods: int,
-    cache_dir: Path | None = None,
+    cache_dir: Path,
 ) -> None:
-    cache_dir = Path(cache_dir) if cache_dir is not None else EDGARTOOLS_CACHE_DIR
-    bundle_dir = _bundle_dir(cache_dir, cik, period, num_periods)
-    if bundle_dir.exists():
+    entry_dir = _entry_dir(cache_dir, cik, period)
+    if entry_dir.exists():
         try:
-            shutil.rmtree(bundle_dir)
+            shutil.rmtree(entry_dir)
         except OSError as exc:
-            logger.warning("Failed to delete period bundle %s: %s", bundle_dir, exc)
+            logger.warning("Failed to delete period bundle %s: %s", entry_dir, exc)
 
 
-def load_period_bundle(
+def read_cache_entry(
     *,
     cik: int | str,
     period: PeriodType,
-    num_periods: int,
-    cache_dir: Path | None = None,
+    cache_dir: Path,
     reference: date | None = None,
-) -> PeriodBundle | None:
-    """Load a cached period bundle, or None if missing, incomplete, or stale."""
-    cache_dir = Path(cache_dir) if cache_dir is not None else EDGARTOOLS_CACHE_DIR
-    meta_path = _bundle_meta_path(cache_dir, cik, period, num_periods)
+    prune: bool = True,
+) -> CachedStatementSet | None:
+    """Load a cached bundle even if it is stale, or None (deleting it) if unusable.
+
+    Unusable means: missing/invalid ``meta.json``, a ``schema_version`` other
+    than :data:`CACHE_SCHEMA_VERSION`, or a missing/corrupt statement or
+    calc-edges file. A bundle whose stored ``latest_filing_date`` is too old
+    is returned with ``stale=True`` and left on disk, so the caller can check
+    whether a newer filing exists before rebuilding it. ``prune=False``
+    (read-only callers such as reports) returns None without deleting anything.
+    """
+
+    def discard() -> None:
+        if prune:
+            delete_cache_entry(cik=cik, period=period, cache_dir=cache_dir)
+
+    meta_path = _entry_meta_path(cache_dir, cik, period)
     if not meta_path.exists():
+        if _entry_dir(cache_dir, cik, period).exists():
+            discard()
         return None
 
     try:
         with meta_path.open("r", encoding="utf-8") as handle:
             meta = json.load(handle)
+        schema_version = meta.get("schema_version")
         latest_filing_date = _parse_iso_date(meta["latest_filing_date"])
-    except (OSError, json.JSONDecodeError, KeyError, ValueError):
-        logger.warning("Invalid period bundle metadata at %s; deleting", meta_path)
-        delete_period_bundle(
-            cik=cik, period=period, num_periods=num_periods, cache_dir=cache_dir
-        )
+    except (OSError, json.JSONDecodeError, AttributeError, KeyError, ValueError):
+        logger.warning("Invalid period bundle metadata at %s", meta_path)
+        discard()
         return None
 
-    if is_period_bundle_stale(latest_filing_date, period=period, reference=reference):
+    if schema_version != CACHE_SCHEMA_VERSION:
         logger.info(
-            "Period bundle stale for CIK %s (%s, %d periods); latest filing %s",
+            "Period bundle for CIK %s (%s) has schema_version %r (want %d)",
             cik,
             period,
-            num_periods,
-            latest_filing_date,
+            schema_version,
+            CACHE_SCHEMA_VERSION,
         )
-        delete_period_bundle(
-            cik=cik, period=period, num_periods=num_periods, cache_dir=cache_dir
-        )
+        discard()
         return None
 
-    bundle: PeriodBundle = {}
-    for statement_type in _STATEMENT_TYPES:
-        views: dict[ViewName, pd.DataFrame] = {}
-        for view in _VIEWS:
-            path = _bundle_view_path(
-                cache_dir, cik, period, num_periods, statement_type, view
+    statements: dict[str, Statement] = {}
+    for statement_type in STATEMENT_TYPES:
+        paths = (
+            _entry_file(cache_dir, cik, period, f"{statement_type}.parquet"),
+            _entry_file(cache_dir, cik, period, f"{statement_type}_calc.parquet"),
+        )
+        try:
+            frame, calc_edges = (pd.read_parquet(path) for path in paths)
+            statements[statement_type] = Statement(
+                frame, statement_type, calc_edges=calc_edges
             )
-            if not path.exists():
-                delete_period_bundle(
-                    cik=cik, period=period, num_periods=num_periods, cache_dir=cache_dir
-                )
-                return None
-            views[view] = pd.read_parquet(path)
-        bundle[statement_type] = views
-    return bundle
+        except (OSError, ValueError) as exc:
+            # FileNotFoundError, a truncated/corrupt parquet file (pyarrow's
+            # ArrowInvalid subclasses ValueError), or a frame Statement rejects.
+            logger.warning(
+                "Unusable %s period bundle for CIK %s (%s): %s",
+                statement_type,
+                cik,
+                period,
+                exc,
+            )
+            discard()
+            return None
+
+    cached = CachedStatementSet(
+        StatementSet(**statements), latest_filing_date, period, reference
+    )
+    if cached.stale:
+        logger.info(
+            "Period bundle stale for CIK %s (%s); latest filing %s",
+            cik,
+            period,
+            latest_filing_date,
+        )
+    return cached
 
 
-def save_period_bundle(
+def save_cache_entry(
     *,
     cik: int | str,
     period: PeriodType,
-    num_periods: int,
     latest_filing_date: date,
-    views: PeriodBundle,
-    cache_dir: Path | None = None,
+    statement_set: StatementSet,
+    cache_dir: Path,
 ) -> None:
-    cache_dir = Path(cache_dir) if cache_dir is not None else EDGARTOOLS_CACHE_DIR
-    bundle_dir = _bundle_dir(cache_dir, cik, period, num_periods)
-    bundle_dir.mkdir(parents=True, exist_ok=True)
+    """Write each statement type's raw frame and calc edges plus ``meta.json``.
+
+    ``meta.json`` is written last so a partially written bundle has no meta
+    and is treated as missing.
+    """
+    delete_cache_entry(cik=cik, period=period, cache_dir=cache_dir)
+    entry_dir = _entry_dir(cache_dir, cik, period)
+    entry_dir.mkdir(parents=True, exist_ok=True)
+
+    for statement_type in STATEMENT_TYPES:
+        statement = statement_set.get(statement_type)
+        statement.frame.to_parquet(
+            _entry_file(cache_dir, cik, period, f"{statement_type}.parquet")
+        )
+        statement.calc_edges.to_parquet(
+            _entry_file(cache_dir, cik, period, f"{statement_type}_calc.parquet")
+        )
 
     meta = {
+        "schema_version": CACHE_SCHEMA_VERSION,
         "period": period,
-        "num_periods": num_periods,
         "latest_filing_date": latest_filing_date.isoformat(),
     }
-    meta_path = _bundle_meta_path(cache_dir, cik, period, num_periods)
+    meta_path = _entry_meta_path(cache_dir, cik, period)
     tmp_meta = meta_path.with_suffix(".tmp")
     with tmp_meta.open("w", encoding="utf-8") as handle:
         json.dump(meta, handle, indent=2, sort_keys=True)
         handle.write("\n")
     tmp_meta.replace(meta_path)
 
-    for statement_type in _STATEMENT_TYPES:
-        statement_views = views.get(statement_type, {})
-        for view in _VIEWS:
-            frame = statement_views.get(view)
-            if frame is None:
-                continue
-            frame.to_parquet(
-                _bundle_view_path(
-                    cache_dir, cik, period, num_periods, statement_type, view
-                )
-            )
 
-
-def _evict_company(cache_dir: Path, index: dict[str, dict], cik_key: str) -> None:
+def _evict_company(cache_dir: Path, index: dict[str, Any], cik_key: str) -> None:
     entry = index["companies"].pop(cik_key, None)
     company_dir = _company_dir(cache_dir, cik_key)
     if company_dir.exists():
@@ -280,37 +369,44 @@ def touch_company_cache(
     *,
     cik: int | str,
     ticker: str,
-    cache_dir: Path | None = None,
-    max_companies: int | None = None,
 ) -> list[str]:
-    """Record a company fetch and evict older companies beyond ``max_companies``."""
-    cache_dir = Path(cache_dir) if cache_dir is not None else EDGARTOOLS_CACHE_DIR
-    limit = (
-        EDGARTOOLS_COMPANY_CACHE_SIZE
-        if max_companies is None
-        else max(1, max_companies)
-    )
+    """Record a company fetch and evict older companies beyond
+    ``EDGARTOOLS_COMPANY_CACHE_SIZE``.
+
+    Always uses ``EDGARTOOLS_CACHE_DIR`` and ``EDGARTOOLS_COMPANY_CACHE_SIZE``
+    (tests override them with ``monkeypatch.setattr`` on this module).
+    Pinned companies (see :func:`set_pinned_tickers`) are never evicted and
+    do not count toward the size; the limit applies to the rest.
+    Returns the evicted CIKs.
+    """
+    cache_dir = EDGARTOOLS_CACHE_DIR
+    limit = EDGARTOOLS_COMPANY_CACHE_SIZE
 
     cik_key = _cik_key(cik)
     index = _load_index(cache_dir)
     companies = index["companies"]
 
     companies[cik_key] = {
+        **companies.get(cik_key, {}),
         "ticker": ticker.upper(),
         "last_accessed": _utc_now_iso(),
     }
 
+    pinned = set(index["pinned_tickers"])
+    unpinned = {
+        key: entry
+        for key, entry in companies.items()
+        if entry.get("ticker") not in pinned
+    }
     ordered = sorted(
-        companies.items(),
+        unpinned.items(),
         key=lambda item: item[1].get("last_accessed", ""),
         reverse=True,
     )
-    keep = {cik for cik, _ in ordered[:limit]}
     evicted: list[str] = []
-    for other_cik in list(companies):
-        if other_cik not in keep:
-            _evict_company(cache_dir, index, other_cik)
-            evicted.append(other_cik)
+    for other_cik, _ in ordered[limit:]:
+        _evict_company(cache_dir, index, other_cik)
+        evicted.append(other_cik)
 
     _save_index(cache_dir, index)
     return evicted

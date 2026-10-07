@@ -62,14 +62,43 @@ Then open:
 - Screener placeholder: `http://127.0.0.1:8000/screener`
 - API docs: `http://127.0.0.1:8000/docs`
 
-SEC identity for edgartools uses `EDGAR_IDENTITY` from `.env`. Computed statement
-views are cached under `data/edgartools_cache/companies/{cik}/{period}_{num_periods}/`
-as a bundle covering income, balance, and cashflow together. The app keeps the
-`EDGARTOOLS_COMPANY_CACHE_SIZE` most recently viewed companies (default 10) and
-deletes older company caches automatically. Bundles older than
-`EDGARTOOLS_CACHE_MAX_AGE_MONTHS` (default 3) by latest filing date are
-refetched. Override sizes via those env vars when storage or freshness needs
-differ. Filings are fetched directly from the SEC on cache miss.
+SEC identity for edgartools uses `EDGAR_IDENTITY` from `.env`. Each company's
+raw detailed statements are cached under
+`data/edgartools_cache/companies/{cik}/{period}/` (`income.parquet`,
+`balance.parquet`, `cashflow.parquet`, `meta.json`), covering up to
+`MAX_CACHE_YEARS` (default 16) years; every `num_periods` and view is served
+from that one bundle. The app keeps the `EDGARTOOLS_COMPANY_CACHE_SIZE` most
+recently viewed companies (default 10) and deletes older company caches
+automatically. Bundles whose latest filing is older than
+`EDGARTOOLS_ANNUAL_CACHE_MAX_AGE_MONTHS` (default 12) or
+`EDGARTOOLS_QUARTERLY_CACHE_MAX_AGE_MONTHS` (default 3) are stale: loading
+one checks SEC's filing list and rebuilds the bundle only if a newer filing
+exists; otherwise it is served from the cache.
+edgartools' own HTTP cache of downloaded filing documents is capped: once the
+`_cache`/`_tcache` directories under `data/edgartools_cache` are over `EDGARTOOLS_HTTP_CACHE_MAX_MB`
+(default 300), it is cleared completely (edgartools' `clear_cache`) before the
+next statements load. Override sizes via those env vars when storage or
+freshness needs differ. Filings are fetched directly from the SEC on cache miss.
+
+### Tests
+
+```bash
+pytest            # unit tests (offline)
+pytest -m data    # data test over real SEC filings (needs EDGAR_IDENTITY)
+```
+
+The data test needs `tests/data_test_tickers.txt`, which is gitignored, so
+create it after cloning: one ticker per line, `#` starts a comment, e.g.
+
+```text
+AAPL
+MU
+SNDK
+```
+
+Without the file the data test is skipped. Listed tickers are pinned in the
+company cache (never evicted, and they don't count toward
+`EDGARTOOLS_COMPANY_CACHE_SIZE`) and loaded through the app's own cache.
 
 ### DatabaseManager
 

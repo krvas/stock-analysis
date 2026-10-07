@@ -1,7 +1,8 @@
 # STATE.md
 
 What exists today (not vision). Product intent: `specs/vision.md`.
-Planned adjustments/statement-model redesign (not yet implemented): `specs/adjustments_architecture.md`.
+Adjustments/statement-model redesign: `specs/adjustments_architecture.md` —
+phase 1 (cache + `Statement`) implemented; phases 2–5 not.
 Audience: planning and coding agents — prefer this file over guessing layout.
 
 Python 3.12, pandas, FastAPI + Jinja SSR, vanilla JS (no frontend libs). Local
@@ -37,10 +38,13 @@ src/config.py              paths + cache tunables (env)
 src/api/<vendor>/          fetch+parse only → DataFrame. No DB writes.
 src/api/edgartools/        source.py, cache.py, standard_terms.py  (not BaseAPIClient)
 src/ingestion/             vendor DataFrame → DatabaseManager
-src/pipelines/             CLIs (load_from_names)
+src/pipelines/             CLIs (load_from_names, calc_residual_report)
 src/database/              schema.sql + tables.py; wizard.sql + wizard_tables.py
                            manager.py (BaseDatabaseManager, DatabaseManager)
                            wizard_manager.py, adjustments.py
+src/models/statement.py    Statement / StatementSet / get_row_id
+                           (pure domain: pandas only, no I/O)
+src/models/calc_residuals.py  calc_residuals (calc-linkbase residuals; pure)
 src/models/table.py        Table / ColumnSpec / LinkedGroupSpec  (FE↔BE contract)
 src/models/edgartools/html_renderer.py   DataFrames → Table.serialize() payload
 src/web/app.py             FastAPI; / → {statements, wizard, screener, docs}
@@ -79,8 +83,8 @@ tests/                     pytest; no HTTP/route tests
 - Logging: `logger = logging.getLogger(__name__)` per module; no printing;
   CLIs call `logging.basicConfig`.
 - Caching: Vendor data should almost always be cached. The caching strategy is
-  determined by the developer. For `edgartools`, LRU cache has already been
-  implemented.
+  determined by the developer. For `edgartools`, a company LRU parquet cache
+  exists (§4).
 
 ## 4. Paths that matter
 
@@ -90,23 +94,77 @@ tests/                     pytest; no HTTP/route tests
 has an explicit unfinished TODO; don’t extend its shape without expecting a
 refactor. Finnhub is thin (quote snapshot, guessy statements).
 
-**EDGAR.** `GET /statements/{ticker}?period=annual|quarterly&num_periods=1..40`
-(default annual, 10). Needs `EDGAR_IDENTITY`.
-It will load financial statements from edgartools - 3 statements (income
-statement, balance sheet and cash flow) and 3 different levels of granularity
-(summary, standard, detailed).
-`get_all_statement_views` LRU-caches a full 3×3 bundle
-(`companies/{cik}/{period}_{num_periods}/*.parquet` + `meta.json`). Stale if
-`latest_filing_date` older than
-`EDGARTOOLS_ANNUAL_CACHE_MAX_AGE_MONTHS` (12) or
-`EDGARTOOLS_QUARTERLY_CACHE_MAX_AGE_MONTHS` (3). Company LRU size
-`EDGARTOOLS_COMPANY_CACHE_SIZE` (10). `_build_view_dataframe` depends on
-edgartools internals (`determine_optimal_periods`, per-filing
-`to_dataframe(view=)`). Payload is nested Table JSON; `statement_view.js`
-toggles type/level and balance-sheet fund-flow client-side.
+**EDGAR.** `GET /statements/{ticker}?period=annual|quarterly&num_periods=1..64`
+(default annual, 10; clamped to `MAX_CACHE_*` and to cached periods). Needs
+`EDGAR_IDENTITY`. 3 statements (income, balance, cashflow) × 3 views
+(summary, standard, detailed). edgartools' own HTTP cache (filing
+documents): once the `_cache`/`_tcache` directories under
+`data/edgartools_cache` are over `EDGARTOOLS_HTTP_CACHE_MAX_MB` (default
+300), setup clears them completely with edgartools' own `clear_cache` (which
+only touches `_cache`/`_tcache`, never our `companies/` bundles).
 
-`get_statement_views(...)` still loads the **full** bundle then indexes one
-statement — wizard opex pays for all three statements on a cold cache.
+`load_statement_set(ticker, period) -> StatementSet` (`source.py`) is the
+only entry point. Cache key `(cik, period)`, no `num_periods`:
+`companies/{cik}/{period}/{income,balance,cashflow}.parquet` +
+`{statement}_calc.parquet` + `meta.json` (`schema_version`, `period`,
+`latest_filing_date`); `read_cache_entry` returns a `CachedStatementSet` (a `StatementSet` plus
+`latest_filing_date` and a `stale` property); a missing calc file, or a frame
+`Statement` rejects, makes the bundle unusable. Builds from up
+to `MAX_CACHE_YEARS` (16) 10-Ks or `MAX_CACHE_QUARTERS` (64) 10-Qs: XBRLS only
+picks filings/periods (`determine_optimal_periods`); each filing gets
+`to_dataframe(view="detailed", presentation=False)` per statement (the stored
+frame) plus `view="standard"` only to set `in_standard`: standard rows are an
+ordered subsequence of detailed rows, matched by `_align` (the same walk
+`_raw_items` uses against `get_raw_data(view="detailed")`); on failure `Statement`
+defaults it to `not dimension or not is_breakdown`. The aligned raw items
+(fetched once per filing statement) give `dimension_key` and replace
+`weight`: edgartools' frame weight comes from the concept's first fact and can
+be another role's calc tree, the raw item's is this role's (same node as
+`parent_concept`); dimensional rows take their concept's role weight. If
+alignment fails, edgartools' weight is kept. Rows
+matched across filings by `get_row_id`; metadata from the newest filing a
+row appears in, except `weight` = newest non-NaN across filings. Values
+stored with **raw** XBRL signs. Because filers restructure calc trees, those
+`parent_concept` / `weight` columns are newest-filing metadata only:
+`Statement.calc_edges` (long frame `period, concept, parent_concept, weight`,
+stored as `{statement}_calc.parquet`) gives each period every arc of the
+statement role's calc tree (`xbrl.find_statement` → `calculation_trees`, no
+cross-role fallback) of the filing that period's values came from; calc code
+must use it. Without stored edges, `Statement` broadcasts the frame's own
+tree to every period. `Statement.children(row_id, period)` returns the
+non-dimensional child rows in that period's edges, `weight` = edge weight.
+Rebuilt on `schema_version` mismatch (`CACHE_SCHEMA_VERSION`) or
+missing/corrupt files. A bundle whose `latest_filing_date` is older than
+`EDGARTOOLS_ANNUAL_CACHE_MAX_AGE_MONTHS` (12) /
+`EDGARTOOLS_QUARTERLY_CACHE_MAX_AGE_MONTHS` (3) (quarterly: newer of latest
+10-Q and latest 10-K, so a year-end 10-K keeps it fresh) is stale
+(`read_cache_entry` returns it with `stale=True` and keeps it on disk): `load_statement_set` then fetches the filing list and
+rebuilds only if SEC has a newer filing (freshness date ≠ stored); otherwise
+it serves the cached bundle. Fresh bundles make no SEC request. Company LRU
+size `EDGARTOOLS_COMPANY_CACHE_SIZE` (10), index `company_lru.json`. Pinned
+tickers (`set_pinned_tickers`, stored in `company_lru.json`) are exempt from
+LRU eviction and don't count toward the size; staleness still applies.
+
+Views are projections: `Statement.project(view, periods)` — summary =
+non-dimensional rows, standard = `in_standard` (edgartools' standard-view
+membership, read from its standard frame at cache build), detailed = all;
+`preferred_sign` applied only here. `html_renderer.py` projects each
+statement to every view over `periods[:num_periods]`. Payload is nested Table JSON;
+`statement_view.js` toggles type/level and balance-sheet fund-flow
+client-side.
+
+`get_row_id` (only place ids are formed): `concept`, plus
+`|Axis=member` for every axis of a dimensional row (sorted by axis, axis
+prefix stripped, member QName kept), `#n` for repeats within one filing.
+`calc_residuals(statement)` (`src/models/calc_residuals.py`): per period,
+`reported(parent) − Σ weight·child` on that period's own `calc_edges` (raw
+signs; edge weights; first non-dimensional row per concept). NaN child values
+count 0 (`n_nan_children`); calc children with no non-dimensional row are
+counted in `n_missing_children`.
+Expected 0 on real filings (data test: AAPL/MU/SNDK all 0); the old diluted
+shares residual is gone (edges come from the statement role only, not the
+EPS-note role).
+`calc_residual_report` CLI runs it over the cache (read-only).
 
 **Wizard.**
 
@@ -126,7 +184,9 @@ in `wizard_pages/` — registry = identity, builders = data. Do not add
 per-sub-page routes.
 
 Slots match `vision.md`; **only `adjustments/opex-to-capex` has UI.** That
-builder: detailed income, `standard_concept` in `OPERATING_EXPENSES`, `Table`
+builder: `load_statement_set(...).income.project("detailed")` over the newest
+2 periods, `standard_concept` in `OPERATING_EXPENSES`, `Table` (rows still
+keyed by `standard_concept` until row-id unification, phase 2)
 with period cols + input `capitalize` (bool) + `years` (number). Saves: POSTs
 to `/wizard/{ticker}/{page_slug}/{subpage_slug}` →
 `wizard_pages/adjustments_post.py::opex_to_capex_post` →
@@ -158,8 +218,10 @@ serialize() → {
 - number `format`: `financial` | `percent` | `integer`. Links: `dtype=string`,
   cell `{text, href}`.
 - `statement_table_from_dataframe(df)`: non-metadata cols → static financial
-  periods. Metadata: `label, concept, standard_concept, preferred_sign, level,
-  is_total, is_abstract`.
+  periods. Metadata = `STATEMENT_VIEW_METADATA_COLUMNS`: `label, concept,
+  standard_concept, preferred_sign, level, is_total, is_abstract` plus every
+  `Statement` column from `statement.py` (`STATEMENT_METADATA_COLUMNS`, incl.
+  `row_id`).
 - Missing input cols → `null`. NaN → `null`. Bad spec → `TableSerializationError`.
 - **Model** (`components/table_model.js`): receives table data
   (`fromSerialized`), owns cell state (`getCell`/`setCell`/`subscribe`/
@@ -227,10 +289,13 @@ Partial: opex (save/prefill for `adjustments/opex-to-capex` only; no
 restatement); Finnhub; `load_to_database.py`.
 
 NYI: every other wizard sub-page; wizard UI ↔ DuckDB; screener; analytics;
-finfetch; README parquet layout.
+finfetch.
 
 Tests cover clients, DBs, edgartools, Table, wizard DB. No web tests. Cache
-miss hits live SEC.
+miss hits live SEC. `pytest -m data` (deselected by default)
+runs the calc-residual check on real filings for the tickers in the gitignored
+`tests/data_test_tickers.txt` (pinned in the company LRU, loaded through the
+app cache).
 
 ## 7. Debt agents should not paper over
 

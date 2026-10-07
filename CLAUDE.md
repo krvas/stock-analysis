@@ -5,11 +5,36 @@ what's implemented vs. not. Read it before editing anything you haven't
 touched before. This file adds *behavioral* rules on top of it: how to decide
 what belongs where, so scope violations don't happen in the first place.
 
-## Lint and format before every commit
+## Checks before every commit
 
-Before creating any git commit, run `.venv/bin/ruff check .` and
-`.venv/bin/ruff format --check .` from the repo root, and fix whatever they
-report. Don't commit code that fails either check.
+Run `make test` (ruff check, ruff format --check, pytest) from the repo root.
+Don't commit code that fails it. `make fix` applies ruff's fixes and formatting.
+
+## Workflow
+
+Non-trivial changes go through these phases (skip 2–4 for docs-only or
+<20-line single-file edits). `<scratch>` is the session scratchpad; nothing in
+it is committed.
+
+1. **Implement.** Worker subagents on disjoint files (sequential if they
+   overlap). Workers never commit. Each ends with `make fix test` and writes
+   `<scratch>/intent-<worker>.md`: what changed, why, and an "Intentionally
+   unused / forward-looking" list (reason + spec section).
+2. **Review.** One `bloat-reviewer` agent (read-only; bloat, redundancy and
+   function placement only). It writes `<scratch>/review-1.md` and
+   `findings-1.json`.
+3. **Triage.** `make triage FINDINGS=<scratch>/findings-1.json`. Jev scores
+   each finding; `execute` means score ≥ 0.85 and not `needs_user_decision`,
+   otherwise `human`. If the API fails, everything is `human`; tell the user.
+4. **Fix.** Fix subagents (disjoint files, no commits) apply `execute`
+   findings, then `make fix test`.
+5. **Human review, then commit.** Show the user the `human` findings (quote,
+   score, intent note) and a summary of what was applied; apply what they
+   approve. Only the orchestrator commits: atomic commits (one logical change
+   plus its tests, in dependency order), `make test` before each, explicit
+   paths (never `git add -A`), unrelated untracked files left alone, no push.
+
+One review round only.
 
 ## The failure mode this file exists to prevent
 

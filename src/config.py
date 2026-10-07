@@ -8,6 +8,8 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+from src.models.statement import PeriodType
+
 logger = logging.getLogger(__name__)
 
 _dotenv_loaded = False
@@ -49,6 +51,23 @@ EDGARTOOLS_ANNUAL_CACHE_MAX_AGE_MONTHS = max(
     1,
     int(os.environ.get("EDGARTOOLS_ANNUAL_CACHE_MAX_AGE_MONTHS", "12")),
 )
+# edgartools' own HTTP cache directories (under EDGARTOOLS_CACHE_DIR):
+# once it is over this size, setup clears it completely (edgartools' clear_cache).
+# Override with EDGARTOOLS_HTTP_CACHE_MAX_MB env var.
+EDGARTOOLS_HTTP_CACHE_MAX_MB = max(
+    1,
+    int(os.environ.get("EDGARTOOLS_HTTP_CACHE_MAX_MB", "300")),
+)
+# Years of filing history cached per company: annual bundles hold up to this
+# many 10-Ks, quarterly bundles up to 4x as many 10-Qs. Requests slice the
+# periods they need from the cached bundle.
+MAX_CACHE_YEARS = max(1, int(os.environ.get("MAX_CACHE_YEARS", "16")))
+MAX_CACHE_QUARTERS = MAX_CACHE_YEARS * 4
+# Most periods (and filings) cached per bundle, by period type.
+MAX_PERIODS_BY_PERIOD: dict[PeriodType, int] = {
+    "annual": MAX_CACHE_YEARS,
+    "quarterly": MAX_CACHE_QUARTERS,
+}
 
 # Logging
 LOG_DIR = PROJECT_ROOT / "logs"
