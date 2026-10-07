@@ -7,6 +7,11 @@
   --accent: #2563eb;
   --header-bg: #eef2f7;
   --row-hover: #f3f6fa;
+  --accent-soft: #eef4ff;
+}
+
+[hidden] {
+  display: none !important;
 }
 
 * {
@@ -81,7 +86,8 @@ body {
   gap: 8px;
 }
 
-.controls label {
+.controls label,
+.controls .control-label {
   font-size: 0.875rem;
   color: var(--muted);
 }
@@ -168,4 +174,49 @@ tbody tr:hover td:first-child {
 .placeholder {
   color: var(--muted);
   margin-top: 24px;
+}
+
+.segmented {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--surface);
+}
+
+.segmented button {
+  font: inherit;
+  font-size: 0.875rem;
+  padding: 7px 12px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.segmented button + button {
+  border-left: 1px solid var(--border);
+}
+
+.segmented button[aria-pressed="true"] {
+  background: var(--accent);
+  color: #ffffff;
+}
+
+.adjustments-note {
+  display: inline-block;
+  margin: 0 0 12px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 0.8125rem;
+}
+
+tbody tr.row-adjusted td {
+  background: var(--accent-soft);
+}
+
+tbody tr.row-adjusted td:first-child {
+  box-shadow: inset 3px 0 0 var(--accent);
 }

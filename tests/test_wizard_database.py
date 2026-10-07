@@ -10,6 +10,7 @@ import pytest
 from src.database import wizard_tables as wt
 from src.database.wizard_manager import WizardDatabaseManager
 from src.models.statement import Statement, StatementSet
+from src.web import adjusted_statements
 from src.web.routes.wizard_pages import adjustments_context
 from src.web.routes.wizard_pages.adjustments_post import opex_to_capex_post
 from tests.statement_fixtures import derived_calc_edges
@@ -234,7 +235,7 @@ def test_opex_to_capex_round_trip_keys_by_row_id(
         cashflow=Statement(raw, "cashflow", derived_calc_edges(raw)),
     )
     monkeypatch.setattr(
-        adjustments_context, "load_statement_set", lambda *_args: statements
+        adjusted_statements, "load_statement_set", lambda *_args: statements
     )
 
     rows = adjustments_context.opex_to_capex_context("AAPL", "annual")["opex_table"][

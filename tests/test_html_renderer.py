@@ -10,6 +10,7 @@ import pandas as pd
 from src.config import MAX_CACHE_QUARTERS, MAX_CACHE_YEARS
 from src.models.edgartools.html_renderer import build_statement_payload
 from src.models.statement import StatementSet
+from src.web import adjusted_statements
 from src.web.routes.statements import clamp_num_periods
 from src.web.routes.wizard_pages import adjustments_context
 from tests.statement_fixtures import make_statement
@@ -66,7 +67,13 @@ def test_payload_shape_and_period_slicing() -> None:
     for views in payload["statements"].values():
         assert set(views) == {"summary", "standard", "detailed"}
         for table in views.values():
-            assert set(table) == {"columns", "linked_groups", "rows"}
+            assert set(table) == {
+                "columns",
+                "linked_groups",
+                "rows",
+                "calculated_cells",
+                "no_input_cells",
+            }
             # Only the newest two periods; no row_id (or other metadata) column.
             assert [col["id"] for col in table["columns"]] == [P1, P2]
             assert all(
@@ -105,8 +112,9 @@ def test_clamp_num_periods() -> None:
 def test_opex_to_capex_context_uses_detailed_projection() -> None:
     with (
         patch.object(
-            adjustments_context, "load_statement_set", return_value=_statement_set()
+            adjusted_statements, "load_statement_set", return_value=_statement_set()
         ) as mock_load,
+        patch.object(adjusted_statements, "load_specs", return_value=[]),
         patch.object(adjustments_context, "_apply_saved_opex_to_capex_preferences"),
     ):
         context = adjustments_context.opex_to_capex_context("AAPL", "annual")
@@ -131,8 +139,9 @@ def test_opex_to_capex_prefill_matches_row_id_keys() -> None:
     )
     with (
         patch.object(
-            adjustments_context, "load_statement_set", return_value=_statement_set()
+            adjusted_statements, "load_statement_set", return_value=_statement_set()
         ),
+        patch.object(adjusted_statements, "load_specs", return_value=[]),
         patch.object(adjustments_context, "WizardDatabaseManager") as mock_db,
     ):
         db = mock_db.return_value.__enter__.return_value

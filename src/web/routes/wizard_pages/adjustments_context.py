@@ -6,21 +6,16 @@ import logging
 
 import pandas as pd
 
-from src.api.edgartools.source import load_statement_set
 from src.api.edgartools.standard_terms import OPERATING_EXPENSES
 from src.database.wizard_manager import WizardDatabaseManager
 from src.models.statement import PeriodType
 from src.models.table import ColumnSpec, Table, period_column_specs
+from src.web.adjusted_statements import DEFAULT_EXCHANGE, load_adjusted
 
 logger = logging.getLogger(__name__)
 
 OPEX_TO_CAPEX_ADJUSTMENT_TYPE = "opex_to_capex"
 
-# Wizard HTTP/route layer only supports a single exchange for now; the
-# underlying DB layer (WizardDatabaseManager, adjustment_preferences) still
-# has a real exchange column/parameter, but nothing above it threads a value
-# through, so it's hardcoded here.
-DEFAULT_EXCHANGE = "NASDAQ"
 
 OPEX_TO_CAPEX_INPUT_COLUMNS: list[ColumnSpec] = [
     ColumnSpec(id="capitalize", label="Capitalize", kind="input", dtype="boolean"),
@@ -64,7 +59,9 @@ def opex_to_capex_context(
     ticker: str,
     period: PeriodType,
 ) -> dict[str, object]:
-    income = load_statement_set(ticker, period).income
+    # Stage semantics: the opex page shows the input to opex-to-capex.
+    _, staged, _ = load_adjusted(ticker, period, until=OPEX_TO_CAPEX_ADJUSTMENT_TYPE)
+    income = staged.income
     df = income.project("detailed", income.periods[:2])
     # Selection by standard_concept; identity is the ``row_id`` from get_row_id.
     opex = df[df["standard_concept"].isin(OPERATING_EXPENSES)]
