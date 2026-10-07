@@ -1,6 +1,9 @@
 {% macro form(action, form_id=none, method='post', wizard_save=none, data_table_id=none) %}
 <form{% if form_id %} id="{{ form_id }}"{% endif %} action="{{ action }}" method="{{ method }}"{% if wizard_save %} data-wizard-save="{{ wizard_save }}"{% endif %}{% if data_table_id %} data-table-id="{{ data_table_id }}"{% endif %}>
   {{ caller() }}
-  <button type="submit">Save</button>
+  <div class="wizard-save-row">
+    <button type="submit">Save</button>
+    <span class="wizard-save-status" role="status" aria-live="polite"></span>
+  </div>
 </form>
 {% endmacro %}

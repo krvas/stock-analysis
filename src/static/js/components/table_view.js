@@ -4,9 +4,13 @@
 
 import { formatNumber, getStatementUnit, getUnitLabel } from "../utils.js";
 
+function cellKey(rowId, colId) {
+  return `${rowId}\0${colId}`;
+}
+
 /**
  * @param {HTMLTableElement} container - Existing table with thead and tbody
- * @param {{ columns: object[], rows: object[] }} table
+ * @param {{ columns: object[], rows: object[], calculated_cells?: object[], no_input_cells?: Array<[string, string]> }} table
  */
 export function render_table(container, table) {
   if (!container) {
@@ -22,6 +26,14 @@ export function render_table(container, table) {
   tbody.innerHTML = "";
 
   const { columns, rows } = table;
+  const calcKeys = new Set(
+    (table.calculated_cells || []).map((spec) =>
+      cellKey(spec.row_id, spec.col_id),
+    ),
+  );
+  const noInputKeys = new Set(
+    (table.no_input_cells || []).map(([rowId, colId]) => cellKey(rowId, colId)),
+  );
   const unitLabel = getUnitLabel();
   const headerRow = document.createElement("tr");
   const labelHeader = document.createElement("th");
@@ -36,6 +48,9 @@ export function render_table(container, table) {
 
   rows.forEach((row) => {
     const tr = document.createElement("tr");
+    if (typeof row.origin === "string" && row.origin.startsWith("adjustment:")) {
+      tr.classList.add("row-adjusted");
+    }
 
     const labelCell = document.createElement("td");
     const labelSpan = document.createElement("span");
@@ -47,6 +62,14 @@ export function render_table(container, table) {
 
     columns.forEach((col) => {
       const value = row.cells[col.id];
+      if (calcKeys.has(cellKey(row.id, col.id))) {
+        const td = document.createElement("td");
+        td.dataset.calcSlot = "";
+        td.dataset.rowId = row.id;
+        td.dataset.colId = col.id;
+        tr.appendChild(td);
+        return;
+      }
       if (col.kind === "static") {
         const valueCell = document.createElement("td");
         valueCell.innerHTML = formatNumber(value, getStatementUnit());
@@ -68,6 +91,10 @@ export function render_table(container, table) {
       }
       if (col.kind === "input") {
         const td = document.createElement("td");
+        if (noInputKeys.has(cellKey(row.id, col.id))) {
+          tr.appendChild(td);
+          return;
+        }
         td.dataset.inputSlot = "";
         td.dataset.rowId = row.id;
         td.dataset.colId = col.id;

@@ -95,7 +95,8 @@
   min-height: 160px;
 }
 
-.wizard-region:empty {
+.wizard-region:empty,
+.wizard-region:not(:has(*)) {
   display: none;
 }
 
@@ -178,4 +179,72 @@
 .wizard-landing-pages ul {
   margin: 4px 0 12px;
   padding-left: 18px;
+}
+
+.wizard-intro {
+  max-width: 72ch;
+  margin-bottom: 16px;
+  color: var(--text);
+}
+
+.wizard-intro p {
+  margin: 0 0 8px;
+}
+
+.wizard-save-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.wizard-save-row button {
+  font: inherit;
+  padding: 6px 16px;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: var(--accent);
+  color: #ffffff;
+  cursor: pointer;
+}
+
+.wizard-save-row button:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+.wizard-save-status {
+  font-size: 0.875rem;
+  color: var(--muted);
+  transition: opacity 0.6s ease;
+}
+
+.wizard-save-status[data-state="saved"] {
+  color: #15803d;
+}
+
+.wizard-save-status[data-state="error"] {
+  color: #b91c1c;
+}
+
+.wizard-save-status.is-faded {
+  opacity: 0;
+}
+
+.wizard-next-link {
+  margin: 16px 0 0;
+}
+
+.wizard-next-link a {
+  color: var(--accent);
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.wizard-next-link a:hover {
+  text-decoration: underline;
+}
+
+.wizard-main td input[type="number"] {
+  width: 5.5rem;
 }
