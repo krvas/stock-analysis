@@ -11,12 +11,12 @@ R6 and Risks) and is otherwise independent of
 ## 1. Problem
 
 A bundle is *stale* when its stored `latest_filing_date` is older than the period
-max age (`is_period_bundle_stale`: `EDGARTOOLS_ANNUAL_CACHE_MAX_AGE_MONTHS`,
+max age (`is_entry_stale`: `EDGARTOOLS_ANNUAL_CACHE_MAX_AGE_MONTHS`,
 default 12; `EDGARTOOLS_QUARTERLY_CACHE_MAX_AGE_MONTHS`, default 3). Stale does
 not mean wrong: it means "SEC might have a newer filing, go look". Verified by
 reading `load_statement_set` (`source.py`):
 
-1. `read_period_bundle` returns `stale=True`, so the fast path
+1. `read_cache_entry` returns `stale=True`, so the fast path
    (`not cached.stale`) is skipped.
 2. `Company(ticker)` is constructed (SEC round trip, unless edgartools has it
    cached).
@@ -51,8 +51,8 @@ per session, multiplying the cost.
 
 ## 3. Non-goals
 
-- **No change to what "stale" means** (`is_period_bundle_stale`, the two
-  max-age settings, `read_period_bundle`'s `stale` flag). Staleness stays a
+- **No change to what "stale" means** (`is_entry_stale`, the two
+  max-age settings, `read_cache_entry`'s `stale` flag). Staleness stays a
   function of `latest_filing_date` only; the TTL gates only the SEC check.
 - **No TTL for fresh bundles.** Fresh bundles never hit SEC and still do not.
 - **No background refresh or "refreshing" UI** (parked P2 in the concurrency
@@ -73,7 +73,7 @@ cached bundle is still current (`cached.latest_filing_date == latest_filing_date
 today's "serving the stale cached bundle" branch), it records `checked_at`, a
 UTC ISO-8601 timestamp (`datetime.now(UTC).isoformat()`, same format as the
 existing `_utc_now_iso`), in that bundle's `meta.json`. Confirmation *after a
-rebuild* also sets it: `save_period_bundle` writes `checked_at` = build time
+rebuild* also sets it: `save_cache_entry` writes `checked_at` = build time
 (the build just proved currency), so a freshly rebuilt bundle that ages into
 staleness starts its TTL window from the build, not from `None`.
 
@@ -94,7 +94,7 @@ useful for the data tests and debugging). `cache.py` converts it to a
 integers and sub-hour TTLs have no use case.
 
 **R4. What still forces work.** The TTL never suppresses any of these:
-- a missing/invalid/old-schema/corrupt bundle (`read_period_bundle` returns
+- a missing/invalid/old-schema/corrupt bundle (`read_cache_entry` returns
   `None` → rebuild, unchanged);
 - `checked_at` missing, unparseable, or **in the future** (clock skew) → treated
   as expired (revalidate);
@@ -119,7 +119,7 @@ feature's acceptance.
 **R6. Ownership of the meta write.** A new function in `cache.py`:
 
 ```python
-def touch_period_bundle_checked(
+def touch_cache_entry_checked(
     *,
     cik: int | str,
     period: PeriodType,
@@ -129,10 +129,10 @@ def touch_period_bundle_checked(
 ) -> bool: ...
 ```
 
-It is the **only** writer of `checked_at` outside `save_period_bundle`. Reuse
-of `save_period_bundle` is rejected: that rewrites six parquet files for a
+It is the **only** writer of `checked_at` outside `save_cache_entry`. Reuse
+of `save_cache_entry` is rejected: that rewrites six parquet files for a
 timestamp change (and, once the concurrency spec lands, creates a whole new
-bundle directory). `touch_period_bundle_checked`:
+bundle directory). `touch_cache_entry_checked`:
 - reads the current `meta.json`; if it is missing/invalid, the
   `schema_version` is not `CACHE_SCHEMA_VERSION`, or its `latest_filing_date`
   differs from `expected_latest_filing_date` (the bundle was rebuilt or evicted
@@ -140,7 +140,7 @@ bundle directory). `touch_period_bundle_checked`:
   guard is what stops a slow "still current" confirmation from overwriting
   a newer bundle's meta with stale values;
 - otherwise writes the same meta dict with `checked_at` set (every existing key,
-  including a future `bundle_id`, preserved untouched) via a uniquely named temp
+  including a future `entry_id`, preserved untouched) via a uniquely named temp
   file (`meta.json.{uuid4hex}.tmp`) plus `os.replace`;
 - never creates a directory or a file for a missing bundle;
 - never raises for I/O errors: logs a WARNING and returns `False` (failing to
@@ -159,9 +159,9 @@ lazily: the first stale request after deploy does one SEC check, then records
 a bad timestamp is not corrupt data). The module docstring's meta line
 becomes `# schema_version, period, latest_filing_date, checked_at (optional)`.
 
-**R8. Clock injection.** Mirrors `reference` in `is_period_bundle_stale`.
+**R8. Clock injection.** Mirrors `reference` in `is_entry_stale`.
 `now: datetime | None = None` (default `datetime.now(UTC)`) on
-`touch_period_bundle_checked` (the value written) and on a new pure helper:
+`touch_cache_entry_checked` (the value written) and on a new pure helper:
 
 ```python
 def is_recheck_due(
@@ -173,7 +173,7 @@ def is_recheck_due(
 ```
 
 `ttl` defaults from config. Due when `checked_at is None`, `ttl <= 0`,
-`checked_at > now`, or `now - checked_at >= ttl`. `read_period_bundle` does not
+`checked_at > now`, or `now - checked_at >= ttl`. `read_cache_entry` does not
 gain a `now` parameter (it only reports `checked_at`; the decision lives in
 `source.py` via `is_recheck_due`, so cache reads stay free of SEC-policy).
 `load_statement_set` has no public clock parameter; tests monkeypatch
@@ -216,7 +216,7 @@ writes, but lost on every restart and invisible to the CLI/data-test processes
 (each would re-check), which is most of the observed cost. Possible *in
 addition* only if disk writes prove a problem; not needed.
 
-**D. Reuse `save_period_bundle` to refresh meta.** Rewrites everything and
+**D. Reuse `save_cache_entry` to refresh meta.** Rewrites everything and
 changes the bundle on every confirmation; rejected (R6).
 
 ## 6. Affected code
@@ -224,9 +224,9 @@ changes the bundle on every confirmation; rejected (R6).
 | Where | Change |
 | --- | --- |
 | `src/config.py` | `EDGARTOOLS_REVALIDATE_TTL_HOURS` (default 24, `max(0, ...)`), commented like the max-age settings |
-| `src/api/edgartools/cache.py` | `touch_period_bundle_checked`, `is_recheck_due`, `CachedStatementSet.checked_at`; `read_period_bundle` parses optional `checked_at`; `save_period_bundle` writes `checked_at`; docstring; no change to `CACHE_SCHEMA_VERSION` |
-| `src/api/edgartools/source.py` `load_statement_set` | TTL skip before `setup_edgartools`/`Company`; call `touch_period_bundle_checked` in the "no newer filing" branch; wrap the freshness check in the offline fallback; update the docstring ("a stale bundle costs one filing-list request" → "at most one per TTL") |
-| `src/api/edgartools/__init__.py` | Export only if `source.py` imports across the package boundary in a way STATE.md §3 requires (the new functions are imported from `cache` directly like `read_period_bundle` today) |
+| `src/api/edgartools/cache.py` | `touch_cache_entry_checked`, `is_recheck_due`, `CachedStatementSet.checked_at`; `read_cache_entry` parses optional `checked_at`; `save_cache_entry` writes `checked_at`; docstring; no change to `CACHE_SCHEMA_VERSION` |
+| `src/api/edgartools/source.py` `load_statement_set` | TTL skip before `setup_edgartools`/`Company`; call `touch_cache_entry_checked` in the "no newer filing" branch; wrap the freshness check in the offline fallback; update the docstring ("a stale bundle costs one filing-list request" → "at most one per TTL") |
+| `src/api/edgartools/__init__.py` | Export only if `source.py` imports across the package boundary in a way STATE.md §3 requires (the new functions are imported from `cache` directly like `read_cache_entry` today) |
 | `src/pipelines/calc_residual_report.py` | No behaviour change. `prune=False` reads, never writes `checked_at`, never does SEC. Optionally (R10) append `checked_at` to its stale warning |
 | `tests/test_edgar_data.py` | No change in behaviour; a stale-but-current bundle now skips SEC for a day. Document `EDGARTOOLS_REVALIDATE_TTL_HOURS=0` as the way to force revalidation for a data run (module docstring only) |
 | `tests/test_edgartools_cache.py`, `tests/test_edgartools_source.py` | New tests (§7); existing tests keep passing, except see below |
@@ -236,13 +236,13 @@ Existing test impact: `test_stale_bundle_without_newer_filing_is_served_from_cac
 seeds a bundle via `_seed_cache` (presumably no `checked_at`) and asserts
 `get_filings` was called; with `checked_at` absent R2 does not skip, so it
 passes unchanged and then also asserts the new `checked_at` (add to its
-asserts). Any test seeding via `save_period_bundle` will now have `checked_at`
+asserts). Any test seeding via `save_cache_entry` will now have `checked_at`
 = build time and must pass `now`/TTL 0 or backdate meta to exercise the SEC
 path; `_seed_cache` should gain an optional `checked_at` argument.
 
 Residual report and data test behaviour in detail:
 - **`calc_residual_report`** is read-only by contract (`prune=False`). It never
-  calls `touch_period_bundle_checked`, never contacts SEC, and its "stale;
+  calls `touch_cache_entry_checked`, never contacts SEC, and its "stale;
   reporting on it anyway" path is unchanged, because the report's job is to
   describe what is on disk. It must tolerate bundles with and without
   `checked_at` (it only reads the `CachedStatementSet` fields it uses).
@@ -259,7 +259,7 @@ Cache-level (`tests/test_edgartools_cache.py`, `tmp_path`, no network, `now`
 injected):
 
 - **AC-1 (write).** Save a bundle, then
-  `touch_period_bundle_checked(..., expected_latest_filing_date=d, now=T)`
+  `touch_cache_entry_checked(..., expected_latest_filing_date=d, now=T)`
   returns `True`; `meta.json` has `checked_at == T.isoformat()` and every other
   key (`schema_version`, `period`, `latest_filing_date`) is unchanged; parquet
   files untouched (mtimes unchanged); no `*.tmp` left.
@@ -272,8 +272,8 @@ injected):
 - **AC-4 (tolerant read).** A bundle with no `checked_at` reads with
   `checked_at is None` and is not discarded; an unparseable `checked_at`
   reads as `None`, bundle kept (INFO log).
-- **AC-5 (save sets it).** `save_period_bundle` followed by
-  `read_period_bundle` yields `checked_at` within a second of build time.
+- **AC-5 (save sets it).** `save_cache_entry` followed by
+  `read_cache_entry` yields `checked_at` within a second of build time.
 - **AC-6 (`is_recheck_due`).** Table: `None` → due; `now - 1h` with 24 h TTL →
   not due; exactly 24 h → due; 25 h → due; future (`now + 1h`) → due; TTL 0 →
   always due; naive timestamp treated as UTC.
@@ -334,11 +334,11 @@ the intentional `_seed_cache`/assert updates above.
   rebuild). The guard shrinks but does not eliminate the window: the check and
   replace are not atomic without a lock.
 - **R3. Overlap with the concurrency spec.** Both change meta writes. If that
-  spec lands first, `touch_period_bundle_checked` must (a) take the per-bundle
-  lock around read-modify-replace, (b) compare `bundle_id` as well as
-  `latest_filing_date` (if bundle_id changed, return `False`), and (c) use the
-  unique-temp-name rule (R10 there). Its `save_period_bundle` swap and
-  `bundle_id` rotation already give new bundles a fresh `checked_at` for free.
+  spec lands first, `touch_cache_entry_checked` must (a) take the per-bundle
+  lock around read-modify-replace, (b) compare `entry_id` as well as
+  `latest_filing_date` (if entry_id changed, return `False`), and (c) use the
+  unique-temp-name rule (R10 there). Its `save_cache_entry` swap and
+  `entry_id` rotation already give new bundles a fresh `checked_at` for free.
   If this lands first, the unique temp name and guard above are the bridge;
   the concurrency work wraps this function with the lock. Lock order stays
   `index lock` → `bundle lock`; this function takes only the bundle lock and
@@ -366,9 +366,9 @@ the intentional `_seed_cache`/assert updates above.
 ## 9. Suggested implementation order
 
 1. `config.py`: `EDGARTOOLS_REVALIDATE_TTL_HOURS`.
-2. `cache.py`: `is_recheck_due`, `checked_at` parse in `read_period_bundle` and
-   `CachedStatementSet`, `save_period_bundle` writes it. Tests AC-4..AC-6.
-3. `cache.py`: `touch_period_bundle_checked` with guard and unique temp name.
+2. `cache.py`: `is_recheck_due`, `checked_at` parse in `read_cache_entry` and
+   `CachedStatementSet`, `save_cache_entry` writes it. Tests AC-4..AC-6.
+3. `cache.py`: `touch_cache_entry_checked` with guard and unique temp name.
    Tests AC-1..AC-3, AC-7.
 4. `source.py`: record the check (AC-8), TTL skip (AC-9..AC-13, AC-16..AC-17).
 5. `source.py`: offline fallback (AC-14, AC-15). This step alone turns the
@@ -402,7 +402,7 @@ Open questions:
    type.
 2. **(Engineering, non-blocking) Should a recently confirmed bundle ever count
    as non-stale?** This spec says no (staleness is unchanged); the alternative
-   would fold `checked_at` into `is_period_bundle_stale`, which also changes the
+   would fold `checked_at` into `is_entry_stale`, which also changes the
    residual report's meaning.
 3. **(Product, non-blocking) Negative caching when offline.** Each request while
    offline pays a connection attempt before falling back. A short failure TTL

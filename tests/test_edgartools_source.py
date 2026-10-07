@@ -17,8 +17,8 @@ from src.api.edgartools import source
 from src.api.edgartools.cache import (
     CachedStatementSet,
     _load_index,
-    is_period_bundle_stale,
-    save_period_bundle,
+    is_entry_stale,
+    save_cache_entry,
     touch_company_cache,
 )
 from src.api.edgartools.source import (
@@ -882,8 +882,8 @@ STATEMENT_CASES = [
 )
 @patch.dict("os.environ", {"EDGAR_IDENTITY": "ScreenerApp/1.0 test@example.com"})
 @patch("src.api.edgartools.source.touch_company_cache")
-@patch("src.api.edgartools.source.save_period_bundle")
-@patch("src.api.edgartools.source.read_period_bundle")
+@patch("src.api.edgartools.source.save_cache_entry")
+@patch("src.api.edgartools.source.read_cache_entry")
 @patch("src.api.edgartools.source.find_cached_cik")
 @patch("src.api.edgartools.source.determine_optimal_periods")
 @patch("src.api.edgartools.source.XBRLS")
@@ -961,8 +961,8 @@ FRESHNESS_CASES = [
 )
 @patch.dict("os.environ", {"EDGAR_IDENTITY": "ScreenerApp/1.0 test@example.com"})
 @patch("src.api.edgartools.source.touch_company_cache")
-@patch("src.api.edgartools.source.save_period_bundle")
-@patch("src.api.edgartools.source.read_period_bundle")
+@patch("src.api.edgartools.source.save_cache_entry")
+@patch("src.api.edgartools.source.read_cache_entry")
 @patch("src.api.edgartools.source.find_cached_cik")
 @patch("src.api.edgartools.source.determine_optimal_periods")
 @patch("src.api.edgartools.source.XBRLS")
@@ -1001,10 +1001,7 @@ def test_load_statement_set_freshness_date_uses_10k_for_quarterly(
 
     stored = mock_save_bundle.call_args.kwargs["latest_filing_date"]
     assert stored == expected
-    assert (
-        is_period_bundle_stale(stored, period=period, reference=date(2026, 10, 5))
-        is stale
-    )
+    assert is_entry_stale(stored, period=period, reference=date(2026, 10, 5)) is stale
 
 
 def _cached_set() -> StatementSet:
@@ -1038,8 +1035,8 @@ def _cached_set() -> StatementSet:
 
 @patch.dict("os.environ", {"EDGAR_IDENTITY": "ScreenerApp/1.0 test@example.com"})
 @patch("src.api.edgartools.source.touch_company_cache")
-@patch("src.api.edgartools.source.save_period_bundle")
-@patch("src.api.edgartools.source.read_period_bundle")
+@patch("src.api.edgartools.source.save_cache_entry")
+@patch("src.api.edgartools.source.read_cache_entry")
 @patch("src.api.edgartools.source.find_cached_cik")
 @patch("src.api.edgartools.source.Company")
 def test_load_statement_set_returns_cached_without_sec_fetch(
@@ -1071,7 +1068,7 @@ def test_load_statement_set_returns_cached_without_sec_fetch(
 
 
 @patch.dict("os.environ", {"EDGAR_IDENTITY": "ScreenerApp/1.0 test@example.com"})
-@patch("src.api.edgartools.source.read_period_bundle")
+@patch("src.api.edgartools.source.read_cache_entry")
 @patch("src.api.edgartools.source.find_cached_cik")
 @patch("src.api.edgartools.source.Company")
 def test_load_statement_set_does_not_reread_missing_bundle_for_same_cik(
@@ -1098,7 +1095,7 @@ _STALE_DATE = date(_TODAY.year - 2, 1, 2)  # stale for annual and quarterly
 
 
 def _seed_cache(cache_dir: Path, period: str, latest_filing_date: date) -> None:
-    save_period_bundle(
+    save_cache_entry(
         cik=320193,
         period=period,
         latest_filing_date=latest_filing_date,
@@ -1216,14 +1213,14 @@ def test_unusable_bundle_is_rebuilt_even_without_newer_filing(
     tmp_path, _sec, damage: str
 ) -> None:
     _seed_cache(tmp_path, "annual", _STALE_DATE)
-    bundle_dir = tmp_path / "companies" / "320193" / "annual"
+    entry_dir = tmp_path / "companies" / "320193" / "annual"
     if damage == "schema":
-        meta_path = bundle_dir / "meta.json"
+        meta_path = entry_dir / "meta.json"
         meta = json.loads(meta_path.read_text())
         meta["schema_version"] = -1
         meta_path.write_text(json.dumps(meta))
     else:
-        (bundle_dir / "income.parquet").write_bytes(b"not parquet")
+        (entry_dir / "income.parquet").write_bytes(b"not parquet")
     _patch_sec_filings(_sec, {"10-K": _STALE_DATE.isoformat()})
 
     statement_set = load_statement_set("AAPL", "annual")

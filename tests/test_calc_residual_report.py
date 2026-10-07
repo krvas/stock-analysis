@@ -11,7 +11,7 @@ import pandas as pd
 import pytest
 
 from src.api.edgartools import cache as cache_mod
-from src.api.edgartools.cache import save_period_bundle, touch_company_cache
+from src.api.edgartools.cache import save_cache_entry, touch_company_cache
 from src.models.statement import Statement
 from src.pipelines import calc_residual_report as report
 from src.pipelines.calc_residual_report import (
@@ -55,7 +55,7 @@ def _cache(tmp_path: Path) -> Path:
     today = datetime.now(UTC).date()
     for cik, ticker, total_p2 in ((1, "AAA", 3.0), (2, "BBB", 13.0)):
         statement_set = make_statement_set(_frame(total_p2))
-        save_period_bundle(
+        save_cache_entry(
             cik=cik,
             period="annual",
             latest_filing_date=today,
@@ -322,7 +322,7 @@ def test_stale_bundle_is_still_reported(
 ) -> None:
     cache_dir = tmp_path / "edgartools_cache"
     statement_set = make_statement_set(_frame(3.0))
-    save_period_bundle(
+    save_cache_entry(
         cik=1,
         period="annual",
         latest_filing_date=date(2000, 1, 1),

@@ -6,7 +6,7 @@ For every cached (ticker, period type, statement), computes
 plus every non-zero residual, sorted by absolute relative residual.
 
 By default reads cached bundles only — never fetches from SEC and never
-modifies the cache (``read_period_bundle(prune=False)``): missing or invalid
+modifies the cache (``read_cache_entry(prune=False)``): missing or invalid
 bundles are logged and skipped, not deleted. Stale bundles are still reported
 on (the app serves them too), with a warning.
 
@@ -36,7 +36,7 @@ from edgar import Company
 from src.api.edgartools.cache import (
     find_cached_cik,
     get_cached_company_list,
-    read_period_bundle,
+    read_cache_entry,
 )
 from src.api.edgartools.source import (
     FORM_BY_PERIOD,
@@ -129,7 +129,7 @@ def collect_residuals(
         _companies(tickers, cache_dir).items(), key=lambda i: i[1]
     ):
         for period in periods:
-            cached = read_period_bundle(
+            cached = read_cache_entry(
                 cik=cik, period=period, cache_dir=cache_dir, prune=False
             )
             if cached is None:
