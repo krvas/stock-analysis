@@ -7,7 +7,7 @@ import math
 import pandas as pd
 import pytest
 
-from src.models.calc_residuals import calc_residuals
+from src.models.calc_residuals import RESIDUAL_COLUMNS, calc_residuals, tagged_residuals
 from src.models.statement import Statement
 from tests.statement_fixtures import P1, P2, P3, _income, _row, make_statement
 
@@ -201,3 +201,44 @@ def test_calc_residuals_use_each_periods_own_tree() -> None:
     # Applying the newest tree to P2 would have given 5 - 7 = -2.
     newest = calc_residuals(make_statement(frame, "income")).set_index("period")
     assert newest.loc[P2, "residual"] == 11.0
+
+
+# --- tagged_residuals --------------------------------------------------------
+
+
+def test_tagged_residuals_prefixes_and_concatenates_statements() -> None:
+    frame = pd.DataFrame(
+        [
+            _row("Opex", "Opex", **{P1: 30.0}),
+            _row("RD", "R&D", parent_concept="Opex", **{P1: 10.0}),
+            _row("SGA", "SG&A", parent_concept="Opex", **{P1: 15.0}),
+        ]
+    )
+    income = make_statement(frame, "income")
+
+    tagged = tagged_residuals(
+        {"income": income, "balance": income}, ticker="AAA", period_type="annual"
+    )
+
+    assert list(tagged.columns) == [
+        "ticker",
+        "period_type",
+        "statement",
+        *RESIDUAL_COLUMNS,
+    ]
+    assert tagged["statement"].tolist() == ["income", "balance"]
+    assert set(tagged["ticker"]) == {"AAA"}
+    assert set(tagged["period_type"]) == {"annual"}
+    assert tagged["residual"].tolist() == [5.0, 5.0]
+
+
+def test_tagged_residuals_empty_keeps_columns() -> None:
+    tagged = tagged_residuals({}, ticker="AAA", period_type="annual")
+
+    assert tagged.empty
+    assert list(tagged.columns) == [
+        "ticker",
+        "period_type",
+        "statement",
+        *RESIDUAL_COLUMNS,
+    ]

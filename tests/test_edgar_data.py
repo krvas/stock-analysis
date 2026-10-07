@@ -29,7 +29,7 @@ import pytest
 from src.api.edgartools.cache import set_pinned_tickers
 from src.api.edgartools.source import load_statement_set
 from src.config import load_project_dotenv
-from src.models.calc_residuals import calc_residuals
+from src.models.calc_residuals import tagged_residuals
 from src.models.statement import STATEMENT_TYPES
 from src.pipelines.calc_residual_report import (
     DEFAULT_TOLERANCE,
@@ -69,12 +69,13 @@ def test_test_tickers_have_no_calc_residuals() -> None:
     for ticker in tickers:
         for period in PERIOD_TYPES:
             statements = load_statement_set(ticker, period)
-            for statement_type in STATEMENT_TYPES:
-                frame = calc_residuals(statements.get(statement_type))
-                frame.insert(0, "statement", statement_type)
-                frame.insert(0, "period_type", period)
-                frame.insert(0, "ticker", ticker)
-                frames.append(frame)
+            frames.append(
+                tagged_residuals(
+                    {t: statements.get(t) for t in STATEMENT_TYPES},
+                    ticker=ticker,
+                    period_type=period,
+                )
+            )
     residuals = pd.concat(frames, ignore_index=True)
 
     non_zero = non_zero_residuals(residuals, DEFAULT_TOLERANCE)

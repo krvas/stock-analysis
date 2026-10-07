@@ -10,12 +10,13 @@ See ``specs/adjustments_architecture.md`` §6.1.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 
 import numpy as np
 import pandas as pd
 
-from src.models.statement import Statement, bool_flag
+from src.models.statement import Statement, StatementType, bool_flag
 
 RESIDUAL_COLUMNS: tuple[str, ...] = (
     "row_id",
@@ -30,16 +31,6 @@ RESIDUAL_COLUMNS: tuple[str, ...] = (
     "n_nan_children",
     "n_missing_children",
 )
-
-
-def _first_per_concept(df: pd.DataFrame) -> pd.DataFrame:
-    """Keep the first row (frame order) of each concept.
-
-    A concept presented twice in one filing gets ``#n`` row ids (see
-    :func:`get_row_id`); the cache builder always adds ``#1`` before ``#2``,
-    so frame order picks ``#1``.
-    """
-    return df[~df["concept"].duplicated(keep="first")]
 
 
 def calc_residuals(statement: Statement) -> pd.DataFrame:
@@ -78,7 +69,11 @@ def calc_residuals(statement: Statement) -> pd.DataFrame:
         return pd.DataFrame(columns=list(RESIDUAL_COLUMNS))
 
     values = df[periods].apply(pd.to_numeric, errors="coerce").astype(float)
-    first_rows = _first_per_concept(df[~bool_flag(df, "dimension")])
+    # Keep the first row (frame order) of each concept. A concept presented
+    # twice in one filing gets ``#n`` row ids (see :func:`get_row_id`); the
+    # cache builder always adds ``#1`` before ``#2``, so frame order picks ``#1``.
+    non_dimensional = df[~bool_flag(df, "dimension")]
+    first_rows = non_dimensional[~non_dimensional["concept"].duplicated(keep="first")]
     index_by_concept = pd.Series(first_rows.index, index=first_rows["concept"])
     period_order = {period: i for i, period in enumerate(periods)}
 
@@ -123,3 +118,30 @@ def calc_residuals(statement: Statement) -> pd.DataFrame:
     return pd.DataFrame.from_records(
         [record for *_, record in keyed], columns=list(RESIDUAL_COLUMNS)
     )
+
+
+def tagged_residuals(
+    statements: Mapping[StatementType, Statement],
+    *,
+    ticker: str,
+    period_type: str,
+) -> pd.DataFrame:
+    """:func:`calc_residuals` of every given statement, concatenated.
+
+    Each statement's rows are prefixed with ``ticker`` / ``period_type`` /
+    ``statement`` columns (in that order), statements in mapping order. With
+    no statements the result is an empty frame with those columns plus
+    :data:`RESIDUAL_COLUMNS`. Pure: no I/O.
+    """
+    frames = []
+    for statement_type, statement in statements.items():
+        frame = calc_residuals(statement)
+        frame.insert(0, "statement", statement_type)
+        frame.insert(0, "period_type", period_type)
+        frame.insert(0, "ticker", ticker)
+        frames.append(frame)
+    if not frames:
+        return pd.DataFrame(
+            columns=["ticker", "period_type", "statement", *RESIDUAL_COLUMNS]
+        )
+    return pd.concat(frames, ignore_index=True)
