@@ -29,19 +29,26 @@ def build_statement_payload(
     ticker: str,
     period: str,
     num_periods: int,
+    adjusted: StatementSet | None = None,
+    adjustments: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Build the JSON payload embedded in the statement Jinja template.
 
     Each statement is projected to every view over its newest ``num_periods``
     periods; ``statements[type][view]`` is a ``Table.serialize()`` payload.
+    ``adjusted_statements`` has the same shape for ``adjusted`` (else None).
     """
+
+    def serialize(ss: StatementSet) -> dict[str, Any]:
+        return {
+            statement_type: _serialize_views(ss.get(statement_type), num_periods)
+            for statement_type in STATEMENT_TYPES
+        }
+
     return {
         "ticker": ticker,
         "period": period,
-        "statements": {
-            statement_type: _serialize_views(
-                statement_set.get(statement_type), num_periods
-            )
-            for statement_type in STATEMENT_TYPES
-        },
+        "statements": serialize(statement_set),
+        "adjusted_statements": serialize(adjusted) if adjusted is not None else None,
+        "adjustments": adjustments or [],
     }

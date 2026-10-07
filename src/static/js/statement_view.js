@@ -19,6 +19,12 @@ function runStatementView(APP_DATA) {
 let currentStatementType = "income";
 let displayMode = "periods";
 let comparePeriod = null;
+const hasAdjusted = Boolean(APP_DATA.adjusted_statements);
+let currentBasis =
+  hasAdjusted &&
+  new URLSearchParams(window.location.search).get("basis") === "adjusted"
+    ? "adjusted"
+    : "reported";
 
 const STATEMENT_LABELS = {
   income: "Income Statement",
@@ -28,8 +34,14 @@ const STATEMENT_LABELS = {
 
 const STATEMENT_TABLE_ID = "statement-table";
 
+function activeStatements() {
+  return currentBasis === "adjusted"
+    ? APP_DATA.adjusted_statements
+    : APP_DATA.statements;
+}
+
 function getCurrentView() {
-  const statementViews = APP_DATA.statements[currentStatementType];
+  const statementViews = activeStatements()[currentStatementType];
   if (!statementViews) {
     return null;
   }
@@ -135,6 +147,7 @@ function handleViewChange() {
         label: row.label,
         level: row.level,
         is_total: row.is_total,
+        origin: row.origin,
         cells: {
           ...row.cells,
           change: computeDifference(
@@ -150,8 +163,35 @@ function handleViewChange() {
   render_table(tableEl, view);
 }
 
+function updateBasisControls() {
+  const basisControls = document.getElementById("basis-controls");
+  const note = document.getElementById("adjustments-note");
+  basisControls.hidden = !hasAdjusted;
+  basisControls.querySelectorAll("button[data-basis]").forEach((button) => {
+    button.setAttribute(
+      "aria-pressed",
+      String(button.dataset.basis === currentBasis),
+    );
+  });
+
+  const labels = (APP_DATA.adjustments || []).map((adj) => adj.label);
+  note.hidden = currentBasis !== "adjusted";
+  note.textContent = labels.length
+    ? `Adjusted for: ${labels.join(" · ")}`
+    : "Adjusted basis (no adjustments applied)";
+}
+
+function handleBasisChange(basis) {
+  if (basis === currentBasis || (basis === "adjusted" && !hasAdjusted)) {
+    return;
+  }
+  currentBasis = basis;
+  updateBasisControls();
+  handleViewChange();
+}
+
 function handleStatementTypeChange(statementType) {
-  if (!APP_DATA.statements[statementType]) {
+  if (!activeStatements()[statementType]) {
     return;
   }
   currentStatementType = statementType;
@@ -172,6 +212,15 @@ function handleComparePeriodChange(period) {
 
 function initPage() {
   updatePageTitle();
+  updateBasisControls();
+
+  document
+    .querySelectorAll("#basis-controls button[data-basis]")
+    .forEach((button) => {
+      button.addEventListener("click", () => {
+        handleBasisChange(button.dataset.basis);
+      });
+    });
 
   const viewSelect = document.getElementById("view-select");
   viewSelect.addEventListener("change", handleViewChange);

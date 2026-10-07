@@ -10,6 +10,13 @@
       <p id="page-subtitle"></p>
     </div>
     <div class="controls">
+      <div class="control-group" id="basis-controls" hidden>
+        <span class="control-label" id="basis-label">Basis</span>
+        <div class="segmented" role="group" aria-labelledby="basis-label">
+          <button type="button" data-basis="reported" aria-pressed="true">Reported</button>
+          <button type="button" data-basis="adjusted" aria-pressed="false">Adjusted</button>
+        </div>
+      </div>
       <div class="control-group">
         <label for="statement-type-select">Statement</label>
         <select id="statement-type-select" aria-label="Statement type">
@@ -39,6 +46,7 @@
       </div>
     </div>
   </div>
+  <p class="adjustments-note" id="adjustments-note" hidden></p>
   <div class="table-wrap">
     <table id="statement-table">
       <thead></thead>

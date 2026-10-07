@@ -5,10 +5,11 @@ from __future__ import annotations
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import HTMLResponse
 
-from src.api.edgartools.source import load_statement_set
+from src.adjustments.specs import describe
 from src.config import MAX_CACHE_QUARTERS, MAX_PERIODS_BY_PERIOD
 from src.models.edgartools.html_renderer import build_statement_payload
 from src.models.statement import PeriodType
+from src.web.adjusted_statements import load_adjusted
 from src.web.templating import templates
 
 router = APIRouter(tags=["statements"])
@@ -28,12 +29,14 @@ def statement_view(
 ) -> HTMLResponse:
     """Serve an interactive statement page; toggles stay client-side."""
     symbol = ticker.upper().strip()
-    statement_set = load_statement_set(symbol, period)
+    statement_set, adjusted, specs = load_adjusted(symbol, period)
     statement_data = build_statement_payload(
         statement_set,
         ticker=symbol,
         period=period,
         num_periods=clamp_num_periods(num_periods, period, len(statement_set.periods)),
+        adjusted=adjusted if specs else None,
+        adjustments=describe(specs),
     )
     return templates.TemplateResponse(
         request,
