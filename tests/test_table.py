@@ -13,6 +13,7 @@ from src.models.table import (
     TableSerializationError,
     statement_table_from_dataframe,
 )
+from tests.statement_fixtures import derived_calc_edges
 
 
 def test_table_serialize_statement_shape() -> None:
@@ -59,7 +60,9 @@ def test_statement_table_keys_rows_by_row_id() -> None:
             "2024-12-31": [100.0, 60.0, 40.0],
         }
     )
-    projected = Statement(raw, "income").project("detailed", ["2024-12-31"])
+    projected = Statement(raw, "income", derived_calc_edges(raw)).project(
+        "detailed", ["2024-12-31"]
+    )
 
     rows = statement_table_from_dataframe(projected).serialize()["rows"]
 

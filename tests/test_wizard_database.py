@@ -12,6 +12,7 @@ from src.database.wizard_manager import WizardDatabaseManager
 from src.models.statement import Statement, StatementSet
 from src.web.routes.wizard_pages import adjustments_context
 from src.web.routes.wizard_pages.adjustments_post import opex_to_capex_post
+from tests.statement_fixtures import derived_calc_edges
 
 
 @pytest.fixture
@@ -226,12 +227,11 @@ def test_opex_to_capex_round_trip_keys_by_row_id(
             periods[1]: [4.0, 6.0],
         }
     )
-    income = Statement(raw, "income")
+    income = Statement(raw, "income", derived_calc_edges(raw))
     statements = StatementSet(
         income=income,
-        balance=Statement(raw, "balance"),
-        cashflow=Statement(raw, "cashflow"),
-        periods=periods,
+        balance=Statement(raw, "balance", derived_calc_edges(raw)),
+        cashflow=Statement(raw, "cashflow", derived_calc_edges(raw)),
     )
     monkeypatch.setattr(
         adjustments_context, "load_statement_set", lambda *_args: statements
