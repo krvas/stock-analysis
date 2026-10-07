@@ -26,6 +26,7 @@ from src.api.edgartools.cache import (
     touch_company_cache,
 )
 from src.models.statement import EDGARTOOLS_METADATA_COLUMNS, Statement
+from tests.statement_fixtures import make_statement
 
 
 def _raw_frame(label: str = "Revenue") -> pd.DataFrame:
@@ -56,7 +57,7 @@ def _raw_frame(label: str = "Revenue") -> pd.DataFrame:
             "2023-09-30": [None, 90.0, None],
         }
     )
-    return Statement(raw, "income").frame
+    return make_statement(raw, "income").frame
 
 
 def _calc_edges() -> pd.DataFrame:
@@ -150,7 +151,7 @@ def test_save_and_load_round_trips_raw_frames(tmp_path: Path) -> None:
     assert statement.periods == ["2024-09-28", "2023-09-30"]
     pd.testing.assert_frame_equal(
         statement.project("detailed"),
-        Statement(bundle["income"].frame, "income").project("detailed"),
+        make_statement(bundle["income"].frame, "income").project("detailed"),
     )
     pd.testing.assert_frame_equal(loaded["income"].calc_edges, _calc_edges())
     pd.testing.assert_frame_equal(statement.calc_edges, _calc_edges())
@@ -158,7 +159,7 @@ def test_save_and_load_round_trips_raw_frames(tmp_path: Path) -> None:
 
 def test_save_and_load_round_trips_empty_calc_edges(tmp_path: Path) -> None:
     cache_dir = tmp_path / "edgartools_cache"
-    empty = Statement(_raw_frame(), "income").calc_edges.iloc[0:0]
+    empty = make_statement(_raw_frame(), "income").calc_edges.iloc[0:0]
     _save(
         cache_dir,
         bundle={

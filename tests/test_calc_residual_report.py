@@ -27,6 +27,7 @@ from src.pipelines.calc_residual_report import (
     summarize,
     summarize_comparison,
 )
+from tests.statement_fixtures import make_statement
 
 P1, P2 = "2024-12-31", "2023-12-31"
 
@@ -43,14 +44,14 @@ def _frame(total_p2: float) -> pd.DataFrame:
             P2: [total_p2, 8.0, 5.0],
         }
     )
-    return Statement(raw, "income").frame
+    return make_statement(raw, "income").frame
 
 
 def _cache(tmp_path: Path) -> Path:
     cache_dir = tmp_path / "edgartools_cache"
     today = datetime.now(UTC).date()
     for cik, ticker, total_p2 in ((1, "AAA", 3.0), (2, "BBB", 13.0)):
-        statement = Statement(_frame(total_p2), "income")
+        statement = make_statement(_frame(total_p2), "income")
         frames = StatementFrames(statement.frame, statement.calc_edges)
         save_period_bundle(
             cik=cik,
@@ -318,7 +319,7 @@ def test_stale_bundle_is_still_reported(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
     cache_dir = tmp_path / "edgartools_cache"
-    statement = Statement(_frame(3.0), "income")
+    statement = make_statement(_frame(3.0), "income")
     frames = StatementFrames(statement.frame, statement.calc_edges)
     save_period_bundle(
         cik=1,
