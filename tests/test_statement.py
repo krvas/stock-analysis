@@ -542,8 +542,8 @@ def test_statement_set_get_and_project() -> None:
         income=_income(),
         balance=_minimal("balance"),
         cashflow=_minimal("cashflow"),
-        periods=(P1, P2, P3),
     )
+    assert ss.periods == (P1, P2, P3)
     assert ss.get("balance") is ss.balance
     projected = ss.project("summary", periods=[P1])
     assert set(projected) == {"income", "balance", "cashflow"}
@@ -556,5 +556,4 @@ def test_statement_set_rejects_mismatched_statement_type() -> None:
             income=_minimal("balance"),
             balance=_minimal("balance"),
             cashflow=_minimal("cashflow"),
-            periods=(P1,),
         )

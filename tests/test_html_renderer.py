@@ -47,7 +47,6 @@ def _statement_set() -> StatementSet:
         income=make_statement(_frame("income"), "income"),
         balance=make_statement(_frame("balance"), "balance"),
         cashflow=make_statement(_frame("cashflow"), "cashflow"),
-        periods=(P1, P2, P3),
     )
 
 

@@ -6,9 +6,10 @@ import logging
 
 import pandas as pd
 
-from src.api.edgartools.source import PeriodType, load_statement_set
+from src.api.edgartools.source import load_statement_set
 from src.api.edgartools.standard_terms import OPERATING_EXPENSES
 from src.database.wizard_manager import WizardDatabaseManager
+from src.models.statement import PeriodType
 from src.models.table import ColumnSpec, Table, period_column_specs
 
 logger = logging.getLogger(__name__)

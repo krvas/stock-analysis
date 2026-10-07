@@ -5,9 +5,10 @@ from __future__ import annotations
 import logging
 import os
 from pathlib import Path
-from typing import Literal
 
 from dotenv import load_dotenv
+
+from src.models.statement import PeriodType
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +64,7 @@ EDGARTOOLS_HTTP_CACHE_MAX_MB = max(
 MAX_CACHE_YEARS = max(1, int(os.environ.get("MAX_CACHE_YEARS", "16")))
 MAX_CACHE_QUARTERS = MAX_CACHE_YEARS * 4
 # Most periods (and filings) cached per bundle, by period type.
-MAX_PERIODS_BY_PERIOD: dict[Literal["annual", "quarterly"], int] = {
+MAX_PERIODS_BY_PERIOD: dict[PeriodType, int] = {
     "annual": MAX_CACHE_YEARS,
     "quarterly": MAX_CACHE_QUARTERS,
 }

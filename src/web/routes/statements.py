@@ -5,9 +5,10 @@ from __future__ import annotations
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import HTMLResponse
 
-from src.api.edgartools.source import PeriodType, load_statement_set
+from src.api.edgartools.source import load_statement_set
 from src.config import MAX_CACHE_QUARTERS, MAX_PERIODS_BY_PERIOD
 from src.models.edgartools.html_renderer import build_statement_payload
+from src.models.statement import PeriodType
 from src.web.templating import templates
 
 router = APIRouter(tags=["statements"])
