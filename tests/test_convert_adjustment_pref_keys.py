@@ -10,43 +10,41 @@ import pytest
 from src.database.wizard_manager import WizardDatabaseManager
 from src.models.statement import Statement, StatementSet
 from src.pipelines.convert_adjustment_pref_keys import convert_pref_keys
+from tests.statement_fixtures import derived_calc_edges
 
 P1 = "2024-12-31"
 
 
 def _statement_set(ticker: str, period: str) -> StatementSet:
-    income = Statement(
-        pd.DataFrame(
-            {
-                "concept": [
-                    "us-gaap_ResearchAndDevelopmentExpense",
-                    "us-gaap_ResearchAndDevelopmentExpense",
-                    "acme_CustomOpex",
-                    "us-gaap_SellingExpense",
-                    "us-gaap_MarketingExpense",
-                ],
-                "label": ["R&D", "R&D (segment)", "Custom", "Selling", "Marketing"],
-                "standard_concept": [
-                    "ResearchAndDevelopmentExpenses",
-                    "ResearchAndDevelopmentExpenses",
-                    None,
-                    "SellingGeneralAndAdminExpenses",
-                    "SellingGeneralAndAdminExpenses",
-                ],
-                "dimension": [False, True, False, False, False],
-                "dimension_axis": [None, "srt_SegmentsAxis", None, None, None],
-                "dimension_member": [None, "acme_ChipsMember", None, None, None],
-                P1: [100.0, 60.0, 5.0, 20.0, 10.0],
-            }
-        ),
-        "income",
+    income_frame = pd.DataFrame(
+        {
+            "concept": [
+                "us-gaap_ResearchAndDevelopmentExpense",
+                "us-gaap_ResearchAndDevelopmentExpense",
+                "acme_CustomOpex",
+                "us-gaap_SellingExpense",
+                "us-gaap_MarketingExpense",
+            ],
+            "label": ["R&D", "R&D (segment)", "Custom", "Selling", "Marketing"],
+            "standard_concept": [
+                "ResearchAndDevelopmentExpenses",
+                "ResearchAndDevelopmentExpenses",
+                None,
+                "SellingGeneralAndAdminExpenses",
+                "SellingGeneralAndAdminExpenses",
+            ],
+            "dimension": [False, True, False, False, False],
+            "dimension_axis": [None, "srt_SegmentsAxis", None, None, None],
+            "dimension_member": [None, "acme_ChipsMember", None, None, None],
+            P1: [100.0, 60.0, 5.0, 20.0, 10.0],
+        }
     )
+    income = Statement(income_frame, "income", derived_calc_edges(income_frame))
     empty = pd.DataFrame({"concept": pd.Series(dtype=str), P1: pd.Series(dtype=float)})
     return StatementSet(
         income=income,
-        balance=Statement(empty, "balance"),
-        cashflow=Statement(empty, "cashflow"),
-        periods=(P1,),
+        balance=Statement(empty, "balance", derived_calc_edges(empty)),
+        cashflow=Statement(empty, "cashflow", derived_calc_edges(empty)),
     )
 
 
@@ -110,10 +108,9 @@ def test_converts_by_concept(db_path: Path) -> None:
         frame.loc[frame["concept"] == "acme_CustomOpex", "row_id"] = "acme_CustomOpex#2"
         frame["row_id"] = frame["row_id"].fillna(base.income.frame["row_id"])
         return StatementSet(
-            income=Statement(frame, "income"),
+            income=Statement(frame, "income", derived_calc_edges(frame)),
             balance=base.balance,
             cashflow=base.cashflow,
-            periods=base.periods,
         )
 
     _seed(db_path, [_pref("acme_CustomOpex")])
