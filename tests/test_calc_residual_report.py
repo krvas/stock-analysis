@@ -345,14 +345,14 @@ def test_stale_bundle_is_still_reported(
 def test_bad_statement_is_skipped_with_warning(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
-    real = report.calc_residuals
+    real = report.Statement
 
-    def flaky(statement: Statement) -> pd.DataFrame:
-        if statement.statement_type == "balance":
+    def flaky(frame: pd.DataFrame, statement_type: str, **kwargs) -> Statement:
+        if statement_type == "balance":
             raise ValueError("duplicate row ids")
-        return real(statement)
+        return real(frame, statement_type, **kwargs)
 
-    monkeypatch.setattr(report, "calc_residuals", flaky)
+    monkeypatch.setattr(report, "Statement", flaky)
     residuals = collect_residuals(None, ("annual",), _cache(tmp_path))
 
     assert set(residuals["statement"]) == {"income", "cashflow"}
