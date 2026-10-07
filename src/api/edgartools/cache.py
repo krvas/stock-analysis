@@ -89,22 +89,10 @@ def _bundle_meta_path(cache_dir: Path, cik: int | str, period: PeriodType) -> Pa
     return _bundle_dir(cache_dir, cik, period) / "meta.json"
 
 
-def _bundle_statement_path(
-    cache_dir: Path,
-    cik: int | str,
-    period: PeriodType,
-    statement_type: StatementType,
+def _bundle_file(
+    cache_dir: Path, cik: int | str, period: PeriodType, name: str
 ) -> Path:
-    return _bundle_dir(cache_dir, cik, period) / f"{statement_type}.parquet"
-
-
-def _bundle_calc_path(
-    cache_dir: Path,
-    cik: int | str,
-    period: PeriodType,
-    statement_type: StatementType,
-) -> Path:
-    return _bundle_dir(cache_dir, cik, period) / f"{statement_type}_calc.parquet"
+    return _bundle_dir(cache_dir, cik, period) / name
 
 
 def _normalize_tickers(tickers: Iterable[object]) -> list[str]:
@@ -173,34 +161,24 @@ def _parse_iso_date(value: str) -> date:
     return date.fromisoformat(str(value)[:10])
 
 
-def _add_months(value: date, months: int) -> date:
-    month_index = value.month - 1 + months
-    year = value.year + month_index // 12
-    month = month_index % 12 + 1
-    if month == 12:
-        next_month = date(year + 1, 1, 1)
-    else:
-        next_month = date(year, month + 1, 1)
-    last_day = (next_month - date(year, month, 1)).days
-    return date(year, month, min(value.day, last_day))
-
-
 def is_period_bundle_stale(
     latest_filing_date: date,
     *,
     period: PeriodType = "quarterly",
     reference: date | None = None,
-    max_age_months: int | None = None,
 ) -> bool:
-    """Return True when ``latest_filing_date`` is more than ``max_age_months`` old."""
+    """Return True when ``latest_filing_date`` is older than the period's max
+    cache age (months, clipped to month end)."""
     reference = reference or datetime.now(UTC).date()
-    if max_age_months is None:
-        max_age_months = (
-            EDGARTOOLS_ANNUAL_CACHE_MAX_AGE_MONTHS
-            if period == "annual"
-            else EDGARTOOLS_QUARTERLY_CACHE_MAX_AGE_MONTHS
-        )
-    return reference > _add_months(latest_filing_date, max_age_months)
+    max_age_months = (
+        EDGARTOOLS_ANNUAL_CACHE_MAX_AGE_MONTHS
+        if period == "annual"
+        else EDGARTOOLS_QUARTERLY_CACHE_MAX_AGE_MONTHS
+    )
+    expires = (
+        pd.Timestamp(latest_filing_date) + pd.DateOffset(months=max_age_months)
+    ).date()
+    return reference > expires
 
 
 def cached_companies(cache_dir: Path) -> dict[str, str]:
@@ -225,9 +203,8 @@ def delete_period_bundle(
     *,
     cik: int | str,
     period: PeriodType,
-    cache_dir: Path | None = None,
+    cache_dir: Path,
 ) -> None:
-    cache_dir = Path(cache_dir) if cache_dir is not None else EDGARTOOLS_CACHE_DIR
     bundle_dir = _bundle_dir(cache_dir, cik, period)
     if bundle_dir.exists():
         try:
@@ -250,7 +227,7 @@ def read_period_bundle(
     *,
     cik: int | str,
     period: PeriodType,
-    cache_dir: Path | None = None,
+    cache_dir: Path,
     reference: date | None = None,
     prune: bool = True,
 ) -> CachedPeriodBundle | None:
@@ -263,7 +240,6 @@ def read_period_bundle(
     whether a newer filing exists before rebuilding it. ``prune=False``
     (read-only callers such as reports) returns None without deleting anything.
     """
-    cache_dir = Path(cache_dir) if cache_dir is not None else EDGARTOOLS_CACHE_DIR
 
     def discard() -> None:
         if prune:
@@ -299,8 +275,8 @@ def read_period_bundle(
     bundle: PeriodBundle = {}
     for statement_type in STATEMENT_TYPES:
         paths = (
-            _bundle_statement_path(cache_dir, cik, period, statement_type),
-            _bundle_calc_path(cache_dir, cik, period, statement_type),
+            _bundle_file(cache_dir, cik, period, f"{statement_type}.parquet"),
+            _bundle_file(cache_dir, cik, period, f"{statement_type}_calc.parquet"),
         )
         frames: list[pd.DataFrame] = []
         for path in paths:
@@ -327,45 +303,19 @@ def read_period_bundle(
     return CachedPeriodBundle(bundle, latest_filing_date, stale)
 
 
-def load_period_bundle(
-    *,
-    cik: int | str,
-    period: PeriodType,
-    cache_dir: Path | None = None,
-    reference: date | None = None,
-    prune: bool = True,
-) -> PeriodBundle | None:
-    """Load a fresh cached bundle, or None (deleting it) if unusable or stale.
-
-    :func:`read_period_bundle`, except that a stale bundle is treated as
-    unusable too. ``prune=False`` returns None without deleting anything.
-    """
-    cached = read_period_bundle(
-        cik=cik, period=period, cache_dir=cache_dir, reference=reference, prune=prune
-    )
-    if cached is None:
-        return None
-    if cached.stale:
-        if prune:
-            delete_period_bundle(cik=cik, period=period, cache_dir=cache_dir)
-        return None
-    return cached.bundle
-
-
 def save_period_bundle(
     *,
     cik: int | str,
     period: PeriodType,
     latest_filing_date: date,
     bundle: Mapping[StatementType, StatementFrames],
-    cache_dir: Path | None = None,
+    cache_dir: Path,
 ) -> None:
     """Write each statement type's raw frame and calc edges plus ``meta.json``.
 
     ``meta.json`` is written last so a partially written bundle has no meta
     and is treated as missing.
     """
-    cache_dir = Path(cache_dir) if cache_dir is not None else EDGARTOOLS_CACHE_DIR
     missing = [st for st in STATEMENT_TYPES if st not in bundle]
     if missing:
         raise ValueError(f"period bundle is missing statement(s): {missing}")
@@ -376,8 +326,12 @@ def save_period_bundle(
 
     for statement_type in STATEMENT_TYPES:
         frame, calc_edges = bundle[statement_type]
-        frame.to_parquet(_bundle_statement_path(cache_dir, cik, period, statement_type))
-        calc_edges.to_parquet(_bundle_calc_path(cache_dir, cik, period, statement_type))
+        frame.to_parquet(
+            _bundle_file(cache_dir, cik, period, f"{statement_type}.parquet")
+        )
+        calc_edges.to_parquet(
+            _bundle_file(cache_dir, cik, period, f"{statement_type}_calc.parquet")
+        )
 
     meta = {
         "schema_version": CACHE_SCHEMA_VERSION,
@@ -414,21 +368,18 @@ def touch_company_cache(
     *,
     cik: int | str,
     ticker: str,
-    cache_dir: Path | None = None,
-    max_companies: int | None = None,
 ) -> list[str]:
-    """Record a company fetch and evict older companies beyond ``max_companies``.
+    """Record a company fetch and evict older companies beyond
+    ``EDGARTOOLS_COMPANY_CACHE_SIZE``.
 
+    Always uses ``EDGARTOOLS_CACHE_DIR`` and ``EDGARTOOLS_COMPANY_CACHE_SIZE``
+    (tests override them with ``monkeypatch.setattr`` on this module).
     Pinned companies (see :func:`set_pinned_tickers`) are never evicted and
-    do not count toward ``max_companies``; the limit applies to the rest.
+    do not count toward the size; the limit applies to the rest.
     Returns the evicted CIKs.
     """
-    cache_dir = Path(cache_dir) if cache_dir is not None else EDGARTOOLS_CACHE_DIR
-    limit = (
-        EDGARTOOLS_COMPANY_CACHE_SIZE
-        if max_companies is None
-        else max(1, max_companies)
-    )
+    cache_dir = EDGARTOOLS_CACHE_DIR
+    limit = EDGARTOOLS_COMPANY_CACHE_SIZE
 
     cik_key = _cik_key(cik)
     index = _load_index(cache_dir)

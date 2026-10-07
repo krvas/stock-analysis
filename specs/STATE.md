@@ -107,7 +107,7 @@ only touches `_cache`/`_tcache`, never our `companies/` bundles).
 only entry point. Cache key `(cik, period)`, no `num_periods`:
 `companies/{cik}/{period}/{income,balance,cashflow}.parquet` +
 `{statement}_calc.parquet` + `meta.json` (`schema_version`, `period`,
-`latest_filing_date`); `load_period_bundle` returns `{statement:
+`latest_filing_date`); `read_period_bundle` returns a `CachedPeriodBundle` whose `bundle` is `{statement:
 StatementFrames(frame, calc_edges)}`, and a missing calc file makes the
 bundle unusable. Builds from up
 to `MAX_CACHE_YEARS` (16) 10-Ks or `MAX_CACHE_QUARTERS` (64) 10-Qs: XBRLS only
@@ -138,8 +138,7 @@ missing/corrupt files. A bundle whose `latest_filing_date` is older than
 `EDGARTOOLS_ANNUAL_CACHE_MAX_AGE_MONTHS` (12) /
 `EDGARTOOLS_QUARTERLY_CACHE_MAX_AGE_MONTHS` (3) (quarterly: newer of latest
 10-Q and latest 10-K, so a year-end 10-K keeps it fresh) is stale
-(`read_period_bundle` returns it with `stale=True`; `load_period_bundle`
-treats it as unusable): `load_statement_set` then fetches the filing list and
+(`read_period_bundle` returns it with `stale=True` and keeps it on disk): `load_statement_set` then fetches the filing list and
 rebuilds only if SEC has a newer filing (freshness date ≠ stored); otherwise
 it serves the cached bundle. Fresh bundles make no SEC request. Company LRU
 size `EDGARTOOLS_COMPANY_CACHE_SIZE` (10), index `company_lru.json`. Pinned

@@ -18,7 +18,6 @@ from src.api.edgartools.cache import (
     cached_companies,
     find_cached_cik,
     is_period_bundle_stale,
-    load_period_bundle,
     pinned_tickers,
     read_period_bundle,
     save_period_bundle,
@@ -27,6 +26,12 @@ from src.api.edgartools.cache import (
 )
 from src.models.statement import EDGARTOOLS_METADATA_COLUMNS, Statement
 from tests.statement_fixtures import make_statement
+
+
+@pytest.fixture(autouse=True)
+def _cache_dir_global(tmp_path: Path, use_cache_dir) -> None:
+    """``touch_company_cache`` takes no dir: point it at the tests' cache dir."""
+    use_cache_dir(tmp_path / "edgartools_cache")
 
 
 def _raw_frame(label: str = "Revenue") -> pd.DataFrame:
@@ -96,9 +101,11 @@ def _save(cache_dir: Path, **overrides) -> None:
 
 
 def _load(cache_dir: Path, period: str = "annual", reference=date(2025, 1, 1)):
-    return load_period_bundle(
+    """The bundle if usable and fresh, else None (unusable ones are pruned)."""
+    cached = read_period_bundle(
         cik=320193, period=period, cache_dir=cache_dir, reference=reference
     )
+    return cached.bundle if cached is not None and not cached.stale else None
 
 
 def test_save_and_load_round_trips_raw_frames(tmp_path: Path) -> None:
@@ -260,27 +267,41 @@ def test_periods_cached_separately(tmp_path: Path) -> None:
     assert _load(cache_dir, period="quarterly") is not None
 
 
-def test_stale_bundle_is_deleted_on_load(tmp_path: Path) -> None:
-    cache_dir = tmp_path / "edgartools_cache"
-    _save(cache_dir, period="quarterly", latest_filing_date=date(2024, 1, 1))
-
-    assert _load(cache_dir, period="quarterly", reference=date(2024, 4, 2)) is None
-    assert not (cache_dir / "companies" / "320193" / "quarterly").exists()
-
-
 def test_stale_bundle_is_kept_when_not_pruning(tmp_path: Path) -> None:
     cache_dir = tmp_path / "edgartools_cache"
     _save(cache_dir, period="quarterly", latest_filing_date=date(2024, 1, 1))
 
-    loaded = load_period_bundle(
+    cached = read_period_bundle(
         cik=320193,
         period="quarterly",
         cache_dir=cache_dir,
         reference=date(2024, 4, 2),
         prune=False,
     )
-    assert loaded is None
+    assert cached is not None
+    assert cached.stale is True
     assert (cache_dir / "companies" / "320193" / "quarterly" / "meta.json").exists()
+
+
+@pytest.mark.parametrize("damage", ["meta", "corrupt", "missing"])
+def test_unusable_bundle_is_kept_when_not_pruning(tmp_path: Path, damage: str) -> None:
+    cache_dir = tmp_path / "edgartools_cache"
+    _save(cache_dir)
+    bundle_dir = cache_dir / "companies" / "320193" / "annual"
+    if damage == "meta":
+        (bundle_dir / "meta.json").write_text("{not json")
+    elif damage == "corrupt":
+        (bundle_dir / "income_calc.parquet").write_bytes(b"not parquet")
+    else:
+        (bundle_dir / "balance.parquet").unlink()
+
+    assert (
+        read_period_bundle(
+            cik=320193, period="annual", cache_dir=cache_dir, prune=False
+        )
+        is None
+    )
+    assert bundle_dir.exists()
 
 
 def test_read_period_bundle_returns_fresh_bundle_with_filing_date(
@@ -336,12 +357,18 @@ def test_read_period_bundle_discards_unusable_stale_bundle(
     assert not bundle_dir.exists()
 
 
-def test_is_period_bundle_stale_respects_three_month_threshold() -> None:
+def test_is_period_bundle_stale_respects_configured_threshold(monkeypatch) -> None:
+    monkeypatch.setattr(cache_mod, "EDGARTOOLS_QUARTERLY_CACHE_MAX_AGE_MONTHS", 3)
     latest = date(2024, 1, 1)
-    assert not is_period_bundle_stale(
-        latest, reference=date(2024, 4, 1), max_age_months=3
-    )
-    assert is_period_bundle_stale(latest, reference=date(2024, 4, 2), max_age_months=3)
+    assert not is_period_bundle_stale(latest, reference=date(2024, 4, 1))
+    assert is_period_bundle_stale(latest, reference=date(2024, 4, 2))
+
+
+def test_is_period_bundle_stale_clips_to_month_end(monkeypatch) -> None:
+    monkeypatch.setattr(cache_mod, "EDGARTOOLS_QUARTERLY_CACHE_MAX_AGE_MONTHS", 1)
+    latest = date(2024, 1, 31)  # + 1 month clips to 2024-02-29
+    assert not is_period_bundle_stale(latest, reference=date(2024, 2, 29))
+    assert is_period_bundle_stale(latest, reference=date(2024, 3, 1))
 
 
 def test_default_cache_age_differs_by_period() -> None:
@@ -363,8 +390,8 @@ def test_default_cache_age_differs_by_period() -> None:
     )
 
 
-def test_touch_evicts_oldest_company_directory(tmp_path: Path) -> None:
-    cache_dir = tmp_path / "edgartools_cache"
+def test_touch_evicts_oldest_company_directory(tmp_path: Path, use_cache_dir) -> None:
+    cache_dir = use_cache_dir(tmp_path / "edgartools_cache", 1)
     older = (datetime.now(UTC) - timedelta(days=1)).isoformat()
 
     _save(cache_dir, cik=1)
@@ -374,12 +401,7 @@ def test_touch_evicts_oldest_company_directory(tmp_path: Path) -> None:
     )
 
     _save(cache_dir, cik=2)
-    evicted = touch_company_cache(
-        cik=2,
-        ticker="NEW",
-        cache_dir=cache_dir,
-        max_companies=1,
-    )
+    evicted = touch_company_cache(cik=2, ticker="NEW")
 
     assert evicted == ["1"]
     assert not (cache_dir / "companies" / "1").exists()
@@ -387,26 +409,20 @@ def test_touch_evicts_oldest_company_directory(tmp_path: Path) -> None:
     assert set(_load_index(cache_dir)["companies"]) == {"2"}
 
 
-def test_refetch_bumps_company_to_most_recent(tmp_path: Path) -> None:
-    cache_dir = tmp_path / "edgartools_cache"
+def test_refetch_bumps_company_to_most_recent(tmp_path: Path, use_cache_dir) -> None:
+    cache_dir = use_cache_dir(tmp_path / "edgartools_cache", 2)
     t0 = datetime(2026, 1, 1, tzinfo=UTC)
     t1 = t0 + timedelta(hours=1)
 
     for cik, ticker, when in ((1, "AAA", t0), (2, "BBB", t1)):
         _save(cache_dir, cik=cik)
-        touch_company_cache(
-            cik=cik, ticker=ticker, cache_dir=cache_dir, max_companies=2
-        )
+        touch_company_cache(cik=cik, ticker=ticker)
         index = _load_index(cache_dir)
         index["companies"][str(cik)]["last_accessed"] = when.isoformat()
         cache_mod._save_index(cache_dir, index)
 
-    evicted = touch_company_cache(
-        cik=1,
-        ticker="AAA",
-        cache_dir=cache_dir,
-        max_companies=1,
-    )
+    use_cache_dir(cache_dir, 1)
+    evicted = touch_company_cache(cik=1, ticker="AAA")
 
     assert evicted == ["2"]
     assert (cache_dir / "companies" / "1").exists()
@@ -415,9 +431,7 @@ def test_refetch_bumps_company_to_most_recent(tmp_path: Path) -> None:
 
 def test_find_cached_cik_by_ticker(tmp_path: Path) -> None:
     cache_dir = tmp_path / "edgartools_cache"
-    touch_company_cache(
-        cik=320193, ticker="AAPL", cache_dir=cache_dir, max_companies=10
-    )
+    touch_company_cache(cik=320193, ticker="AAPL")
 
     assert find_cached_cik(cache_dir, "aapl") == "320193"
     assert find_cached_cik(cache_dir, "MSFT") is None
@@ -426,27 +440,25 @@ def test_find_cached_cik_by_ticker(tmp_path: Path) -> None:
 def test_cached_companies_lists_index(tmp_path: Path) -> None:
     cache_dir = tmp_path / "edgartools_cache"
     assert cached_companies(cache_dir) == {}
-    touch_company_cache(cik=320193, ticker="aapl", cache_dir=cache_dir)
-    touch_company_cache(cik=789019, ticker="MSFT", cache_dir=cache_dir)
+    touch_company_cache(cik=320193, ticker="aapl")
+    touch_company_cache(cik=789019, ticker="MSFT")
 
     assert cached_companies(cache_dir) == {"320193": "AAPL", "789019": "MSFT"}
 
 
-def _touch_at(
-    cache_dir: Path, cik: int, ticker: str, when: datetime, max_companies: int
-) -> list[str]:
+def _touch_at(cache_dir: Path, cik: int, ticker: str, when: datetime) -> list[str]:
     """Touch ``cik`` then backdate its ``last_accessed`` to ``when``."""
-    evicted = touch_company_cache(
-        cik=cik, ticker=ticker, cache_dir=cache_dir, max_companies=max_companies
-    )
+    evicted = touch_company_cache(cik=cik, ticker=ticker)
     index = _load_index(cache_dir)
     index["companies"][str(cik)]["last_accessed"] = when.isoformat()
     cache_mod._save_index(cache_dir, index)
     return evicted
 
 
-def test_pinned_companies_survive_eviction_and_use_no_slots(tmp_path: Path) -> None:
-    cache_dir = tmp_path / "edgartools_cache"
+def test_pinned_companies_survive_eviction_and_use_no_slots(
+    tmp_path: Path, use_cache_dir
+) -> None:
+    cache_dir = use_cache_dir(tmp_path / "edgartools_cache", 2)
     set_pinned_tickers(["pin1", "PIN2"], cache_dir)
     t0 = datetime(2026, 1, 1, tzinfo=UTC)
 
@@ -460,9 +472,7 @@ def test_pinned_companies_survive_eviction_and_use_no_slots(tmp_path: Path) -> N
     evicted: list[str] = []
     for offset, (cik, ticker) in enumerate(touches):
         _save(cache_dir, cik=cik)
-        evicted += _touch_at(
-            cache_dir, cik, ticker, t0 + timedelta(hours=offset), max_companies=2
-        )
+        evicted += _touch_at(cache_dir, cik, ticker, t0 + timedelta(hours=offset))
 
     assert evicted == ["3"]
     assert set(_load_index(cache_dir)["companies"]) == {"1", "2", "4", "5"}
@@ -480,19 +490,19 @@ def test_set_pinned_tickers_replaces_list(tmp_path: Path) -> None:
     assert pinned_tickers(cache_dir) == frozenset({"MU"})
 
 
-def test_pin_set_before_entry_exists_applies_on_touch(tmp_path: Path) -> None:
-    cache_dir = tmp_path / "edgartools_cache"
+def test_pin_set_before_entry_exists_applies_on_touch(
+    tmp_path: Path, use_cache_dir
+) -> None:
+    cache_dir = use_cache_dir(tmp_path / "edgartools_cache", 1)
     t0 = datetime(2026, 1, 1, tzinfo=UTC)
     _save(cache_dir, cik=1)
-    _touch_at(cache_dir, 1, "OLD", t0, max_companies=1)
+    _touch_at(cache_dir, 1, "OLD", t0)
 
     set_pinned_tickers(["AAPL"], cache_dir)
     assert _load_index(cache_dir)["companies"].keys() == {"1"}
 
     _save(cache_dir, cik=320193)
-    evicted = touch_company_cache(
-        cik=320193, ticker="aapl", cache_dir=cache_dir, max_companies=1
-    )
+    evicted = touch_company_cache(cik=320193, ticker="aapl")
 
     # AAPL is pinned, so OLD still fits in the single unpinned slot.
     assert evicted == []
@@ -502,21 +512,24 @@ def test_pin_set_before_entry_exists_applies_on_touch(tmp_path: Path) -> None:
 def test_touch_preserves_pinned_tickers(tmp_path: Path) -> None:
     cache_dir = tmp_path / "edgartools_cache"
     set_pinned_tickers(["AAPL"], cache_dir)
-    touch_company_cache(cik=789019, ticker="MSFT", cache_dir=cache_dir)
+    touch_company_cache(cik=789019, ticker="MSFT")
 
     raw = json.loads((cache_dir / "company_lru.json").read_text())
     assert raw["pinned_tickers"] == ["AAPL"]
     assert set(raw["companies"]) == {"789019"}
 
 
-def test_pinned_company_stale_bundle_still_discarded(tmp_path: Path) -> None:
+def test_pinned_company_bundle_is_still_reported_stale(tmp_path: Path) -> None:
     cache_dir = tmp_path / "edgartools_cache"
     set_pinned_tickers(["AAPL"], cache_dir)
     _save(cache_dir, period="quarterly", latest_filing_date=date(2024, 1, 1))
-    touch_company_cache(cik=320193, ticker="AAPL", cache_dir=cache_dir)
+    touch_company_cache(cik=320193, ticker="AAPL")
 
-    assert _load(cache_dir, period="quarterly", reference=date(2024, 4, 2)) is None
-    assert not (cache_dir / "companies" / "320193" / "quarterly").exists()
+    cached = read_period_bundle(
+        cik=320193, period="quarterly", cache_dir=cache_dir, reference=date(2024, 4, 2)
+    )
+    assert cached is not None
+    assert cached.stale is True
 
 
 @pytest.mark.parametrize("pinned", [None, "AAPL", {"a": 1}, ["AAPL", 3]])
@@ -531,5 +544,5 @@ def test_missing_or_invalid_pinned_tickers_tolerated(
 
     expected = frozenset({"AAPL"}) if isinstance(pinned, list) else frozenset()
     assert pinned_tickers(cache_dir) == expected
-    touch_company_cache(cik=789019, ticker="MSFT", cache_dir=cache_dir)
+    touch_company_cache(cik=789019, ticker="MSFT")
     assert set(_load_index(cache_dir)["companies"]) == {"789019"}

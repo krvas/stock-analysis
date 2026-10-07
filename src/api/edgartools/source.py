@@ -32,7 +32,6 @@ from src.api.edgartools.cache import (
 )
 from src.config import (
     EDGARTOOLS_CACHE_DIR,
-    EDGARTOOLS_COMPANY_CACHE_SIZE,
     EDGARTOOLS_HTTP_CACHE_MAX_MB,
     MAX_PERIODS_BY_PERIOD,
     load_project_dotenv,
@@ -48,6 +47,7 @@ from src.models.statement import (
     format_dimension_key,
     get_row_id,
 )
+from src.utils.text import clean_str
 
 logger = logging.getLogger(__name__)
 
@@ -78,8 +78,10 @@ FORM_BY_PERIOD: dict[PeriodType, str] = {
     "quarterly": "10-Q",
 }
 
-# Non-metadata, non-period columns edgartools can emit (only when requested via
-# include_unit / include_point_in_time); never treat them as periods.
+# Non-metadata, non-period columns edgartools can emit only when requested via
+# include_unit / include_point_in_time. They are never emitted by our current
+# calls (nothing requests them); kept in case a future feature does. Still
+# excluded from period columns via ``_NON_PERIOD_COLUMNS``.
 _EDGARTOOLS_EXTRA_COLUMNS = frozenset({"unit", "point_in_time"})
 _NON_PERIOD_COLUMNS = STATEMENT_METADATA_COLUMNS | _EDGARTOOLS_EXTRA_COLUMNS
 
@@ -159,10 +161,6 @@ def _empty_statement_frame() -> pd.DataFrame:
     return pd.DataFrame(columns=["row_id", *_STORED_METADATA_COLUMNS])
 
 
-def _text(value: object) -> str:
-    return "" if value is None or pd.isna(value) else str(value)
-
-
 def _raw_item_matches(item: dict, record: dict) -> bool:
     """Whether raw-data ``item`` is the source of ``to_dataframe`` ``record``."""
     if item.get("concept") != record.get("concept"):
@@ -175,9 +173,12 @@ def _raw_item_matches(item: dict, record: dict) -> bool:
     metadata = item.get("dimension_metadata") or []
     primary = metadata[0] if metadata else {}
     return (
-        _text(item.get("full_dimension_label")) == _text(record.get("dimension_label"))
-        and _text(primary.get("dimension")) == _text(record.get("dimension_axis"))
-        and _text(primary.get("member")) == _text(record.get("dimension_member"))
+        (clean_str(item.get("full_dimension_label")) or "")
+        == (clean_str(record.get("dimension_label")) or "")
+        and (clean_str(primary.get("dimension")) or "")
+        == (clean_str(record.get("dimension_axis")) or "")
+        and (clean_str(primary.get("member")) or "")
+        == (clean_str(record.get("dimension_member")) or "")
     )
 
 
@@ -289,7 +290,10 @@ _ROW_MATCH_COLUMNS: tuple[str, ...] = (
 
 
 def _rows_match(left: dict, right: dict) -> bool:
-    return all(_text(left.get(c)) == _text(right.get(c)) for c in _ROW_MATCH_COLUMNS)
+    return all(
+        (clean_str(left.get(c)) or "") == (clean_str(right.get(c)) or "")
+        for c in _ROW_MATCH_COLUMNS
+    )
 
 
 def _in_standard(statement, frame: pd.DataFrame) -> list[bool] | list[None]:
@@ -439,13 +443,14 @@ def _build_statement_dataframe(
     weight``) of the filing its values came from — the one
     ``determine_optimal_periods`` assigned it.
     """
+    empty = StatementFrames(_empty_statement_frame(), _calc_edges_frame([]))
     period_metas = determine_optimal_periods(
         xbrls.xbrl_list,
         _STATEMENT_XBRL_TYPES[statement_type],
         max_periods=max_periods,
     )
     if not period_metas:
-        return StatementFrames(_empty_statement_frame(), _calc_edges_frame([]))
+        return empty
 
     period_labels = [str(_period_date(meta)) for meta in period_metas]
     rows_by_id: dict[str, dict] = {}
@@ -506,9 +511,7 @@ def _build_statement_dataframe(
 
     calc_edges = _calc_edges_frame(edge_records)
     if not rows_by_id:
-        return StatementFrames(
-            _empty_statement_frame(), calc_edges.iloc[0:0].reset_index(drop=True)
-        )
+        return empty
 
     row_ids = list(rows_by_id)
     data: dict[str, list] = {"row_id": row_ids}
@@ -536,16 +539,12 @@ def _calc_edges_frame(
     ).astype({"period": str, "concept": str, "parent_concept": str, "weight": float})
 
 
-def _latest_filing_date(filings) -> date:
-    if getattr(filings, "end_date", None):
-        return date.fromisoformat(str(filings.end_date)[:10])
-    filing_dates = [
-        date.fromisoformat(str(getattr(filing, "filing_date", filing))[:10])
-        for filing in filings
-    ]
-    if not filing_dates:
-        raise ValueError("Cannot determine latest filing date from empty filings.")
-    return max(filing_dates)
+def _latest_filing_date(filings) -> date | None:
+    """Newest filing date of ``filings`` (edgartools' ``Filings.end_date``), or
+    None for empty filings."""
+    if not filings.end_date:
+        return None
+    return date.fromisoformat(str(filings.end_date)[:10])
 
 
 def _freshness_date(company, period: PeriodType, filings) -> date:
@@ -554,15 +553,17 @@ def _freshness_date(company, period: PeriodType, filings) -> date:
     Annual: the newest 10-K. Quarterly: the newer of the newest 10-Q and the
     newest 10-K, since a fiscal year's fourth quarter is reported in a 10-K,
     not a 10-Q; using the 10-Q alone would mark the bundle stale (and rebuild
-    it on every load) until the next 10-Q.
+    it on every load) until the next 10-Q. Raises ``ValueError`` when
+    ``filings`` is empty.
     """
     latest = _latest_filing_date(filings)
+    if latest is None:
+        raise ValueError("Cannot determine latest filing date from empty filings.")
     if period == "quarterly":
         annual = company.get_filings(form=FORM_BY_PERIOD["annual"], amendments=False)
-        try:
-            latest = max(latest, _latest_filing_date(annual))
-        except ValueError:  # no 10-Ks
-            pass
+        latest_annual = _latest_filing_date(annual)  # None: no 10-Ks
+        if latest_annual is not None:
+            latest = max(latest, latest_annual)
     return latest
 
 
@@ -582,23 +583,11 @@ def _statement_set(bundle: PeriodBundle) -> StatementSet:
     )
 
 
-def _touch(cik: int | str, ticker: str) -> None:
-    touch_company_cache(
-        cik=cik,
-        ticker=ticker,
-        cache_dir=EDGARTOOLS_CACHE_DIR,
-        max_companies=EDGARTOOLS_COMPANY_CACHE_SIZE,
-    )
-
-
-def _read_cached(cik: int | str, period: PeriodType) -> CachedPeriodBundle | None:
-    return read_period_bundle(cik=cik, period=period, cache_dir=EDGARTOOLS_CACHE_DIR)
-
-
 def _serve_cached(
     cached: CachedPeriodBundle, *, cik: int | str, ticker: str
 ) -> StatementSet:
-    _touch(cik, ticker)
+    """Record the access in the company LRU and serve ``cached``."""
+    touch_company_cache(cik=cik, ticker=ticker)
     return _statement_set(cached.bundle)
 
 
@@ -616,13 +605,17 @@ def load_statement_set(ticker: str, period: PeriodType) -> StatementSet:
     cached = None
     cached_cik = find_cached_cik(EDGARTOOLS_CACHE_DIR, ticker)
     if cached_cik is not None:
-        cached = _read_cached(cached_cik, period)
+        cached = read_period_bundle(
+            cik=cached_cik, period=period, cache_dir=EDGARTOOLS_CACHE_DIR
+        )
         if cached is not None and not cached.stale:
             return _serve_cached(cached, cik=cached_cik, ticker=ticker)
 
     company = Company(ticker)
-    if cached is None or int(cached_cik) != int(company.cik):
-        cached = _read_cached(company.cik, period)
+    if cached_cik is None or int(cached_cik) != int(company.cik):
+        cached = read_period_bundle(
+            cik=company.cik, period=period, cache_dir=EDGARTOOLS_CACHE_DIR
+        )
         if cached is not None and not cached.stale:
             return _serve_cached(cached, cik=company.cik, ticker=ticker)
 
@@ -658,5 +651,5 @@ def load_statement_set(ticker: str, period: PeriodType) -> StatementSet:
         bundle=bundle,
         cache_dir=EDGARTOOLS_CACHE_DIR,
     )
-    _touch(company.cik, ticker)
+    touch_company_cache(cik=company.cik, ticker=ticker)
     return statement_set
