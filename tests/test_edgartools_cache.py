@@ -13,7 +13,6 @@ import pytest
 from src.api.edgartools import cache as cache_mod
 from src.api.edgartools.cache import (
     CACHE_SCHEMA_VERSION,
-    StatementFrames,
     _load_index,
     cached_companies,
     find_cached_cik,
@@ -24,7 +23,12 @@ from src.api.edgartools.cache import (
     set_pinned_tickers,
     touch_company_cache,
 )
-from src.models.statement import EDGARTOOLS_METADATA_COLUMNS, Statement
+from src.models.statement import (
+    EDGARTOOLS_METADATA_COLUMNS,
+    STATEMENT_TYPES,
+    Statement,
+    StatementSet,
+)
 from tests.statement_fixtures import make_statement
 
 
@@ -81,11 +85,14 @@ def _calc_edges() -> pd.DataFrame:
     )
 
 
-def _sample_bundle() -> dict[str, StatementFrames]:
-    return {
-        st: StatementFrames(_raw_frame(st), _calc_edges())
-        for st in ("income", "balance", "cashflow")
-    }
+def _sample_set(edges: pd.DataFrame | None = None) -> StatementSet:
+    edges = _calc_edges() if edges is None else edges
+    return StatementSet(
+        **{
+            st: Statement(_raw_frame(st), st, calc_edges=edges)
+            for st in STATEMENT_TYPES
+        }
+    )
 
 
 def _save(cache_dir: Path, **overrides) -> None:
@@ -93,7 +100,7 @@ def _save(cache_dir: Path, **overrides) -> None:
         "cik": 320193,
         "period": "annual",
         "latest_filing_date": date(2024, 11, 1),
-        "bundle": _sample_bundle(),
+        "statement_set": _sample_set(),
         "cache_dir": cache_dir,
     }
     kwargs.update(overrides)
@@ -105,13 +112,13 @@ def _load(cache_dir: Path, period: str = "annual", reference=date(2025, 1, 1)):
     cached = read_period_bundle(
         cik=320193, period=period, cache_dir=cache_dir, reference=reference
     )
-    return cached.bundle if cached is not None and not cached.stale else None
+    return cached.statement_set if cached is not None and not cached.stale else None
 
 
 def test_save_and_load_round_trips_raw_frames(tmp_path: Path) -> None:
     cache_dir = tmp_path / "edgartools_cache"
-    bundle = _sample_bundle()
-    _save(cache_dir, bundle=bundle)
+    statement_set = _sample_set()
+    _save(cache_dir, statement_set=statement_set)
 
     bundle_dir = cache_dir / "companies" / "320193" / "annual"
     assert sorted(p.name for p in bundle_dir.iterdir()) == [
@@ -132,10 +139,9 @@ def test_save_and_load_round_trips_raw_frames(tmp_path: Path) -> None:
 
     loaded = _load(cache_dir)
     assert loaded is not None
-    assert set(loaded) == {"income", "balance", "cashflow"}
-    assert all(isinstance(frames, StatementFrames) for frames in loaded.values())
-    frame = loaded["income"].frame
-    assert list(frame.columns) == list(bundle["income"].frame.columns)
+    assert isinstance(loaded, StatementSet)
+    frame = loaded.income.frame
+    assert list(frame.columns) == list(statement_set.income.frame.columns)
     for col in EDGARTOOLS_METADATA_COLUMNS:
         assert col in frame.columns
 
@@ -150,36 +156,24 @@ def test_save_and_load_round_trips_raw_frames(tmp_path: Path) -> None:
     assert frame["weight"].iloc[1] == 1.0
 
     # tags come back as numpy arrays; Statement normalizes them to tuples.
-    statement = Statement(frame, "income", calc_edges=loaded["income"].calc_edges)
-    assert statement.frame["tags"].tolist() == [(), (), ()]
-    assert (
-        statement.frame["row_id"].tolist() == bundle["income"].frame["row_id"].tolist()
-    )
-    assert statement.periods == ["2024-09-28", "2023-09-30"]
+    assert frame["tags"].tolist() == [(), (), ()]
+    assert frame["row_id"].tolist() == statement_set.income.frame["row_id"].tolist()
+    assert loaded.income.periods == ["2024-09-28", "2023-09-30"]
     pd.testing.assert_frame_equal(
-        statement.project("detailed"),
-        make_statement(bundle["income"].frame, "income").project("detailed"),
+        loaded.income.project("detailed"),
+        make_statement(statement_set.income.frame, "income").project("detailed"),
     )
-    pd.testing.assert_frame_equal(loaded["income"].calc_edges, _calc_edges())
-    pd.testing.assert_frame_equal(statement.calc_edges, _calc_edges())
+    pd.testing.assert_frame_equal(loaded.income.calc_edges, _calc_edges())
 
 
 def test_save_and_load_round_trips_empty_calc_edges(tmp_path: Path) -> None:
     cache_dir = tmp_path / "edgartools_cache"
     empty = make_statement(_raw_frame(), "income").calc_edges.iloc[0:0]
-    _save(
-        cache_dir,
-        bundle={
-            st: StatementFrames(_raw_frame(st), empty)
-            for st in ("income", "balance", "cashflow")
-        },
-    )
+    _save(cache_dir, statement_set=_sample_set(empty))
 
     loaded = _load(cache_dir)
     assert loaded is not None
-    edges = Statement(
-        loaded["income"].frame, "income", calc_edges=loaded["income"].calc_edges
-    ).calc_edges
+    edges = loaded.income.calc_edges
     assert edges.empty
     assert list(edges.columns) == ["period", "concept", "parent_concept", "weight"]
 
@@ -187,11 +181,6 @@ def test_save_and_load_round_trips_empty_calc_edges(tmp_path: Path) -> None:
 def test_schema_version_is_7() -> None:
     """Bumped for the per-period ``{statement}_calc.parquet`` files."""
     assert CACHE_SCHEMA_VERSION == 7
-
-
-def test_save_requires_all_statements(tmp_path: Path) -> None:
-    with pytest.raises(ValueError):
-        _save(tmp_path, bundle={"income": _sample_bundle()["income"]})
 
 
 def test_load_returns_none_when_statement_file_missing(tmp_path: Path) -> None:
@@ -317,7 +306,7 @@ def test_read_period_bundle_returns_fresh_bundle_with_filing_date(
     assert cached is not None
     assert cached.stale is False
     assert cached.latest_filing_date == date(2024, 11, 1)
-    pd.testing.assert_frame_equal(cached.bundle["income"].calc_edges, _calc_edges())
+    pd.testing.assert_frame_equal(cached.statement_set.income.calc_edges, _calc_edges())
 
 
 def test_read_period_bundle_keeps_and_returns_stale_bundle(tmp_path: Path) -> None:
@@ -331,7 +320,7 @@ def test_read_period_bundle_keeps_and_returns_stale_bundle(tmp_path: Path) -> No
     assert cached is not None
     assert cached.stale is True
     assert cached.latest_filing_date == date(2024, 1, 1)
-    assert set(cached.bundle) == {"income", "balance", "cashflow"}
+    assert cached.statement_set.income.periods == ["2024-09-28", "2023-09-30"]
     assert (cache_dir / "companies" / "320193" / "quarterly" / "meta.json").exists()
 
 

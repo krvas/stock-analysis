@@ -10,11 +10,8 @@ from typing import ClassVar
 import pandas as pd
 import pytest
 
-from src.api.edgartools.cache import (
-    StatementFrames,
-    save_period_bundle,
-    touch_company_cache,
-)
+from src.api.edgartools import cache as cache_mod
+from src.api.edgartools.cache import save_period_bundle, touch_company_cache
 from src.models.statement import Statement
 from src.pipelines import calc_residual_report as report
 from src.pipelines.calc_residual_report import (
@@ -27,7 +24,7 @@ from src.pipelines.calc_residual_report import (
     summarize,
     summarize_comparison,
 )
-from tests.statement_fixtures import make_statement
+from tests.statement_fixtures import make_statement, make_statement_set
 
 P1, P2 = "2024-12-31", "2023-12-31"
 
@@ -57,13 +54,12 @@ def _cache(tmp_path: Path) -> Path:
     cache_dir = tmp_path / "edgartools_cache"
     today = datetime.now(UTC).date()
     for cik, ticker, total_p2 in ((1, "AAA", 3.0), (2, "BBB", 13.0)):
-        statement = make_statement(_frame(total_p2), "income")
-        frames = StatementFrames(statement.frame, statement.calc_edges)
+        statement_set = make_statement_set(_frame(total_p2))
         save_period_bundle(
             cik=cik,
             period="annual",
             latest_filing_date=today,
-            bundle=dict.fromkeys(("income", "balance", "cashflow"), frames),
+            statement_set=statement_set,
             cache_dir=cache_dir,
         )
         touch_company_cache(cik=cik, ticker=ticker)
@@ -325,13 +321,12 @@ def test_stale_bundle_is_still_reported(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
     cache_dir = tmp_path / "edgartools_cache"
-    statement = make_statement(_frame(3.0), "income")
-    frames = StatementFrames(statement.frame, statement.calc_edges)
+    statement_set = make_statement_set(_frame(3.0))
     save_period_bundle(
         cik=1,
         period="annual",
         latest_filing_date=date(2000, 1, 1),
-        bundle=dict.fromkeys(("income", "balance", "cashflow"), frames),
+        statement_set=statement_set,
         cache_dir=cache_dir,
     )
     touch_company_cache(cik=1, ticker="AAA")
@@ -342,20 +337,21 @@ def test_stale_bundle_is_still_reported(
     assert "stale" in caplog.text
 
 
-def test_bad_statement_is_skipped_with_warning(
+def test_bundle_with_bad_statement_is_skipped_with_warning(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
-    real = report.Statement
+    real = cache_mod.Statement
 
     def flaky(frame: pd.DataFrame, statement_type: str, **kwargs) -> Statement:
         if statement_type == "balance":
             raise ValueError("duplicate row ids")
         return real(frame, statement_type, **kwargs)
 
-    monkeypatch.setattr(report, "Statement", flaky)
+    monkeypatch.setattr(cache_mod, "Statement", flaky)
     residuals = collect_residuals(None, ("annual",), _cache(tmp_path))
 
-    assert set(residuals["statement"]) == {"income", "cashflow"}
+    # An invalid statement makes the whole bundle unusable (and pruned).
+    assert residuals.empty
     assert "duplicate row ids" in caplog.text
 
 

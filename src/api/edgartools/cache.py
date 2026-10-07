@@ -31,10 +31,11 @@ from __future__ import annotations
 import json
 import logging
 import shutil
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable
+from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from pathlib import Path
-from typing import Any, Literal, NamedTuple
+from typing import Any
 
 import pandas as pd
 
@@ -44,23 +45,14 @@ from src.config import (
     EDGARTOOLS_COMPANY_CACHE_SIZE,
     EDGARTOOLS_QUARTERLY_CACHE_MAX_AGE_MONTHS,
 )
-from src.models.statement import STATEMENT_TYPES, StatementType
+from src.models.statement import (
+    STATEMENT_TYPES,
+    PeriodType,
+    Statement,
+    StatementSet,
+)
 
 logger = logging.getLogger(__name__)
-
-PeriodType = Literal["annual", "quarterly"]
-
-
-class StatementFrames(NamedTuple):
-    """One cached statement: what ``Statement(frame, type, calc_edges)`` takes."""
-
-    # Raw (unprojected, raw-sign) statement frame (``Statement.frame``).
-    frame: pd.DataFrame
-    # Per-period calc tree (``Statement.calc_edges``).
-    calc_edges: pd.DataFrame
-
-
-PeriodBundle = dict[StatementType, StatementFrames]
 
 # Bump when the on-disk bundle shape (or how a stored column is computed)
 # changes; mismatched bundles are rebuilt.
@@ -213,14 +205,23 @@ def delete_period_bundle(
             logger.warning("Failed to delete period bundle %s: %s", bundle_dir, exc)
 
 
-class CachedPeriodBundle(NamedTuple):
-    """A readable bundle with its ``meta.json`` freshness information."""
+@dataclass(frozen=True)
+class CachedStatementSet:
+    """A readable cached statement set with its ``meta.json`` freshness date."""
 
-    bundle: PeriodBundle
+    statement_set: StatementSet
     # ``meta.json``'s ``latest_filing_date`` (the freshness date it was built at).
     latest_filing_date: date
-    # Whether ``latest_filing_date`` is older than the period's max cache age.
-    stale: bool
+    period: PeriodType
+    # Date staleness is judged against (None: today).
+    reference: date | None = None
+
+    @property
+    def stale(self) -> bool:
+        """Whether ``latest_filing_date`` is older than the period's max cache age."""
+        return is_period_bundle_stale(
+            self.latest_filing_date, period=self.period, reference=self.reference
+        )
 
 
 def read_period_bundle(
@@ -230,7 +231,7 @@ def read_period_bundle(
     cache_dir: Path,
     reference: date | None = None,
     prune: bool = True,
-) -> CachedPeriodBundle | None:
+) -> CachedStatementSet | None:
     """Load a cached bundle even if it is stale, or None (deleting it) if unusable.
 
     Unusable means: missing/invalid ``meta.json``, a ``schema_version`` other
@@ -272,35 +273,41 @@ def read_period_bundle(
         discard()
         return None
 
-    bundle: PeriodBundle = {}
+    statements: dict[str, Statement] = {}
     for statement_type in STATEMENT_TYPES:
         paths = (
             _bundle_file(cache_dir, cik, period, f"{statement_type}.parquet"),
             _bundle_file(cache_dir, cik, period, f"{statement_type}_calc.parquet"),
         )
-        frames: list[pd.DataFrame] = []
-        for path in paths:
-            try:
-                frames.append(pd.read_parquet(path))
-            except (OSError, ValueError) as exc:
-                # FileNotFoundError, or a truncated/corrupt parquet file
-                # (pyarrow's ArrowInvalid subclasses ValueError).
-                logger.warning("Unreadable period bundle file %s (%s)", path, exc)
-                discard()
-                return None
-        bundle[statement_type] = StatementFrames(*frames)
+        try:
+            frame, calc_edges = (pd.read_parquet(path) for path in paths)
+            statements[statement_type] = Statement(
+                frame, statement_type, calc_edges=calc_edges
+            )
+        except (OSError, ValueError) as exc:
+            # FileNotFoundError, a truncated/corrupt parquet file (pyarrow's
+            # ArrowInvalid subclasses ValueError), or a frame Statement rejects.
+            logger.warning(
+                "Unusable %s period bundle for CIK %s (%s): %s",
+                statement_type,
+                cik,
+                period,
+                exc,
+            )
+            discard()
+            return None
 
-    stale = is_period_bundle_stale(
-        latest_filing_date, period=period, reference=reference
+    cached = CachedStatementSet(
+        StatementSet(**statements), latest_filing_date, period, reference
     )
-    if stale:
+    if cached.stale:
         logger.info(
             "Period bundle stale for CIK %s (%s); latest filing %s",
             cik,
             period,
             latest_filing_date,
         )
-    return CachedPeriodBundle(bundle, latest_filing_date, stale)
+    return cached
 
 
 def save_period_bundle(
@@ -308,7 +315,7 @@ def save_period_bundle(
     cik: int | str,
     period: PeriodType,
     latest_filing_date: date,
-    bundle: Mapping[StatementType, StatementFrames],
+    statement_set: StatementSet,
     cache_dir: Path,
 ) -> None:
     """Write each statement type's raw frame and calc edges plus ``meta.json``.
@@ -316,20 +323,16 @@ def save_period_bundle(
     ``meta.json`` is written last so a partially written bundle has no meta
     and is treated as missing.
     """
-    missing = [st for st in STATEMENT_TYPES if st not in bundle]
-    if missing:
-        raise ValueError(f"period bundle is missing statement(s): {missing}")
-
     delete_period_bundle(cik=cik, period=period, cache_dir=cache_dir)
     bundle_dir = _bundle_dir(cache_dir, cik, period)
     bundle_dir.mkdir(parents=True, exist_ok=True)
 
     for statement_type in STATEMENT_TYPES:
-        frame, calc_edges = bundle[statement_type]
-        frame.to_parquet(
+        statement = statement_set.get(statement_type)
+        statement.frame.to_parquet(
             _bundle_file(cache_dir, cik, period, f"{statement_type}.parquet")
         )
-        calc_edges.to_parquet(
+        statement.calc_edges.to_parquet(
             _bundle_file(cache_dir, cik, period, f"{statement_type}_calc.parquet")
         )
 

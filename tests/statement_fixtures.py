@@ -10,7 +10,9 @@ import pandas as pd
 from src.models.statement import (
     CALC_EDGE_COLUMNS,
     STATEMENT_METADATA_COLUMNS,
+    STATEMENT_TYPES,
     Statement,
+    StatementSet,
     StatementType,
 )
 from src.utils.text import clean_str
@@ -151,6 +153,18 @@ def derived_calc_edges(frame: pd.DataFrame) -> pd.DataFrame:
 def make_statement(frame: pd.DataFrame, statement_type: StatementType) -> Statement:
     """A :class:`Statement` whose calc edges are derived from ``frame``."""
     return Statement(frame, statement_type, calc_edges=derived_calc_edges(frame))
+
+
+def make_statement_set(
+    frame: pd.DataFrame, calc_edges: pd.DataFrame | None = None
+) -> StatementSet:
+    """A :class:`StatementSet` whose three statements all use ``frame``; calc
+    edges are ``calc_edges`` when given, else derived from ``frame``."""
+    if calc_edges is None:
+        calc_edges = derived_calc_edges(frame)
+    return StatementSet(
+        **{st: Statement(frame, st, calc_edges=calc_edges) for st in STATEMENT_TYPES}
+    )
 
 
 def _income() -> Statement:

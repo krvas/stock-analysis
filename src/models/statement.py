@@ -25,7 +25,7 @@ from __future__ import annotations
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any, Literal, get_args
 
 import numpy as np
 import pandas as pd
@@ -34,9 +34,11 @@ from src.utils.text import clean_str, is_missing
 
 StatementType = Literal["income", "balance", "cashflow"]
 StatementView = Literal["summary", "standard", "detailed"]
+PeriodType = Literal["annual", "quarterly"]
 
-STATEMENT_TYPES: tuple[StatementType, ...] = ("income", "balance", "cashflow")
-STATEMENT_VIEWS: tuple[StatementView, ...] = ("summary", "standard", "detailed")
+STATEMENT_TYPES: tuple[StatementType, ...] = get_args(StatementType)
+STATEMENT_VIEWS: tuple[StatementView, ...] = get_args(StatementView)
+PERIOD_TYPES: tuple[PeriodType, ...] = get_args(PeriodType)
 
 # Metadata columns emitted by edgartools 5.47 ``Statement.to_dataframe``.
 # (edgartools can also emit ``unit`` / ``point_in_time``; we don't retain them.)
@@ -569,7 +571,6 @@ class StatementSet:
     income: Statement
     balance: Statement
     cashflow: Statement
-    periods: tuple[str, ...]
 
     def __post_init__(self) -> None:
         for statement_type in STATEMENT_TYPES:
@@ -578,6 +579,16 @@ class StatementSet:
                 raise ValueError(
                     f"StatementSet.{statement_type} has statement_type '{actual}'"
                 )
+
+    @property
+    def periods(self) -> tuple[str, ...]:
+        """Every period of any statement, newest first."""
+        return tuple(
+            sorted(
+                {p for st in STATEMENT_TYPES for p in self.get(st).periods},
+                reverse=True,
+            )
+        )
 
     def get(self, statement_type: StatementType) -> Statement:
         if statement_type not in STATEMENT_TYPES:

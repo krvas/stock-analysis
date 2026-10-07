@@ -34,7 +34,6 @@ import pandas as pd
 from edgar import Company
 
 from src.api.edgartools.cache import (
-    PeriodType,
     cached_companies,
     find_cached_cik,
     read_period_bundle,
@@ -45,11 +44,10 @@ from src.api.edgartools.source import (
 )
 from src.config import EDGARTOOLS_CACHE_DIR, MAX_PERIODS_BY_PERIOD
 from src.models.calc_residuals import RESIDUAL_COLUMNS, tagged_residuals
-from src.models.statement import STATEMENT_TYPES, Statement, StatementType
+from src.models.statement import PERIOD_TYPES, STATEMENT_TYPES, PeriodType
 
 logger = logging.getLogger(__name__)
 
-PERIOD_TYPES: tuple[PeriodType, ...] = ("annual", "quarterly")
 
 # Absolute tolerance in reported units: XBRL monetary facts are integers, so
 # anything below one unit is float noise, not a real gap.
@@ -148,22 +146,7 @@ def collect_residuals(
                     cik,
                     cached.latest_filing_date,
                 )
-            statements: dict[StatementType, Statement] = {}
-            for statement_type in STATEMENT_TYPES:
-                try:
-                    frame, calc_edges = cached.bundle[statement_type]
-                    statements[statement_type] = Statement(
-                        frame, statement_type, calc_edges=calc_edges
-                    )
-                except ValueError as exc:
-                    logger.warning(
-                        "Bad %s %s bundle for %s (CIK %s): %s; skipping",
-                        period,
-                        statement_type,
-                        ticker,
-                        cik,
-                        exc,
-                    )
+            statements = {st: cached.statement_set.get(st) for st in STATEMENT_TYPES}
             frames.append(
                 tagged_residuals(statements, ticker=ticker, period_type=period)
             )

@@ -15,8 +15,7 @@ from edgar.xbrl.exceptions import StatementNotFound
 
 from src.api.edgartools import source
 from src.api.edgartools.cache import (
-    CachedPeriodBundle,
-    StatementFrames,
+    CachedStatementSet,
     _load_index,
     is_period_bundle_stale,
     save_period_bundle,
@@ -24,7 +23,7 @@ from src.api.edgartools.cache import (
 )
 from src.api.edgartools.source import (
     _align,
-    _build_statement_dataframe,
+    _build_statement,
     load_statement_set,
     setup_edgartools,
 )
@@ -35,7 +34,7 @@ from src.models.statement import (
     Statement,
     StatementSet,
 )
-from tests.statement_fixtures import make_statement
+from tests.statement_fixtures import make_statement, make_statement_set
 
 _GETTERS = {
     "income": "income_statement",
@@ -187,7 +186,7 @@ def _to_dataframe_mock(xbrl: MagicMock, statement_type: str) -> MagicMock:
     return getattr(xbrl.statements, _GETTERS[statement_type]).return_value.to_dataframe
 
 
-# --- _build_statement_dataframe ---------------------------------------------
+# --- _build_statement ---------------------------------------------
 
 
 @patch("src.api.edgartools.source.determine_optimal_periods")
@@ -244,7 +243,7 @@ def test_build_one_raw_frame_with_newest_metadata(mock_periods: MagicMock) -> No
         {"xbrl_index": 1, "end_date": "2023-09-30", "period_type": "duration"},
     ]
 
-    df = _build_statement_dataframe(xbrls, "cashflow", max_periods=16).frame
+    df = _build_statement(xbrls, "cashflow", max_periods=16).frame
 
     mock_periods.assert_called_once_with(
         xbrls.xbrl_list, "CashFlowStatement", max_periods=16
@@ -265,6 +264,9 @@ def test_build_one_raw_frame_with_newest_metadata(mock_periods: MagicMock) -> No
         "in_standard",
         "2024-09-28",
         "2023-09-30",
+        "tags",
+        "origin",
+        "is_total",
     ]
     assert df["row_id"].tolist() == [
         "Cash",
@@ -358,7 +360,7 @@ def test_build_keys_multi_axis_rows_by_every_axis(mock_periods: MagicMock) -> No
         {"xbrl_index": 1, "end_date": "2023-09-30", "period_type": "duration"},
     ]
 
-    df = _build_statement_dataframe(xbrls, "income", max_periods=16).frame
+    df = _build_statement(xbrls, "income", max_periods=16).frame
 
     segment = "ConsolidationItemsAxis=us-gaap_OperatingSegmentsMember"
     americas = f"Rev|{segment}|SegmentsAxis=AmericasMember"
@@ -393,7 +395,7 @@ def test_build_falls_back_to_primary_dimension_when_raw_misaligned(
         {"xbrl_index": 0, "end_date": "2024-09-28", "period_type": "duration"}
     ]
 
-    df = _build_statement_dataframe(xbrls, "income", max_periods=16).frame
+    df = _build_statement(xbrls, "income", max_periods=16).frame
 
     assert df["row_id"].tolist() == ["Rev|A=M"]
 
@@ -437,7 +439,7 @@ def test_build_takes_role_weight_from_raw_data(mock_periods: MagicMock) -> None:
         {"xbrl_index": 0, "end_date": "2023-09-30", "period_type": "duration"},
     ]
 
-    df = _build_statement_dataframe(xbrls, "cashflow", max_periods=16).frame
+    df = _build_statement(xbrls, "cashflow", max_periods=16).frame
 
     statement = xbrl.statements.cash_flow_statement.return_value
     statement.get_raw_data.assert_called_once_with(view="detailed")
@@ -461,7 +463,7 @@ def test_build_keeps_frame_weight_when_raw_misaligned(
         {"xbrl_index": 0, "end_date": "2024-09-28", "period_type": "duration"}
     ]
 
-    df = _build_statement_dataframe(xbrls, "income", max_periods=16).frame
+    df = _build_statement(xbrls, "income", max_periods=16).frame
 
     assert df["weight"].tolist() == [1.0]
     assert "Could not align raw data" in caplog.text
@@ -505,7 +507,7 @@ def test_build_weight_is_newest_non_nan_across_filings(
         for index, (end, *_) in enumerate(filings)
     ]
 
-    df = _build_statement_dataframe(xbrls, "cashflow", max_periods=16).frame
+    df = _build_statement(xbrls, "cashflow", max_periods=16).frame
 
     acq = df.set_index("row_id").loc["Acq"]
     assert acq["weight"] == -1.0
@@ -516,7 +518,7 @@ def test_build_weight_is_newest_non_nan_across_filings(
 @patch("src.api.edgartools.source.determine_optimal_periods")
 def test_build_empty_when_no_periods(mock_periods: MagicMock) -> None:
     mock_periods.return_value = []
-    df = _build_statement_dataframe(MagicMock(), "income", max_periods=16).frame
+    df = _build_statement(MagicMock(), "income", max_periods=16).frame
     statement = make_statement(df, "income")
     assert statement.periods == []
     assert statement.project("summary").empty
@@ -548,7 +550,7 @@ def test_build_warns_when_filing_has_no_column_for_its_period(
     ]
     # Parametrization: "2025-12-31" matches the period; "2026-09-30" does not.
     with caplog.at_level("WARNING", logger=source.logger.name):
-        _build_statement_dataframe(xbrls, "income", max_periods=8)
+        _build_statement(xbrls, "income", max_periods=8)
 
     messages = [
         r.getMessage() for r in caplog.records if "matches period" in r.getMessage()
@@ -605,9 +607,9 @@ def test_build_gives_each_period_its_own_filings_calc_tree(
         {"xbrl_index": 1, "end_date": "2015-09-03", "period_type": "duration"},
     ]
 
-    built = _build_statement_dataframe(xbrls, "income", max_periods=16)
+    built = _build_statement(xbrls, "income", max_periods=16)
 
-    assert isinstance(built, StatementFrames)
+    assert isinstance(built, Statement)
     edges = built.calc_edges
     assert list(edges.columns) == list(CALC_EDGE_COLUMNS)
     new_edges = {
@@ -646,7 +648,7 @@ def test_build_normalizes_colon_element_ids(mock_periods: MagicMock) -> None:
         {"xbrl_index": 0, "end_date": "2024-09-28", "period_type": "duration"}
     ]
 
-    edges = _build_statement_dataframe(xbrls, "income", max_periods=16).calc_edges
+    edges = _build_statement(xbrls, "income", max_periods=16).calc_edges
 
     assert _edges(edges, "2024-09-28") == {
         ("us-gaap_ProfitLoss", "us-gaap_NetIncomeLoss", 1.0),
@@ -684,7 +686,7 @@ def test_build_role_lookup_failure_gives_no_edges(
     ]
 
     with caplog.at_level("WARNING", logger="src.api.edgartools.source"):
-        built = _build_statement_dataframe(xbrls, "income", max_periods=16)
+        built = _build_statement(xbrls, "income", max_periods=16)
 
     assert built.calc_edges.empty
     assert list(built.calc_edges.columns) == list(CALC_EDGE_COLUMNS)
@@ -739,7 +741,7 @@ def test_build_stores_in_standard_from_newest_filing(mock_periods: MagicMock) ->
         {"xbrl_index": 1, "end_date": "2023-09-30", "period_type": "duration"},
     ]
 
-    df = _build_statement_dataframe(xbrls, "income", max_periods=16).frame
+    df = _build_statement(xbrls, "income", max_periods=16).frame
 
     flags = dict(zip(df["row_id"], df["in_standard"], strict=True))
     assert flags == {
@@ -790,14 +792,9 @@ def test_build_in_standard_falls_back_to_default(
         {"xbrl_index": 0, "end_date": "2024-09-28", "period_type": "duration"}
     ]
 
-    df = _build_statement_dataframe(xbrls, "income", max_periods=16).frame
+    df = _build_statement(xbrls, "income", max_periods=16).frame
 
-    assert df["in_standard"].isna().all()
-    assert make_statement(df, "income").frame["in_standard"].tolist() == [
-        True,
-        True,
-        False,
-    ]
+    assert df["in_standard"].tolist() == [True, True, False]
 
 
 # --- _align -----------------------------------------------------------------
@@ -944,13 +941,7 @@ def test_load_statement_set_fetches_builds_and_saves(
     assert save_kwargs["cik"] == 320193
     assert save_kwargs["period"] == period
     assert save_kwargs["latest_filing_date"] == date(2024, 11, 1)
-    saved = save_kwargs["bundle"]
-    assert set(saved) == {"income", "balance", "cashflow"}
-    assert all(isinstance(frames, StatementFrames) for frames in saved.values())
-    pd.testing.assert_frame_equal(
-        saved[statement_type].calc_edges,
-        statement_set.get(statement_type).calc_edges,
-    )
+    assert save_kwargs["statement_set"] is statement_set
     mock_touch_cache.assert_called_once()
 
 
@@ -1016,7 +1007,7 @@ def test_load_statement_set_freshness_date_uses_10k_for_quarterly(
     )
 
 
-def _cached_bundle() -> dict[str, StatementFrames]:
+def _cached_set() -> StatementSet:
     raw = pd.DataFrame(
         {
             "concept": ["Revenue", "Capex", "Rev"],
@@ -1042,10 +1033,7 @@ def _cached_bundle() -> dict[str, StatementFrames]:
             "weight": [-1.0, 1.0],
         }
     )
-    return {
-        st: StatementFrames(make_statement(raw, st).frame, edges)
-        for st in ("income", "balance", "cashflow")
-    }
+    return make_statement_set(make_statement(raw, "income").frame, edges)
 
 
 @patch.dict("os.environ", {"EDGAR_IDENTITY": "ScreenerApp/1.0 test@example.com"})
@@ -1062,15 +1050,15 @@ def test_load_statement_set_returns_cached_without_sec_fetch(
     mock_touch_cache: MagicMock,
 ) -> None:
     mock_find_cached_cik.return_value = "320193"
-    mock_load_bundle.return_value = CachedPeriodBundle(
-        _cached_bundle(), date(2024, 11, 1), stale=False
+    mock_load_bundle.return_value = CachedStatementSet(
+        _cached_set(), date(2024, 11, 1), "annual", reference=date(2024, 12, 1)
     )
 
     statement_set = load_statement_set("AAPL", "annual")
 
     assert statement_set.periods == ("2024-09-28", "2023-09-30", "2022-09-24")
     pd.testing.assert_frame_equal(
-        statement_set.income.calc_edges, _cached_bundle()["income"].calc_edges
+        statement_set.income.calc_edges, _cached_set().income.calc_edges
     )
     mock_load_bundle.assert_called_once_with(
         cik="320193",
@@ -1114,7 +1102,7 @@ def _seed_cache(cache_dir: Path, period: str, latest_filing_date: date) -> None:
         cik=320193,
         period=period,
         latest_filing_date=latest_filing_date,
-        bundle=_cached_bundle(),
+        statement_set=_cached_set(),
         cache_dir=cache_dir,
     )
     touch_company_cache(cik=320193, ticker="AAPL")
