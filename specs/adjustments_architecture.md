@@ -66,7 +66,7 @@ edgartools ──(cache build, once)──► parquet: 3 Statement frames per (c
   `to_dataframe(view="detailed", presentation=False)` **once**. The views become
   projections (§5).
 - **Retain edgartools metadata.** `_build_view_dataframe` (rename to e.g.
-  `_build_statement_dataframe`) must keep:
+  `_build_statement`) must keep:
   - `abstract`, `dimension`, `is_breakdown`, `dimension_axis`, `dimension_member`,
     `dimension_member_label`, `dimension_label`
   - `balance`, `weight`, `preferred_sign`, `parent_concept`, `parent_abstract_concept`
