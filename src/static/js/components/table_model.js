@@ -27,6 +27,10 @@ export class TableModel {
     this._listeners = [];
     /** @type {Map<string, Set<string>>} colId -> linked group names */
     this._colToGroups = new Map();
+    /** @type {Array<{row_id: string, col_id: string, expr: object}>} */
+    this._calculatedCells = [];
+    /** @type {Array<[string, string]>} (rowId, colId) input cells with no slot */
+    this._noInputCells = [];
   }
 
   _ingest(data) {
@@ -56,9 +60,18 @@ export class TableModel {
         level: row.level,
         is_total: Boolean(row.is_total),
         parent_id: row.parent_id ?? null,
+        origin: row.origin ?? null,
         cells: { ...(row.cells || {}) },
       });
     }
+
+    this._calculatedCells = (data.calculated_cells || []).map((spec) => ({
+      ...spec,
+    }));
+    this._noInputCells = (data.no_input_cells || []).map(([rowId, colId]) => [
+      rowId,
+      colId,
+    ]);
   }
 
   get columns() {
@@ -67,6 +80,15 @@ export class TableModel {
 
   get rows() {
     return [...this._rows.values()];
+  }
+
+  /** Read-only: calculated cells are painted/computed, never saved. */
+  get calculated_cells() {
+    return [...this._calculatedCells];
+  }
+
+  get no_input_cells() {
+    return [...this._noInputCells];
   }
 
   /**

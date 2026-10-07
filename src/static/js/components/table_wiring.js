@@ -7,10 +7,12 @@
  * 4. Each slot gets a GenericInput. That class is the only place that listens to the input element.
  * 5. input.subscribe sends the coerced value to model.setCell.
  * 6. model.subscribe writes linked-group updates back with input.set. GenericInput ignores a set that does not change the value, so this does not loop.
- * 7. Save posts model.serialize(), which includes input columns only.
+ * 7. Each calc slot gets a CalculatedCell, which computes from the model and recomputes on changes.
+ * 8. Save posts model.serialize(), which includes input columns only, and reports status inline.
  */
 
 import { postJson } from "../api_client.js";
+import { CalculatedCell } from "./calculated_cell.js";
 import { GenericInput } from "./generic_input.js";
 import { render_table } from "./table_view.js";
 import { TableModel } from "./table_model.js";
@@ -59,6 +61,25 @@ function wireTableInputs(model, container) {
   });
 }
 
+/**
+ * @param {TableModel} model
+ * @param {HTMLTableElement} container
+ */
+function wireCalculatedCells(model, container) {
+  const specs = new Map(
+    model.calculated_cells.map((spec) => [
+      `${spec.row_id}\0${spec.col_id}`,
+      spec,
+    ]),
+  );
+  container.querySelectorAll("[data-calc-slot]").forEach((slot) => {
+    const spec = specs.get(`${slot.dataset.rowId}\0${slot.dataset.colId}`);
+    if (spec) {
+      new CalculatedCell(slot, model, spec);
+    }
+  });
+}
+
 function hydrateWizardTables() {
   document
     .querySelectorAll('script[type="application/json"][data-line-item-table]')
@@ -72,6 +93,7 @@ function hydrateWizardTables() {
       const container = document.getElementById(tableId);
       render_table(container, model);
       wireTableInputs(model, container);
+      wireCalculatedCells(model, container);
     });
 }
 
@@ -94,8 +116,38 @@ function buildWizardSaveBody(form) {
   return model.serialize();
 }
 
+const SAVE_STATUS_FADE_MS = 3000;
+/** @type {WeakMap<HTMLElement, number>} status element -> pending fade timer */
+const fadeTimers = new WeakMap();
+
+/**
+ * @param {HTMLElement | null} statusEl
+ * @param {"saving" | "saved" | "error"} state
+ * @param {string} message
+ */
+function showSaveStatus(statusEl, state, message) {
+  if (!statusEl) {
+    return;
+  }
+  clearTimeout(fadeTimers.get(statusEl));
+  statusEl.textContent = message;
+  statusEl.dataset.state = state;
+  statusEl.classList.remove("is-faded");
+  if (state === "saved") {
+    fadeTimers.set(
+      statusEl,
+      setTimeout(() => statusEl.classList.add("is-faded"), SAVE_STATUS_FADE_MS),
+    );
+  }
+}
+
+function errorMessage(err) {
+  return err instanceof Error ? err.message : String(err);
+}
+
 function bindWizardSaveForms() {
   document.querySelectorAll("form[data-wizard-save]").forEach((form) => {
+    const statusEl = form.querySelector(".wizard-save-status");
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
 
@@ -103,7 +155,7 @@ function bindWizardSaveForms() {
       try {
         body = buildWizardSaveBody(form);
       } catch (err) {
-        alert(err instanceof Error ? err.message : String(err));
+        showSaveStatus(statusEl, "error", errorMessage(err));
         return;
       }
 
@@ -111,12 +163,13 @@ function bindWizardSaveForms() {
       if (submitButton) {
         submitButton.disabled = true;
       }
+      showSaveStatus(statusEl, "saving", "Saving…");
 
       try {
         await postJson(form.action, body);
-        window.location.reload();
+        showSaveStatus(statusEl, "saved", "Saved ✓");
       } catch (err) {
-        alert(err instanceof Error ? err.message : String(err));
+        showSaveStatus(statusEl, "error", errorMessage(err));
       } finally {
         if (submitButton) {
           submitButton.disabled = false;
