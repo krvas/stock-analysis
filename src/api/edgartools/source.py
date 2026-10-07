@@ -2,8 +2,10 @@
 
 :func:`load_statement_set` is the entry point: it returns a
 :class:`~src.models.statement.StatementSet` holding one raw detailed frame per
-statement, built from up to ``MAX_CACHE_YEARS`` of filings and cached per
-``(cik, period)``. Views and period windows are projections of that set.
+statement plus its per-period calc edges (each period's calc tree from the
+filing its values came from), built from up to ``MAX_CACHE_YEARS`` of filings
+and cached per ``(cik, period)``. Views and period windows are projections of
+that set.
 """
 
 from __future__ import annotations
@@ -12,46 +14,43 @@ import logging
 import os
 from collections.abc import Callable, Sequence
 from datetime import date
-from typing import Literal
 
 import pandas as pd
-from edgar import Company
+from edgar import Company, clear_cache
 from edgar.xbrl import XBRLS
 from edgar.xbrl.stitching.periods import determine_optimal_periods
 
 from src.api.edgartools.cache import (
-    PeriodBundle,
+    CachedStatementSet,
     find_cached_cik,
-    load_period_bundle,
+    read_period_bundle,
     save_period_bundle,
     touch_company_cache,
 )
 from src.config import (
     EDGARTOOLS_CACHE_DIR,
-    EDGARTOOLS_COMPANY_CACHE_SIZE,
-    MAX_CACHE_QUARTERS,
-    MAX_CACHE_YEARS,
+    EDGARTOOLS_HTTP_CACHE_MAX_MB,
+    MAX_PERIODS_BY_PERIOD,
     load_project_dotenv,
 )
 from src.models.statement import (
+    CALC_EDGE_COLUMNS,
     EDGARTOOLS_METADATA_COLUMNS,
     STATEMENT_METADATA_COLUMNS,
     STATEMENT_TYPES,
+    PeriodType,
     Statement,
     StatementSet,
     StatementType,
     format_dimension_key,
     get_row_id,
 )
+from src.utils.text import clean_str
 
 logger = logging.getLogger(__name__)
 
-PeriodType = Literal["annual", "quarterly"]
-
 __all__ = [
     "FORM_BY_PERIOD",
-    "MAX_PERIODS_BY_PERIOD",
-    "PeriodType",
     "StatementType",
     "load_statement_set",
     "setup_edgartools",
@@ -74,23 +73,47 @@ FORM_BY_PERIOD: dict[PeriodType, str] = {
     "quarterly": "10-Q",
 }
 
-# Max filings (and periods) cached per bundle.
-MAX_PERIODS_BY_PERIOD: dict[PeriodType, int] = {
-    "annual": MAX_CACHE_YEARS,
-    "quarterly": MAX_CACHE_QUARTERS,
-}
-
-# Non-metadata, non-period columns edgartools can emit (only when requested via
-# include_unit / include_point_in_time); never treat them as periods.
+# Non-metadata, non-period columns edgartools can emit only when requested via
+# include_unit / include_point_in_time. They are never emitted by our current
+# calls (nothing requests them); kept in case a future feature does. Still
+# excluded from period columns via ``_NON_PERIOD_COLUMNS``.
 _EDGARTOOLS_EXTRA_COLUMNS = frozenset({"unit", "point_in_time"})
 _NON_PERIOD_COLUMNS = STATEMENT_METADATA_COLUMNS | _EDGARTOOLS_EXTRA_COLUMNS
 
 
+def _clear_http_cache_if_over(max_bytes: int) -> None:
+    """Clear the HTTP cache directories completely once they exceed ``max_bytes``.
+
+    Uses edgartools' own ``clear_cache``: a dry run reports the cache size,
+    a real run deletes every file in the ``_cache`` / ``_tcache`` directories
+    of ``EDGAR_LOCAL_DATA_DIR`` and nothing else (our ``companies/`` bundles
+    and ``company_lru.json`` are left alone).
+    """
+    size = clear_cache(dry_run=True)["bytes_freed"]
+    if size <= max_bytes:
+        return
+    result = clear_cache(dry_run=False)
+    logger.info(
+        "Cleared edgartools HTTP cache: %d files (%.1f MB)",
+        result["files_deleted"],
+        result["bytes_freed"] / 1_000_000,
+    )
+
+
 def _configure_edgartools_cache() -> None:
-    """Point edgartools at our cache directory and allow network fetches."""
+    """Point edgartools at our cache directory, allow network fetches, and cap
+    the HTTP cache directory.
+
+    Sets ``EDGAR_LOCAL_DATA_DIR`` to ``EDGARTOOLS_CACHE_DIR`` and enables
+    ``EDGAR_ALLOW_NETWORK_FALLBACK``, then clears the ``_cache`` / ``_tcache``
+    directories under that data dir once they are over
+    ``EDGARTOOLS_HTTP_CACHE_MAX_MB`` (see :func:`_clear_http_cache_if_over`).
+    edgartools' HTTP client is left as edgartools configured it.
+    """
     EDGARTOOLS_CACHE_DIR.mkdir(parents=True, exist_ok=True)
     os.environ["EDGAR_LOCAL_DATA_DIR"] = str(EDGARTOOLS_CACHE_DIR)
     os.environ["EDGAR_ALLOW_NETWORK_FALLBACK"] = "True"
+    _clear_http_cache_if_over(EDGARTOOLS_HTTP_CACHE_MAX_MB * 1_000_000)
 
 
 def setup_edgartools() -> None:
@@ -133,10 +156,6 @@ def _empty_statement_frame() -> pd.DataFrame:
     return pd.DataFrame(columns=["row_id", *_STORED_METADATA_COLUMNS])
 
 
-def _text(value: object) -> str:
-    return "" if value is None or pd.isna(value) else str(value)
-
-
 def _raw_item_matches(item: dict, record: dict) -> bool:
     """Whether raw-data ``item`` is the source of ``to_dataframe`` ``record``."""
     if item.get("concept") != record.get("concept"):
@@ -149,9 +168,12 @@ def _raw_item_matches(item: dict, record: dict) -> bool:
     metadata = item.get("dimension_metadata") or []
     primary = metadata[0] if metadata else {}
     return (
-        _text(item.get("full_dimension_label")) == _text(record.get("dimension_label"))
-        and _text(primary.get("dimension")) == _text(record.get("dimension_axis"))
-        and _text(primary.get("member")) == _text(record.get("dimension_member"))
+        (clean_str(item.get("full_dimension_label")) or "")
+        == (clean_str(record.get("dimension_label")) or "")
+        and (clean_str(primary.get("dimension")) or "")
+        == (clean_str(record.get("dimension_axis")) or "")
+        and (clean_str(primary.get("member")) or "")
+        == (clean_str(record.get("dimension_member")) or "")
     )
 
 
@@ -263,7 +285,10 @@ _ROW_MATCH_COLUMNS: tuple[str, ...] = (
 
 
 def _rows_match(left: dict, right: dict) -> bool:
-    return all(_text(left.get(c)) == _text(right.get(c)) for c in _ROW_MATCH_COLUMNS)
+    return all(
+        (clean_str(left.get(c)) or "") == (clean_str(right.get(c)) or "")
+        for c in _ROW_MATCH_COLUMNS
+    )
 
 
 def _in_standard(statement, frame: pd.DataFrame) -> list[bool] | list[None]:
@@ -304,8 +329,52 @@ def _in_standard(statement, frame: pd.DataFrame) -> list[bool] | list[None]:
     return flags
 
 
-def _filing_frame(xbrl, statement_type: StatementType) -> pd.DataFrame | None:
-    """One raw (``presentation=False``) detailed frame for one filing.
+def _concept_id(element_id: str) -> str:
+    """``element_id`` in our ``concept`` form: ``us-gaap:X`` → ``us-gaap_X``.
+
+    edgartools 5.47 keys calc nodes as ``us-gaap_X`` already; the colon QName
+    form is normalized too in case a filing or version uses it.
+    """
+    prefix, colon, local = element_id.partition(":")
+    return f"{prefix}_{local}" if colon else element_id
+
+
+def _role_calc_edges(xbrl, statement) -> list[tuple[str, str, float]]:
+    """Every arc of the calc tree of ``statement``'s own role in one filing.
+
+    Resolves the role the way edgartools' ``Statement.extension_arcs`` does
+    (``find_statement`` on the canonical type, else ``role_or_type``) and
+    emits ``(concept, parent_concept, weight)`` for each calc node with a
+    parent, including concepts the statement does not present. No cross-role
+    fallback: another role's tree (e.g. the EPS note's) is never used. On an
+    edgartools error or a role without a calc tree, logs a warning and
+    returns no edges.
+    """
+    lookup_key = statement.canonical_type or statement.role_or_type
+    try:
+        _, role_uri, _ = xbrl.find_statement(lookup_key)
+    except Exception:  # noqa: BLE001 - StatementNotFound and assorted errors
+        logger.warning("Calc role lookup failed for %r; no calc edges", lookup_key)
+        return []
+    tree = xbrl.calculation_trees.get(role_uri) if role_uri else None
+    if tree is None:
+        logger.warning("No calc tree for role %r (%r)", role_uri, lookup_key)
+        return []
+    edges: list[tuple[str, str, float]] = []
+    for element_id, node in tree.all_nodes.items():
+        if node.parent is None or node.weight is None:
+            continue
+        edges.append(
+            (_concept_id(element_id), _concept_id(node.parent), float(node.weight))
+        )
+    return edges
+
+
+def _filing_frame(
+    xbrl, statement_type: StatementType
+) -> tuple[pd.DataFrame, list[tuple[str, str, float]]] | None:
+    """One raw (``presentation=False``) detailed frame for one filing, plus
+    the statement role's calc edges (:func:`_role_calc_edges`).
 
     Adds our ``dimension_key`` column (all axis/member pairs per row) and
     ``in_standard`` (edgartools' own ``view="standard"`` membership, see
@@ -329,15 +398,16 @@ def _filing_frame(xbrl, statement_type: StatementType) -> pd.DataFrame | None:
         frame["dimension_key"] = [_dimension_key(item) for item in items]
         frame["weight"] = _role_weights(frame, items)
     frame["in_standard"] = _in_standard(statement, frame)
-    return frame
+    return frame, _role_calc_edges(xbrl, statement)
 
 
-def _build_statement_dataframe(
+def _build_statement(
     xbrls: XBRLS,
     statement_type: StatementType,
     max_periods: int,
-) -> pd.DataFrame:
-    """Build one multi-period raw detailed frame for ``statement_type``.
+) -> Statement:
+    """Build one multi-period :class:`Statement` (raw detailed frame plus
+    per-period calc edges) for ``statement_type``.
 
     XBRLS's stitched ``to_dataframe()`` drops dimensional rows, so we use XBRLS
     only for filing selection and period alignment
@@ -352,30 +422,53 @@ def _build_statement_dataframe(
     ``weight``, which is the newest non-NaN weight across filings (a filing
     can list a calc child without a weight); rows only in older filings are
     appended after it. Values keep raw XBRL signs.
+
+    The frame's ``parent_concept`` / ``weight`` are therefore the newest
+    filing's calc tree; filers restructure calc trees over the years, so each
+    period also gets the calc edges (``period, concept, parent_concept,
+    weight``) of the filing its values came from — the one
+    ``determine_optimal_periods`` assigned it.
     """
+    empty = Statement(_empty_statement_frame(), statement_type, _calc_edges_frame([]))
     period_metas = determine_optimal_periods(
         xbrls.xbrl_list,
         _STATEMENT_XBRL_TYPES[statement_type],
         max_periods=max_periods,
     )
     if not period_metas:
-        return _empty_statement_frame()
+        return empty
 
     period_labels = [str(_period_date(meta)) for meta in period_metas]
     rows_by_id: dict[str, dict] = {}
     values_by_id: dict[str, dict[str, object]] = {}
-    frames_by_index: dict[int, pd.DataFrame | None] = {}
+    filings_by_index: dict[
+        int, tuple[pd.DataFrame, list[tuple[str, str, float]]] | None
+    ] = {}
+    edge_records: list[tuple[str, str, str, float]] = []
+    periods_with_edges: set[str] = set()
 
     for meta, period_label in zip(period_metas, period_labels, strict=True):
         xbrl_index = meta["xbrl_index"]
-        if xbrl_index not in frames_by_index:
-            frames_by_index[xbrl_index] = _filing_frame(
+        if xbrl_index not in filings_by_index:
+            filings_by_index[xbrl_index] = _filing_frame(
                 xbrls.xbrl_list[xbrl_index], statement_type
             )
-        filing_df = frames_by_index[xbrl_index]
-        if filing_df is None:
+        filing = filings_by_index[xbrl_index]
+        if filing is None:
             continue
+        filing_df, filing_edges = filing
+        if period_label not in periods_with_edges:
+            periods_with_edges.add(period_label)
+            edge_records.extend((period_label, *edge) for edge in filing_edges)
         period_column = _column_for_period_date(filing_df, _period_date(meta))
+        if period_column is None:
+            logger.warning(
+                "No %s column in filing %s matches period %s; "
+                "every value for that period will be empty",
+                statement_type,
+                xbrl_index,
+                period_label,
+            )
 
         occurrences: dict[str, int] = {}
         for record in filing_df.to_dict(orient="records"):
@@ -404,8 +497,9 @@ def _build_statement_dataframe(
                 if period_label not in values or values[period_label] is None:
                     values[period_label] = None if pd.isna(value) else value
 
+    calc_edges = _calc_edges_frame(edge_records)
     if not rows_by_id:
-        return _empty_statement_frame()
+        return empty
 
     row_ids = list(rows_by_id)
     data: dict[str, list] = {"row_id": row_ids}
@@ -421,92 +515,110 @@ def _build_statement_dataframe(
             ),
             errors="coerce",
         ).astype(float)
-    return pd.DataFrame(data)
+    # Statement adds tags/origin/is_total and validates row_id uniqueness
+    # and the calc edges.
+    return Statement(pd.DataFrame(data), statement_type, calc_edges)
 
 
-def _latest_filing_date(filings) -> date:
-    if getattr(filings, "end_date", None):
-        return date.fromisoformat(str(filings.end_date)[:10])
-    filing_dates = [
-        date.fromisoformat(str(getattr(filing, "filing_date", filing))[:10])
-        for filing in filings
-    ]
-    if not filing_dates:
-        raise ValueError("Cannot determine latest filing date from empty filings.")
-    return max(filing_dates)
+def _calc_edges_frame(
+    records: Sequence[tuple[str, str, str, float]],
+) -> pd.DataFrame:
+    """Long calc-edges frame (``Statement.calc_edges`` columns)."""
+    return pd.DataFrame.from_records(
+        list(records), columns=list(CALC_EDGE_COLUMNS)
+    ).astype({"period": str, "concept": str, "parent_concept": str, "weight": float})
 
 
-def _statement_set(bundle: PeriodBundle) -> StatementSet:
-    statements = {
-        statement_type: Statement(bundle[statement_type], statement_type)
-        for statement_type in STATEMENT_TYPES
-    }
-    all_periods = {p for s in statements.values() for p in s.periods}
-    return StatementSet(
-        **statements,
-        periods=tuple(sorted(all_periods, reverse=True)),
-    )
-
-
-def _touch(cik: int | str, ticker: str) -> None:
-    touch_company_cache(
-        cik=cik,
-        ticker=ticker,
-        cache_dir=EDGARTOOLS_CACHE_DIR,
-        max_companies=EDGARTOOLS_COMPANY_CACHE_SIZE,
-    )
-
-
-def _load_cached_set(
-    *, cik: int | str, ticker: str, period: PeriodType
-) -> StatementSet | None:
-    bundle = load_period_bundle(cik=cik, period=period, cache_dir=EDGARTOOLS_CACHE_DIR)
-    if bundle is None:
+def _latest_filing_date(filings) -> date | None:
+    """Newest filing date of ``filings`` (edgartools' ``Filings.end_date``), or
+    None for empty filings."""
+    if not filings.end_date:
         return None
-    _touch(cik, ticker)
-    return _statement_set(bundle)
+    return date.fromisoformat(str(filings.end_date)[:10])
+
+
+def _freshness_date(company, period: PeriodType, filings) -> date:
+    """The ``latest_filing_date`` stored for staleness checks.
+
+    Annual: the newest 10-K. Quarterly: the newer of the newest 10-Q and the
+    newest 10-K, since a fiscal year's fourth quarter is reported in a 10-K,
+    not a 10-Q; using the 10-Q alone would mark the bundle stale (and rebuild
+    it on every load) until the next 10-Q. Raises ``ValueError`` when
+    ``filings`` is empty.
+    """
+    latest = _latest_filing_date(filings)
+    if latest is None:
+        raise ValueError("Cannot determine latest filing date from empty filings.")
+    if period == "quarterly":
+        annual = company.get_filings(form=FORM_BY_PERIOD["annual"], amendments=False)
+        latest_annual = _latest_filing_date(annual)  # None: no 10-Ks
+        if latest_annual is not None:
+            latest = max(latest, latest_annual)
+    return latest
+
+
+def _serve_cached(
+    cached: CachedStatementSet, *, cik: int | str, ticker: str
+) -> StatementSet:
+    """Record the access in the company LRU and serve ``cached``."""
+    touch_company_cache(cik=cik, ticker=ticker)
+    return cached.statement_set
 
 
 def load_statement_set(ticker: str, period: PeriodType) -> StatementSet:
     """Return all cached periods of all three statements for ``ticker``.
 
-    Served from the ``(cik, period)`` cache when fresh; otherwise fetches up to
+    Served from the ``(cik, period)`` cache when fresh (no SEC request). A
+    stale bundle costs one filing-list request: it is still served if SEC has
+    no newer filing than the one it was built from. Otherwise fetches up to
     ``MAX_CACHE_YEARS`` 10-Ks (annual) or ``MAX_CACHE_QUARTERS`` 10-Qs
     (quarterly), builds, and caches the raw detailed frames.
     """
     setup_edgartools()
 
+    cached = None
     cached_cik = find_cached_cik(EDGARTOOLS_CACHE_DIR, ticker)
     if cached_cik is not None:
-        cached = _load_cached_set(cik=cached_cik, ticker=ticker, period=period)
-        if cached is not None:
-            return cached
+        cached = read_period_bundle(
+            cik=cached_cik, period=period, cache_dir=EDGARTOOLS_CACHE_DIR
+        )
+        if cached is not None and not cached.stale:
+            return _serve_cached(cached, cik=cached_cik, ticker=ticker)
 
     company = Company(ticker)
-    cached = _load_cached_set(cik=company.cik, ticker=ticker, period=period)
-    if cached is not None:
-        return cached
+    if cached_cik is None or int(cached_cik) != int(company.cik):
+        cached = read_period_bundle(
+            cik=company.cik, period=period, cache_dir=EDGARTOOLS_CACHE_DIR
+        )
+        if cached is not None and not cached.stale:
+            return _serve_cached(cached, cik=company.cik, ticker=ticker)
 
     max_periods = MAX_PERIODS_BY_PERIOD[period]
     filings = company.get_filings(form=FORM_BY_PERIOD[period], amendments=False).head(
         max_periods
     )
-    latest_filing_date = _latest_filing_date(filings)
+    latest_filing_date = _freshness_date(company, period, filings)
+    if cached is not None and cached.latest_filing_date == latest_filing_date:
+        logger.info(
+            "No filing newer than %s for %s (%s); serving the stale cached bundle",
+            latest_filing_date,
+            ticker,
+            period,
+        )
+        return _serve_cached(cached, cik=company.cik, ticker=ticker)
+
     xbrls = XBRLS.from_filings(filings, filter_amendments=True)
 
-    bundle: PeriodBundle = {}
-    for statement_type in STATEMENT_TYPES:
-        raw = _build_statement_dataframe(xbrls, statement_type, max_periods)
-        # Statement adds tags/origin/is_total and validates row_id uniqueness.
-        bundle[statement_type] = Statement(raw, statement_type).frame
-    statement_set = _statement_set(bundle)
+    statement_set = StatementSet(
+        **{st: _build_statement(xbrls, st, max_periods) for st in STATEMENT_TYPES}
+    )
 
     save_period_bundle(
         cik=company.cik,
         period=period,
         latest_filing_date=latest_filing_date,
-        frames=bundle,
+        statement_set=statement_set,
         cache_dir=EDGARTOOLS_CACHE_DIR,
     )
-    _touch(company.cik, ticker)
+    touch_company_cache(cik=company.cik, ticker=ticker)
     return statement_set

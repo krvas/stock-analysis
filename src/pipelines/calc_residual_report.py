@@ -6,8 +6,9 @@ For every cached (ticker, period type, statement), computes
 plus every non-zero residual, sorted by absolute relative residual.
 
 By default reads cached bundles only — never fetches from SEC and never
-modifies the cache (``load_period_bundle(prune=False)``): missing, stale or
-invalid bundles are logged and skipped, not deleted.
+modifies the cache (``read_period_bundle(prune=False)``): missing or invalid
+bundles are logged and skipped, not deleted. Stale bundles are still reported
+on (the app serves them too), with a warning.
 
 ``--compare-viewer`` additionally fetches each company's filings from SEC and
 compares our residuals with edgartools' SEC-viewer calc validation
@@ -33,27 +34,26 @@ import pandas as pd
 from edgar import Company
 
 from src.api.edgartools.cache import (
-    PeriodType,
     cached_companies,
     find_cached_cik,
-    load_period_bundle,
+    read_period_bundle,
 )
 from src.api.edgartools.source import (
     FORM_BY_PERIOD,
-    MAX_PERIODS_BY_PERIOD,
     setup_edgartools,
 )
-from src.config import EDGARTOOLS_CACHE_DIR
-from src.models.calc_residuals import calc_residuals
-from src.models.statement import STATEMENT_TYPES, Statement
+from src.config import EDGARTOOLS_CACHE_DIR, MAX_PERIODS_BY_PERIOD
+from src.models.calc_residuals import RESIDUAL_COLUMNS, tagged_residuals
+from src.models.statement import PERIOD_TYPES, STATEMENT_TYPES, PeriodType
 
 logger = logging.getLogger(__name__)
 
-PERIOD_TYPES: tuple[PeriodType, ...] = ("annual", "quarterly")
 
 # Absolute tolerance in reported units: XBRL monetary facts are integers, so
 # anything below one unit is float noise, not a real gap.
 DEFAULT_TOLERANCE = 0.5
+
+_GROUP_KEYS = ["ticker", "period_type", "statement"]
 
 SUMMARY_COLUMNS: tuple[str, ...] = (
     "ticker",
@@ -66,19 +66,8 @@ SUMMARY_COLUMNS: tuple[str, ...] = (
 )
 
 DETAIL_COLUMNS: tuple[str, ...] = (
-    "ticker",
-    "period_type",
-    "statement",
-    "row_id",
-    "label",
-    "period",
-    "reported",
-    "computed",
-    "residual",
-    "relative",
-    "n_children",
-    "n_nan_children",
-    "n_nan_weight_children",
+    *_GROUP_KEYS,
+    *(c for c in RESIDUAL_COLUMNS if c != "concept"),
 )
 
 # ``collect_viewer_validations`` output; values in raw (unscaled) units.
@@ -111,7 +100,6 @@ COMPARE_SUMMARY_COLUMNS: tuple[str, ...] = (
     "viewer_only",
 )
 
-_GROUP_KEYS = ["ticker", "period_type", "statement"]
 _JOIN_KEYS = [*_GROUP_KEYS, "concept", "period"]
 
 
@@ -141,24 +129,29 @@ def collect_residuals(
         _companies(tickers, cache_dir).items(), key=lambda i: i[1]
     ):
         for period in periods:
-            bundle = load_period_bundle(
+            cached = read_period_bundle(
                 cik=cik, period=period, cache_dir=cache_dir, prune=False
             )
-            if bundle is None:
+            if cached is None:
                 logger.warning(
                     "No usable %s bundle for %s (CIK %s); skipping", period, ticker, cik
                 )
                 continue
-            for statement_type in STATEMENT_TYPES:
-                residuals = calc_residuals(
-                    Statement(bundle[statement_type], statement_type)
+            if cached.stale:
+                logger.warning(
+                    "%s bundle for %s (CIK %s) is stale (latest filing %s); "
+                    "reporting on it anyway",
+                    period,
+                    ticker,
+                    cik,
+                    cached.latest_filing_date,
                 )
-                residuals.insert(0, "statement", statement_type)
-                residuals.insert(0, "period_type", period)
-                residuals.insert(0, "ticker", ticker)
-                frames.append(residuals)
+            statements = {st: cached.statement_set.get(st) for st in STATEMENT_TYPES}
+            frames.append(
+                tagged_residuals(statements, ticker=ticker, period_type=period)
+            )
     if not frames:
-        return pd.DataFrame(columns=["ticker", "period_type", "statement"])
+        return pd.DataFrame(columns=[*_GROUP_KEYS, *RESIDUAL_COLUMNS])
     return pd.concat(frames, ignore_index=True)
 
 
@@ -221,24 +214,45 @@ def collect_viewer_validations(
                 for report in viewer.financial_statements
             }
             results = viewer.validate(tolerance=tolerance)
-        except Exception:  # noqa: BLE001 - edgartools raises assorted errors
-            logger.warning("SEC viewer validation failed for %s; skipping", label)
-            continue
-        for result in results:
-            scale = scaling.get(result["role"], 1)
-            records.append(
-                {
-                    "ticker": ticker.upper(),
-                    "period_type": period,
-                    "statement": _viewer_statement(result["role"]),
-                    "concept": result["parent"].id,
-                    "period": str(filing.period_of_report),
-                    "viewer_expected": result["expected"] * scale,
-                    "viewer_computed": result["computed"] * scale,
-                    "viewer_difference": result["difference"] * scale,
-                    "viewer_valid": bool(result["valid"]),
-                }
+        except Exception as exc:
+            logger.warning(
+                "SEC viewer validation failed for %s (%s: %s); skipping",
+                label,
+                type(exc).__name__,
+                exc,
+                exc_info=True,
             )
+            continue
+        missing_roles: set[str] = set()
+        for result in results:
+            try:
+                role = result["role"]
+                if role not in scaling and role not in missing_roles:
+                    missing_roles.add(role)
+                    logger.warning(
+                        "No currency scaling for role %r in %s; assuming 1", role, label
+                    )
+                scale = scaling.get(role, 1)
+                records.append(
+                    {
+                        "ticker": ticker.upper(),
+                        "period_type": period,
+                        "statement": _viewer_statement(role),
+                        "concept": result["parent"].id,
+                        "period": str(filing.period_of_report),
+                        "viewer_expected": result["expected"] * scale,
+                        "viewer_computed": result["computed"] * scale,
+                        "viewer_difference": result["difference"] * scale,
+                        "viewer_valid": bool(result["valid"]),
+                    }
+                )
+            except Exception as exc:  # noqa: BLE001 - malformed viewer result
+                logger.warning(
+                    "Malformed SEC viewer result for %s (%s: %s); skipping it",
+                    label,
+                    type(exc).__name__,
+                    exc,
+                )
     return pd.DataFrame(records, columns=list(VIEWER_COLUMNS))
 
 
@@ -303,25 +317,31 @@ def summarize(residuals: pd.DataFrame, tolerance: float) -> pd.DataFrame:
     return summary[list(SUMMARY_COLUMNS)]
 
 
+def _flagged(
+    rows: pd.DataFrame, mask: pd.Series | None, columns: list[str]
+) -> pd.DataFrame:
+    """``rows[mask]`` (all rows if ``mask`` is None), largest ``|relative|``
+    first, as ``columns``; an empty frame of ``columns`` for empty ``rows``."""
+    if rows.empty:
+        return pd.DataFrame(columns=columns)
+    return _by_relative(rows if mask is None else rows[mask])[columns]
+
+
 def non_zero_residuals(residuals: pd.DataFrame, tolerance: float) -> pd.DataFrame:
     """Rows with ``|residual| > tolerance``, largest ``|relative|`` first."""
-    if residuals.empty:
-        return pd.DataFrame(columns=list(DETAIL_COLUMNS))
-    return _by_relative(residuals[residuals["residual"].abs() > tolerance])[
-        list(DETAIL_COLUMNS)
-    ]
+    mask = None if residuals.empty else residuals["residual"].abs() > tolerance
+    return _flagged(residuals, mask, list(DETAIL_COLUMNS))
 
 
 def flagged_residuals(compared: pd.DataFrame, tolerance: float) -> pd.DataFrame:
     """Compared rows that are non-zero or disagree with the viewer, largest
     ``|relative|`` first, with :data:`COMPARE_COLUMNS`."""
-    columns = [*DETAIL_COLUMNS, *COMPARE_COLUMNS]
-    if compared.empty:
-        return pd.DataFrame(columns=columns)
-    rows = compared[
-        (compared["residual"].abs() > tolerance) | compared["agrees"].eq(False)
-    ]
-    return _by_relative(rows)[columns]
+    mask = (
+        None
+        if compared.empty
+        else (compared["residual"].abs() > tolerance) | compared["agrees"].eq(False)
+    )
+    return _flagged(compared, mask, [*DETAIL_COLUMNS, *COMPARE_COLUMNS])
 
 
 def _by_relative(rows: pd.DataFrame) -> pd.DataFrame:

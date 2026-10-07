@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 from types import SimpleNamespace
 from typing import ClassVar
@@ -10,6 +10,7 @@ from typing import ClassVar
 import pandas as pd
 import pytest
 
+from src.api.edgartools import cache as cache_mod
 from src.api.edgartools.cache import save_period_bundle, touch_company_cache
 from src.models.statement import Statement
 from src.pipelines import calc_residual_report as report
@@ -23,8 +24,15 @@ from src.pipelines.calc_residual_report import (
     summarize,
     summarize_comparison,
 )
+from tests.statement_fixtures import make_statement, make_statement_set
 
 P1, P2 = "2024-12-31", "2023-12-31"
+
+
+@pytest.fixture(autouse=True)
+def _cache_dir_global(tmp_path: Path, use_cache_dir) -> None:
+    """``touch_company_cache`` takes no dir: point it at the tests' cache dir."""
+    use_cache_dir(tmp_path / "edgartools_cache")
 
 
 def _frame(total_p2: float) -> pd.DataFrame:
@@ -39,21 +47,22 @@ def _frame(total_p2: float) -> pd.DataFrame:
             P2: [total_p2, 8.0, 5.0],
         }
     )
-    return Statement(raw, "income").frame
+    return make_statement(raw, "income").frame
 
 
 def _cache(tmp_path: Path) -> Path:
     cache_dir = tmp_path / "edgartools_cache"
     today = datetime.now(UTC).date()
     for cik, ticker, total_p2 in ((1, "AAA", 3.0), (2, "BBB", 13.0)):
+        statement_set = make_statement_set(_frame(total_p2))
         save_period_bundle(
             cik=cik,
             period="annual",
             latest_filing_date=today,
-            frames={st: _frame(total_p2) for st in ("income", "balance", "cashflow")},
+            statement_set=statement_set,
             cache_dir=cache_dir,
         )
-        touch_company_cache(cik=cik, ticker=ticker, cache_dir=cache_dir)
+        touch_company_cache(cik=cik, ticker=ticker)
     return cache_dir
 
 
@@ -74,7 +83,7 @@ def test_collect_summarize_and_list_non_zero(tmp_path: Path) -> None:
     details = non_zero_residuals(residuals, tolerance=0.5)
     assert set(details["ticker"]) == {"BBB"}
     assert details["residual"].tolist() == [10.0, 10.0, 10.0]
-    assert (details["n_nan_weight_children"] == 0).all()
+    assert (details["n_missing_children"] == 0).all()
     assert set(details["period"]) == {P2}
 
 
@@ -100,13 +109,13 @@ def test_non_zero_sorted_by_abs_relative(tmp_path: Path) -> None:
             "relative": [0.1, -0.5, float("nan")],
             "n_children": [1, 1, 1],
             "n_nan_children": [0, 0, 0],
-            "n_nan_weight_children": [0, 1, 0],
+            "n_missing_children": [0, 1, 0],
         }
     )
     details = non_zero_residuals(residuals, tolerance=0.5)
 
     assert details["row_id"].tolist() == ["b", "a"]
-    assert details["n_nan_weight_children"].tolist() == [1, 0]
+    assert details["n_missing_children"].tolist() == [1, 0]
 
 
 INCOME_ROLE = "CONSOLIDATED STATEMENTS OF OPERATIONS"
@@ -294,3 +303,68 @@ def test_run_report_default_does_not_touch_network(
     details = pd.read_csv(csv_path)
     assert "viewer_difference" not in details.columns
     assert len(details) == 3
+
+
+def test_run_report_compare_viewer_with_empty_cache(
+    tmp_path: Path, fake_edgar, caplog: pytest.LogCaptureFixture
+) -> None:
+    csv_path = tmp_path / "out.csv"
+    report.run_report(
+        None, ("annual",), 0.5, csv_path, True, cache_dir=tmp_path / "empty"
+    )
+
+    assert fake_edgar.calls == []
+    assert csv_path.exists()
+
+
+def test_stale_bundle_is_still_reported(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    cache_dir = tmp_path / "edgartools_cache"
+    statement_set = make_statement_set(_frame(3.0))
+    save_period_bundle(
+        cik=1,
+        period="annual",
+        latest_filing_date=date(2000, 1, 1),
+        statement_set=statement_set,
+        cache_dir=cache_dir,
+    )
+    touch_company_cache(cik=1, ticker="AAA")
+
+    residuals = collect_residuals(None, ("annual",), cache_dir)
+
+    assert set(residuals["ticker"]) == {"AAA"}
+    assert "stale" in caplog.text
+
+
+def test_bundle_with_bad_statement_is_skipped_with_warning(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    real = cache_mod.Statement
+
+    def flaky(frame: pd.DataFrame, statement_type: str, **kwargs) -> Statement:
+        if statement_type == "balance":
+            raise ValueError("duplicate row ids")
+        return real(frame, statement_type, **kwargs)
+
+    monkeypatch.setattr(cache_mod, "Statement", flaky)
+    residuals = collect_residuals(None, ("annual",), _cache(tmp_path))
+
+    # An invalid statement makes the whole bundle unusable (and pruned).
+    assert residuals.empty
+    assert "duplicate row ids" in caplog.text
+
+
+def test_viewer_missing_scaling_and_malformed_result(
+    fake_edgar, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    viewer = _Viewer([("Total", "UNKNOWN ROLE", 5, 5)])
+    good = viewer.validate()[0]
+    viewer.validate = lambda tolerance=0.5: [{**good}, {"role": INCOME_ROLE}]
+    monkeypatch.setitem(FILINGS, "AAA", [(P1, viewer)])
+
+    result = collect_viewer_validations("AAA", "annual")
+
+    assert result["viewer_expected"].tolist() == [5]
+    assert "No currency scaling" in caplog.text
+    assert "Malformed SEC viewer result" in caplog.text

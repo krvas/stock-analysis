@@ -9,9 +9,10 @@ import pandas as pd
 
 from src.config import MAX_CACHE_QUARTERS, MAX_CACHE_YEARS
 from src.models.edgartools.html_renderer import build_statement_payload
-from src.models.statement import Statement, StatementSet
+from src.models.statement import StatementSet
 from src.web.routes.statements import clamp_num_periods
 from src.web.routes.wizard_pages import adjustments_context
+from tests.statement_fixtures import make_statement
 
 P1, P2, P3 = "2024-09-28", "2023-09-30", "2022-09-24"
 
@@ -38,15 +39,14 @@ def _frame(statement_type: str) -> pd.DataFrame:
             P3: [80.0, 3.0, 40.0],
         }
     )
-    return Statement(raw, statement_type).frame
+    return make_statement(raw, statement_type).frame
 
 
 def _statement_set() -> StatementSet:
     return StatementSet(
-        income=Statement(_frame("income"), "income"),
-        balance=Statement(_frame("balance"), "balance"),
-        cashflow=Statement(_frame("cashflow"), "cashflow"),
-        periods=(P1, P2, P3),
+        income=make_statement(_frame("income"), "income"),
+        balance=make_statement(_frame("balance"), "balance"),
+        cashflow=make_statement(_frame("cashflow"), "cashflow"),
     )
 
 
