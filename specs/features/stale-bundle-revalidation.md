@@ -165,7 +165,9 @@ becomes `# schema_version, period, latest_filing_date, checked_at (optional)`.
 
 ```python
 def is_recheck_due(
-    checked_at: datetime | None, *, now: datetime | None = None,
+    checked_at: datetime | None,
+    *,
+    now: datetime | None = None,
     ttl: timedelta | None = None,
 ) -> bool: ...
 ```
