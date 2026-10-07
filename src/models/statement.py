@@ -8,6 +8,14 @@ other column is a period column (ISO date string, newest first). Values are
 stored with **raw** XBRL signs; ``preferred_sign`` is applied only in
 :meth:`Statement.project`.
 
+The calc tree is per period: :attr:`Statement.calc_edges` is a long frame
+(``period, concept, parent_concept, weight``) holding, for each period, the
+calc tree of the filing that period's values came from. Filers restructure
+their calc trees over the years, so the frame's own ``parent_concept`` /
+``weight`` columns (edgartools-mirror metadata from the newest filing a row
+appears in) must not be used for calc math across periods; calc code uses
+``calc_edges``.
+
 Pure domain module: pandas only, no edgartools import, no I/O.
 See ``specs/adjustments_architecture.md`` §3–§5.
 """
@@ -17,16 +25,20 @@ from __future__ import annotations
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any, Literal, get_args
 
 import numpy as np
 import pandas as pd
 
+from src.utils.text import clean_str, is_missing
+
 StatementType = Literal["income", "balance", "cashflow"]
 StatementView = Literal["summary", "standard", "detailed"]
+PeriodType = Literal["annual", "quarterly"]
 
-STATEMENT_TYPES: tuple[StatementType, ...] = ("income", "balance", "cashflow")
-STATEMENT_VIEWS: tuple[StatementView, ...] = ("summary", "standard", "detailed")
+STATEMENT_TYPES: tuple[StatementType, ...] = get_args(StatementType)
+STATEMENT_VIEWS: tuple[StatementView, ...] = get_args(StatementView)
+PERIOD_TYPES: tuple[PeriodType, ...] = get_args(PeriodType)
 
 # Metadata columns emitted by edgartools 5.47 ``Statement.to_dataframe``.
 # (edgartools can also emit ``unit`` / ``point_in_time``; we don't retain them.)
@@ -92,6 +104,9 @@ PROJECTION_METADATA_COLUMNS: tuple[str, ...] = (
 
 REPORTED_ORIGIN = "reported"
 
+# Columns of :attr:`Statement.calc_edges`, in order.
+CALC_EDGE_COLUMNS: tuple[str, ...] = ("period", "concept", "parent_concept", "weight")
+
 _TOTAL_LABEL_RE = re.compile(r"\btotal\b", re.IGNORECASE)
 
 
@@ -101,26 +116,9 @@ class DuplicateRowIdError(ValueError):
 
 def is_total_label(label: object) -> bool:
     """Return whether ``label`` looks like a total row (contains the word 'total')."""
-    if _is_missing(label):
+    if is_missing(label):
         return False
     return bool(_TOTAL_LABEL_RE.search(str(label)))
-
-
-def _is_missing(value: object) -> bool:
-    if value is None:
-        return True
-    try:
-        return bool(pd.isna(value))
-    except (TypeError, ValueError):
-        # list-like values: not a scalar missing marker
-        return False
-
-
-def _clean_str(value: object) -> str | None:
-    if _is_missing(value):
-        return None
-    text = str(value).strip()
-    return text or None
 
 
 _DIMENSION_PAIR_SEPARATOR = "|"
@@ -136,8 +134,8 @@ def format_dimension_key(pairs: Sequence[tuple[str, str]]) -> str | None:
     """
     parts = []
     for axis, member in pairs:
-        axis_text = _clean_str(axis)
-        member_text = _clean_str(member)
+        axis_text = clean_str(axis)
+        member_text = clean_str(member)
         if axis_text is None and member_text is None:
             continue
         parts.append(f"{axis_text or ''}={member_text or ''}")
@@ -170,11 +168,11 @@ def dimension_pairs(row: Mapping[str, Any] | pd.Series) -> list[tuple[str, str]]
     """All ``(axis, member)`` pairs of a row: from ``dimension_key`` when present,
     else the primary ``dimension_axis`` / ``dimension_member``; ``[]`` if none.
     """
-    key = _clean_str(row.get("dimension_key"))
+    key = clean_str(row.get("dimension_key"))
     if key is not None:
         return _parse_dimension_key(key)
-    axis = _clean_str(row.get("dimension_axis"))
-    member = _clean_str(row.get("dimension_member"))
+    axis = clean_str(row.get("dimension_axis"))
+    member = clean_str(row.get("dimension_member"))
     if axis is None and member is None:
         return []
     return [(axis or "", member or "")]
@@ -207,7 +205,7 @@ def get_row_id(row: Mapping[str, Any] | pd.Series, *, occurrence: int = 1) -> st
     """
     if occurrence < 1:
         raise ValueError("occurrence must be >= 1")
-    concept = _clean_str(row.get("concept"))
+    concept = clean_str(row.get("concept"))
     if concept is None:
         raise ValueError("cannot form a row id for a row without a concept")
     pairs = sorted(
@@ -228,7 +226,7 @@ def _normalize_tags(value: object) -> tuple[str, ...]:
     """
     if isinstance(value, str):
         return (value,)
-    if value is None or (np.ndim(value) == 0 and _is_missing(value)):
+    if value is None or (np.ndim(value) == 0 and is_missing(value)):
         return ()
     return tuple(sorted({str(tag) for tag in value}))
 
@@ -259,17 +257,49 @@ def _presentation_ancestors(df: pd.DataFrame, rows: pd.Series) -> set[str]:
         return set()
     parent_of: dict[str, str] = {}
     for concept, parent in zip(df["concept"], df["parent_abstract_concept"]):
-        parent_text = _clean_str(parent)
+        parent_text = clean_str(parent)
         if parent_text is not None and concept not in parent_of:
             parent_of[concept] = parent_text
 
     ancestors: set[str] = set()
     for parent in df.loc[rows, "parent_abstract_concept"]:
-        current = _clean_str(parent)
+        current = clean_str(parent)
         while current is not None and current not in ancestors:
             ancestors.add(current)
             current = parent_of.get(current)
     return ancestors
+
+
+def _normalize_calc_edges(edges: pd.DataFrame) -> pd.DataFrame:
+    """``edges`` restricted to :data:`CALC_EDGE_COLUMNS`, fresh index, ``str``
+    id columns (missing values stay missing) and float ``weight``."""
+    out = edges.loc[:, list(CALC_EDGE_COLUMNS)].reset_index(drop=True).copy()
+    for col in ("period", "concept", "parent_concept"):
+        out[col] = out[col].astype(str)
+    out["weight"] = pd.to_numeric(out["weight"], errors="coerce").astype(float)
+    return out
+
+
+def _validated_calc_edges(edges: pd.DataFrame, periods: Sequence[str]) -> pd.DataFrame:
+    """Check and normalize a caller-supplied :attr:`Statement.calc_edges`."""
+    missing = [col for col in CALC_EDGE_COLUMNS if col not in edges.columns]
+    if missing:
+        raise ValueError(f"calc_edges is missing column(s): {missing}")
+    out = _normalize_calc_edges(edges)
+    for col in CALC_EDGE_COLUMNS:
+        if out[col].isna().any():
+            raise ValueError(f"calc_edges has missing {col!r} value(s)")
+    unknown = sorted(set(out["period"]) - set(periods))
+    if unknown:
+        raise ValueError(f"calc_edges has unknown period(s): {unknown}")
+    duplicated = out[out.duplicated(["period", "concept"], keep=False)]
+    if not duplicated.empty:
+        first = duplicated.iloc[0]
+        raise ValueError(
+            "calc_edges has more than one parent for "
+            f"{first['concept']!r} in {first['period']!r}"
+        )
+    return out
 
 
 def _check_unique_row_ids(row_ids: pd.Series) -> None:
@@ -285,11 +315,21 @@ def _check_unique_row_ids(row_ids: pd.Series) -> None:
 class Statement:
     """One financial statement (income, balance or cashflow).
 
-    Treat instances as immutable: :attr:`frame` must not be mutated, and every
-    transforming method returns a new :class:`Statement`.
+    Treat instances as immutable: :attr:`frame` and :attr:`calc_edges` must
+    not be mutated, and every transforming method returns a new
+    :class:`Statement`.
+
+    ``calc_edges`` is the per-period calc tree (see the module doc and
+    :attr:`calc_edges`); it is required and validated against the frame's
+    periods.
     """
 
-    def __init__(self, frame: pd.DataFrame, statement_type: StatementType) -> None:
+    def __init__(
+        self,
+        frame: pd.DataFrame,
+        statement_type: StatementType,
+        calc_edges: pd.DataFrame,
+    ) -> None:
         if statement_type not in STATEMENT_TYPES:
             raise ValueError(f"unknown statement_type '{statement_type}'")
 
@@ -327,6 +367,8 @@ class Statement:
 
         self._frame = df
         self.statement_type: StatementType = statement_type
+        periods = self.periods
+        self._calc_edges = _validated_calc_edges(calc_edges, periods)
 
     def __repr__(self) -> str:
         return (
@@ -338,6 +380,18 @@ class Statement:
     def frame(self) -> pd.DataFrame:
         """Underlying frame (raw signs). Do not mutate."""
         return self._frame
+
+    @property
+    def calc_edges(self) -> pd.DataFrame:
+        """Per-period calc tree (raw signs). Do not mutate.
+
+        Columns :data:`CALC_EDGE_COLUMNS`: one row per ``(period, concept)``
+        with a calc parent in the statement role's calc tree of the filing
+        that ``period``'s values came from (``weight`` ±1 etc., never NaN).
+        Concept-level, not row-level: dimensional rows share their concept's
+        edge. Includes calc-tree concepts the statement does not present.
+        """
+        return self._calc_edges
 
     @property
     def periods(self) -> list[str]:
@@ -369,14 +423,33 @@ class Statement:
             mask &= ~bool_flag(df, "dimension")
         return df[mask].copy()
 
-    def children(self, row_id: str) -> pd.DataFrame:
-        """Non-dimensional calc children of ``row_id`` (via ``parent_concept``)."""
+    def children(self, row_id: str, period: str) -> pd.DataFrame:
+        """Non-dimensional calc children of ``row_id`` in ``period``'s calc tree.
+
+        Returns the frame rows (frame order, all columns) whose concept is a
+        child of ``row_id``'s concept in ``period``'s :attr:`calc_edges`, with
+        the ``weight`` column set to that period's edge weight (added if the
+        frame has none; the frame's own newest-filing ``weight`` is not used).
+        A child concept presented twice yields both rows. Calc children the
+        statement does not present (no non-dimensional row) are not returned.
+
+        Raises ``KeyError`` for an unknown ``row_id`` or ``period``.
+        """
         df = self._frame
         concept = df["concept"].iloc[self._row_index(row_id)]
-        if "parent_concept" not in df.columns:
-            return df.iloc[0:0].copy()
-        mask = df["parent_concept"].eq(concept) & ~bool_flag(df, "dimension")
-        return df[mask].copy()
+        if period not in self.periods:
+            raise KeyError(f"unknown period '{period}' in {self.statement_type}")
+        edges = self._calc_edges
+        edges = edges[
+            (edges["period"] == period) & (edges["parent_concept"] == concept)
+        ]
+        weight_by_concept = dict(zip(edges["concept"], edges["weight"], strict=True))
+        mask = df["concept"].isin(weight_by_concept.keys()) & ~bool_flag(
+            df, "dimension"
+        )
+        children = df[mask].copy()
+        children["weight"] = children["concept"].map(weight_by_concept).astype(float)
+        return children
 
     def insert(self, row: Mapping[str, Any], after: str | None = None) -> Statement:
         """Return a new statement with ``row`` inserted after ``after`` (else appended).
@@ -384,8 +457,12 @@ class Statement:
         ``row`` must supply ``concept`` and ``origin`` (e.g.
         ``"adjustment:opex_to_capex"``); ``row_id`` is derived via
         :func:`get_row_id` when absent and must not already exist.
+
+        :attr:`calc_edges` is carried over unchanged: the inserted row gets no
+        calc edges here (wiring inserted rows into the calc tree is the
+        adjustments engine's job).
         """
-        if _clean_str(row.get("origin")) is None:
+        if clean_str(row.get("origin")) is None:
             raise ValueError("inserted rows must supply an 'origin'")
         allowed = set(self._frame.columns) | STATEMENT_METADATA_COLUMNS
         unknown = sorted(set(row) - allowed)
@@ -396,7 +473,7 @@ class Statement:
         for col in STATEMENT_METADATA_COLUMNS - set(self._frame.columns):
             if col in row:
                 record[col] = row[col]
-        record["row_id"] = _clean_str(row.get("row_id")) or get_row_id(row)
+        record["row_id"] = clean_str(row.get("row_id")) or get_row_id(row)
         record["tags"] = _normalize_tags(row.get("tags"))
         if "is_total" not in row:
             record["is_total"] = is_total_label(row.get("label"))
@@ -412,11 +489,14 @@ class Statement:
             c for c in record if c not in self._frame.columns
         ]
         return Statement(
-            pd.DataFrame.from_records(records, columns=columns), self.statement_type
+            pd.DataFrame.from_records(records, columns=columns),
+            self.statement_type,
+            calc_edges=self._calc_edges,
         )
 
     def with_values(self, row_id: str, values: Mapping[str, float]) -> Statement:
-        """Return a new statement with ``row_id``'s period values replaced."""
+        """Return a new statement with ``row_id``'s period values replaced
+        (:attr:`calc_edges` carried over)."""
         position = self._row_index(row_id)
         unknown = sorted(set(values) - set(self.periods))
         if unknown:
@@ -428,7 +508,7 @@ class Statement:
             ):
                 df[period] = df[period].astype(float)
             df.loc[position, period] = value
-        return Statement(df, self.statement_type)
+        return Statement(df, self.statement_type, calc_edges=self._calc_edges)
 
     def project(
         self,
@@ -491,7 +571,6 @@ class StatementSet:
     income: Statement
     balance: Statement
     cashflow: Statement
-    periods: tuple[str, ...]
 
     def __post_init__(self) -> None:
         for statement_type in STATEMENT_TYPES:
@@ -500,6 +579,16 @@ class StatementSet:
                 raise ValueError(
                     f"StatementSet.{statement_type} has statement_type '{actual}'"
                 )
+
+    @property
+    def periods(self) -> tuple[str, ...]:
+        """Every period of any statement, newest first."""
+        return tuple(
+            sorted(
+                {p for st in STATEMENT_TYPES for p in self.get(st).periods},
+                reverse=True,
+            )
+        )
 
     def get(self, statement_type: StatementType) -> Statement:
         if statement_type not in STATEMENT_TYPES:

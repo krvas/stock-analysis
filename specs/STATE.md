@@ -97,12 +97,19 @@ refactor. Finnhub is thin (quote snapshot, guessy statements).
 **EDGAR.** `GET /statements/{ticker}?period=annual|quarterly&num_periods=1..64`
 (default annual, 10; clamped to `MAX_CACHE_*` and to cached periods). Needs
 `EDGAR_IDENTITY`. 3 statements (income, balance, cashflow) × 3 views
-(summary, standard, detailed).
+(summary, standard, detailed). edgartools' own HTTP cache (filing
+documents): once the `_cache`/`_tcache` directories under
+`data/edgartools_cache` are over `EDGARTOOLS_HTTP_CACHE_MAX_MB` (default
+300), setup clears them completely with edgartools' own `clear_cache` (which
+only touches `_cache`/`_tcache`, never our `companies/` bundles).
 
 `load_statement_set(ticker, period) -> StatementSet` (`source.py`) is the
 only entry point. Cache key `(cik, period)`, no `num_periods`:
-`companies/{cik}/{period}/{income,balance,cashflow}.parquet` + `meta.json`
-(`schema_version`, `period`, `latest_filing_date`). Builds from up
+`companies/{cik}/{period}/{income,balance,cashflow}.parquet` +
+`{statement}_calc.parquet` + `meta.json` (`schema_version`, `period`,
+`latest_filing_date`); `read_period_bundle` returns a `CachedStatementSet` (a `StatementSet` plus
+`latest_filing_date` and a `stale` property); a missing calc file, or a frame
+`Statement` rejects, makes the bundle unusable. Builds from up
 to `MAX_CACHE_YEARS` (16) 10-Ks or `MAX_CACHE_QUARTERS` (64) 10-Qs: XBRLS only
 picks filings/periods (`determine_optimal_periods`); each filing gets
 `to_dataframe(view="detailed", presentation=False)` per statement (the stored
@@ -117,12 +124,26 @@ be another role's calc tree, the raw item's is this role's (same node as
 alignment fails, edgartools' weight is kept. Rows
 matched across filings by `get_row_id`; metadata from the newest filing a
 row appears in, except `weight` = newest non-NaN across filings. Values
-stored with **raw** XBRL signs.
-Rebuilt on `schema_version` mismatch (`CACHE_SCHEMA_VERSION`), missing/corrupt
-files, or `latest_filing_date` older than
+stored with **raw** XBRL signs. Because filers restructure calc trees, those
+`parent_concept` / `weight` columns are newest-filing metadata only:
+`Statement.calc_edges` (long frame `period, concept, parent_concept, weight`,
+stored as `{statement}_calc.parquet`) gives each period every arc of the
+statement role's calc tree (`xbrl.find_statement` → `calculation_trees`, no
+cross-role fallback) of the filing that period's values came from; calc code
+must use it. Without stored edges, `Statement` broadcasts the frame's own
+tree to every period. `Statement.children(row_id, period)` returns the
+non-dimensional child rows in that period's edges, `weight` = edge weight.
+Rebuilt on `schema_version` mismatch (`CACHE_SCHEMA_VERSION`) or
+missing/corrupt files. A bundle whose `latest_filing_date` is older than
 `EDGARTOOLS_ANNUAL_CACHE_MAX_AGE_MONTHS` (12) /
-`EDGARTOOLS_QUARTERLY_CACHE_MAX_AGE_MONTHS` (3). Company LRU size
-`EDGARTOOLS_COMPANY_CACHE_SIZE` (10), index `company_lru.json`.
+`EDGARTOOLS_QUARTERLY_CACHE_MAX_AGE_MONTHS` (3) (quarterly: newer of latest
+10-Q and latest 10-K, so a year-end 10-K keeps it fresh) is stale
+(`read_period_bundle` returns it with `stale=True` and keeps it on disk): `load_statement_set` then fetches the filing list and
+rebuilds only if SEC has a newer filing (freshness date ≠ stored); otherwise
+it serves the cached bundle. Fresh bundles make no SEC request. Company LRU
+size `EDGARTOOLS_COMPANY_CACHE_SIZE` (10), index `company_lru.json`. Pinned
+tickers (`set_pinned_tickers`, stored in `company_lru.json`) are exempt from
+LRU eviction and don't count toward the size; staleness still applies.
 
 Views are projections: `Statement.project(view, periods)` — summary =
 non-dimensional rows, standard = `in_standard` (edgartools' standard-view
@@ -135,13 +156,14 @@ client-side.
 `get_row_id` (only place ids are formed): `concept`, plus
 `|Axis=member` for every axis of a dimensional row (sorted by axis, axis
 prefix stripped, member QName kept), `#n` for repeats within one filing.
-`calc_residuals(statement)` (`src/models/calc_residuals.py`):
-`reported(parent) − Σ weight·child` over non-dimensional calc children (raw
-signs); children with NaN weight are excluded and counted
-(`n_nan_weight_children`), never assumed +1. Known, accepted residual: diluted
-shares (`WeightedAverageNumberOfDilutedSharesOutstanding`) always has a
-residual equal to the dilutive effect (edgartools uses the EPS-note calc role;
-its incremental-shares child is not on the income statement).
+`calc_residuals(statement)` (`src/models/calc_residuals.py`): per period,
+`reported(parent) − Σ weight·child` on that period's own `calc_edges` (raw
+signs; edge weights; first non-dimensional row per concept). NaN child values
+count 0 (`n_nan_children`); calc children with no non-dimensional row are
+counted in `n_missing_children`.
+Expected 0 on real filings (data test: AAPL/MU/SNDK all 0); the old diluted
+shares residual is gone (edges come from the statement role only, not the
+EPS-note role).
 `calc_residual_report` CLI runs it over the cache (read-only).
 
 **Wizard.**
@@ -270,7 +292,10 @@ NYI: every other wizard sub-page; wizard UI ↔ DuckDB; screener; analytics;
 finfetch.
 
 Tests cover clients, DBs, edgartools, Table, wizard DB. No web tests. Cache
-miss hits live SEC.
+miss hits live SEC. `pytest -m data` (deselected by default)
+runs the calc-residual check on real filings for the tickers in the gitignored
+`tests/data_test_tickers.txt` (pinned in the company LRU, loaded through the
+app cache).
 
 ## 7. Debt agents should not paper over
 

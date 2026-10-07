@@ -7,7 +7,15 @@ from __future__ import annotations
 
 import pandas as pd
 
-from src.models.statement import Statement
+from src.models.statement import (
+    CALC_EDGE_COLUMNS,
+    STATEMENT_METADATA_COLUMNS,
+    STATEMENT_TYPES,
+    Statement,
+    StatementSet,
+    StatementType,
+)
+from src.utils.text import clean_str
 
 P1, P2, P3 = "2024-12-31", "2023-12-31", "2022-12-31"
 
@@ -103,5 +111,61 @@ def _income_frame() -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def derived_calc_edges(frame: pd.DataFrame) -> pd.DataFrame:
+    """Calc edges of a single-filing frame, from its own columns.
+
+    Every non-dimensional row with a ``parent_concept`` and a known ``weight``
+    (1 when there is no ``weight`` column) becomes an edge in every period
+    column; a concept presented twice keeps its first row's edge.
+    """
+    periods = [c for c in frame.columns if c not in STATEMENT_METADATA_COLUMNS]
+    if "parent_concept" not in frame.columns or not periods:
+        return pd.DataFrame(
+            {
+                c: pd.Series(dtype=float if c == "weight" else str)
+                for c in CALC_EDGE_COLUMNS
+            }
+        )
+    if "dimension" in frame.columns:
+        rows = frame[~frame["dimension"].fillna(False).astype(bool)]
+    else:
+        rows = frame
+    if "weight" in rows.columns:
+        weights = pd.to_numeric(rows["weight"], errors="coerce").astype(float)
+    else:
+        weights = pd.Series(1.0, index=rows.index)
+    edges = pd.DataFrame(
+        {
+            "concept": rows["concept"].map(clean_str),
+            "parent_concept": rows["parent_concept"].map(clean_str),
+            "weight": weights,
+        }
+    )
+    edges = edges.dropna().drop_duplicates("concept", keep="first")
+    out = pd.concat([edges.assign(period=p) for p in periods], ignore_index=True)
+    out = out.loc[:, list(CALC_EDGE_COLUMNS)]
+    for col in ("period", "concept", "parent_concept"):
+        out[col] = out[col].astype(str)
+    out["weight"] = out["weight"].astype(float)
+    return out
+
+
+def make_statement(frame: pd.DataFrame, statement_type: StatementType) -> Statement:
+    """A :class:`Statement` whose calc edges are derived from ``frame``."""
+    return Statement(frame, statement_type, calc_edges=derived_calc_edges(frame))
+
+
+def make_statement_set(
+    frame: pd.DataFrame, calc_edges: pd.DataFrame | None = None
+) -> StatementSet:
+    """A :class:`StatementSet` whose three statements all use ``frame``; calc
+    edges are ``calc_edges`` when given, else derived from ``frame``."""
+    if calc_edges is None:
+        calc_edges = derived_calc_edges(frame)
+    return StatementSet(
+        **{st: Statement(frame, st, calc_edges=calc_edges) for st in STATEMENT_TYPES}
+    )
+
+
 def _income() -> Statement:
-    return Statement(_income_frame(), "income")
+    return make_statement(_income_frame(), "income")

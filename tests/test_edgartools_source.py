@@ -2,26 +2,54 @@
 
 from __future__ import annotations
 
-from datetime import date
+import json
+from datetime import UTC, date, datetime
+from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, call, patch
 
 import numpy as np
 import pandas as pd
 import pytest
+from edgar.xbrl.exceptions import StatementNotFound
 
+from src.api.edgartools import source
+from src.api.edgartools.cache import (
+    CachedStatementSet,
+    _load_index,
+    is_period_bundle_stale,
+    save_period_bundle,
+    touch_company_cache,
+)
 from src.api.edgartools.source import (
     _align,
-    _build_statement_dataframe,
+    _build_statement,
     load_statement_set,
+    setup_edgartools,
 )
 from src.config import MAX_CACHE_QUARTERS, MAX_CACHE_YEARS
-from src.models.statement import EDGARTOOLS_METADATA_COLUMNS, Statement, StatementSet
+from src.models.statement import (
+    CALC_EDGE_COLUMNS,
+    EDGARTOOLS_METADATA_COLUMNS,
+    Statement,
+    StatementSet,
+)
+from tests.statement_fixtures import make_statement, make_statement_set
 
 _GETTERS = {
     "income": "income_statement",
     "balance": "balance_sheet",
     "cashflow": "cash_flow_statement",
 }
+
+
+@pytest.fixture(autouse=True)
+def _isolated_edgartools_cache(monkeypatch, tmp_path, use_cache_dir) -> None:
+    """Keep setup_edgartools (run by load_statement_set) and the cache index
+    off the real data/ cache: every cache dir points at tmp_path."""
+    monkeypatch.setenv("EDGAR_LOCAL_DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(source, "EDGARTOOLS_CACHE_DIR", tmp_path)
+    use_cache_dir(tmp_path)
 
 
 def _filing_df(period_column: str, rows: list[dict]) -> pd.DataFrame:
@@ -103,17 +131,38 @@ def _default_standard(frame: pd.DataFrame) -> pd.DataFrame:
     return frame.loc[~drop].reset_index(drop=True)
 
 
+def _role(statement_type: str) -> str:
+    return f"http://example.com/role/{statement_type}"
+
+
 def _mock_xbrl(
     frames_by_statement: dict[str, pd.DataFrame],
     standard_by_statement: dict[str, pd.DataFrame | Exception] | None = None,
+    calc_trees: dict[str, dict[str, tuple[str | None, float]]] | None = None,
 ) -> MagicMock:
     """A filing whose statements return the given frames.
 
     ``to_dataframe(view="standard")`` returns ``standard_by_statement``'s frame
     (or raises it, if an exception), defaulting to :func:`_default_standard`.
+    ``calc_trees`` maps a statement type to its role's calc nodes
+    (``{element_id: (parent, weight)}``, default empty); ``find_statement``
+    resolves each statement's canonical type to that role.
     """
     xbrl = MagicMock()
     standard_by_statement = standard_by_statement or {}
+    calc_trees = calc_trees or {}
+    xbrl.find_statement.side_effect = lambda key: ([], _role(key), key)
+    xbrl.calculation_trees = {
+        _role(statement_type): SimpleNamespace(
+            all_nodes={
+                element_id: SimpleNamespace(parent=parent, weight=weight)
+                for element_id, (parent, weight) in calc_trees.get(
+                    statement_type, {}
+                ).items()
+            }
+        )
+        for statement_type in _GETTERS
+    }
     for statement_type, getter in _GETTERS.items():
         statement = MagicMock()
         statement.canonical_type = statement_type
@@ -137,7 +186,7 @@ def _to_dataframe_mock(xbrl: MagicMock, statement_type: str) -> MagicMock:
     return getattr(xbrl.statements, _GETTERS[statement_type]).return_value.to_dataframe
 
 
-# --- _build_statement_dataframe ---------------------------------------------
+# --- _build_statement ---------------------------------------------
 
 
 @patch("src.api.edgartools.source.determine_optimal_periods")
@@ -194,7 +243,7 @@ def test_build_one_raw_frame_with_newest_metadata(mock_periods: MagicMock) -> No
         {"xbrl_index": 1, "end_date": "2023-09-30", "period_type": "duration"},
     ]
 
-    df = _build_statement_dataframe(xbrls, "cashflow", max_periods=16)
+    df = _build_statement(xbrls, "cashflow", max_periods=16).frame
 
     mock_periods.assert_called_once_with(
         xbrls.xbrl_list, "CashFlowStatement", max_periods=16
@@ -215,6 +264,9 @@ def test_build_one_raw_frame_with_newest_metadata(mock_periods: MagicMock) -> No
         "in_standard",
         "2024-09-28",
         "2023-09-30",
+        "tags",
+        "origin",
+        "is_total",
     ]
     assert df["row_id"].tolist() == [
         "Cash",
@@ -240,7 +292,7 @@ def test_build_one_raw_frame_with_newest_metadata(mock_periods: MagicMock) -> No
     ]
     assert pd.isna(by_id.loc["OldOnly", "2024-09-28"])
 
-    statement = Statement(df, "cashflow")
+    statement = make_statement(df, "cashflow")
     assert statement.periods == ["2024-09-28", "2023-09-30"]
 
 
@@ -308,7 +360,7 @@ def test_build_keys_multi_axis_rows_by_every_axis(mock_periods: MagicMock) -> No
         {"xbrl_index": 1, "end_date": "2023-09-30", "period_type": "duration"},
     ]
 
-    df = _build_statement_dataframe(xbrls, "income", max_periods=16)
+    df = _build_statement(xbrls, "income", max_periods=16).frame
 
     segment = "ConsolidationItemsAxis=us-gaap_OperatingSegmentsMember"
     americas = f"Rev|{segment}|SegmentsAxis=AmericasMember"
@@ -325,7 +377,7 @@ def test_build_keys_multi_axis_rows_by_every_axis(mock_periods: MagicMock) -> No
         "|us-gaap:SegmentsAxis=AmericasMember"
     )
     assert pd.isna(by_id.loc["Rev", "dimension_key"])
-    Statement(df, "income")  # unique row ids
+    make_statement(df, "income")  # unique row ids
 
 
 @patch("src.api.edgartools.source.determine_optimal_periods")
@@ -343,7 +395,7 @@ def test_build_falls_back_to_primary_dimension_when_raw_misaligned(
         {"xbrl_index": 0, "end_date": "2024-09-28", "period_type": "duration"}
     ]
 
-    df = _build_statement_dataframe(xbrls, "income", max_periods=16)
+    df = _build_statement(xbrls, "income", max_periods=16).frame
 
     assert df["row_id"].tolist() == ["Rev|A=M"]
 
@@ -387,7 +439,7 @@ def test_build_takes_role_weight_from_raw_data(mock_periods: MagicMock) -> None:
         {"xbrl_index": 0, "end_date": "2023-09-30", "period_type": "duration"},
     ]
 
-    df = _build_statement_dataframe(xbrls, "cashflow", max_periods=16)
+    df = _build_statement(xbrls, "cashflow", max_periods=16).frame
 
     statement = xbrl.statements.cash_flow_statement.return_value
     statement.get_raw_data.assert_called_once_with(view="detailed")
@@ -411,7 +463,7 @@ def test_build_keeps_frame_weight_when_raw_misaligned(
         {"xbrl_index": 0, "end_date": "2024-09-28", "period_type": "duration"}
     ]
 
-    df = _build_statement_dataframe(xbrls, "income", max_periods=16)
+    df = _build_statement(xbrls, "income", max_periods=16).frame
 
     assert df["weight"].tolist() == [1.0]
     assert "Could not align raw data" in caplog.text
@@ -455,7 +507,7 @@ def test_build_weight_is_newest_non_nan_across_filings(
         for index, (end, *_) in enumerate(filings)
     ]
 
-    df = _build_statement_dataframe(xbrls, "cashflow", max_periods=16)
+    df = _build_statement(xbrls, "cashflow", max_periods=16).frame
 
     acq = df.set_index("row_id").loc["Acq"]
     assert acq["weight"] == -1.0
@@ -466,10 +518,180 @@ def test_build_weight_is_newest_non_nan_across_filings(
 @patch("src.api.edgartools.source.determine_optimal_periods")
 def test_build_empty_when_no_periods(mock_periods: MagicMock) -> None:
     mock_periods.return_value = []
-    df = _build_statement_dataframe(MagicMock(), "income", max_periods=16)
-    statement = Statement(df, "income")
+    df = _build_statement(MagicMock(), "income", max_periods=16).frame
+    statement = make_statement(df, "income")
     assert statement.periods == []
     assert statement.project("summary").empty
+
+
+@pytest.mark.parametrize(
+    ("column", "warns"), [("2026-09-30", True), ("2025-12-31", False)]
+)
+@patch("src.api.edgartools.source.determine_optimal_periods")
+def test_build_warns_when_filing_has_no_column_for_its_period(
+    mock_periods: MagicMock,
+    column: str,
+    warns: bool,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    frame = _filing_df(
+        column, [{"concept": "us-gaap_Revenues", "label": "Revenue", "value": 1.0}]
+    )
+    xbrls = MagicMock()
+    xbrls.xbrl_list = [_mock_xbrl({"income": frame})]
+    mock_periods.return_value = [
+        {
+            "xbrl_index": 0,
+            "start_date": "2025-01-01",
+            "end_date": "2025-12-31",
+            "duration_days": 364,
+            "period_type": "duration",
+        }
+    ]
+    # Parametrization: "2025-12-31" matches the period; "2026-09-30" does not.
+    with caplog.at_level("WARNING", logger=source.logger.name):
+        _build_statement(xbrls, "income", max_periods=8)
+
+    messages = [
+        r.getMessage() for r in caplog.records if "matches period" in r.getMessage()
+    ]
+    if warns:
+        assert len(messages) == 1
+        assert "income" in messages[0]
+        assert "2025-12-31" in messages[0]
+        assert "filing 0" in messages[0]
+    else:
+        assert messages == []
+
+
+# Old tree: ProfitLoss under NetIncomeLoss; new tree: pretax income directly.
+_OLD_TREE = {
+    "us-gaap_NetIncomeLoss": (None, 1.0),
+    "us-gaap_ProfitLoss": ("us-gaap_NetIncomeLoss", 1.0),
+    "us-gaap_MinorityInterest": ("us-gaap_NetIncomeLoss", -1.0),
+}
+_NEW_TREE = {
+    "us-gaap_NetIncomeLoss": (None, 1.0),
+    "us-gaap_IncomeBeforeTax": ("us-gaap_NetIncomeLoss", 1.0),
+    "us-gaap_IncomeTaxExpenseBenefit": ("us-gaap_NetIncomeLoss", -1.0),
+    # Calc-only concept (not presented on the statement): still an edge.
+    "aapl_NotPresented": ("us-gaap_IncomeBeforeTax", 1.0),
+}
+
+
+def _edges(frame: pd.DataFrame, period: str) -> set[tuple[str, str, float]]:
+    rows = frame[frame["period"] == period]
+    return set(
+        zip(rows["concept"], rows["parent_concept"], rows["weight"], strict=True)
+    )
+
+
+@patch("src.api.edgartools.source.determine_optimal_periods")
+def test_build_gives_each_period_its_own_filings_calc_tree(
+    mock_periods: MagicMock,
+) -> None:
+    rows = [{"concept": "us-gaap_NetIncomeLoss", "value": 1.0}]
+    newest = _mock_xbrl(
+        {"income": _filing_df("2024-09-28 (FY)", rows)},
+        calc_trees={"income": _NEW_TREE},
+    )
+    older = _mock_xbrl(
+        {"income": _filing_df("2015-09-03 (FY)", rows)},
+        calc_trees={"income": _OLD_TREE},
+    )
+    xbrls = MagicMock()
+    xbrls.xbrl_list = [newest, older]
+    mock_periods.return_value = [
+        {"xbrl_index": 0, "end_date": "2024-09-28", "period_type": "duration"},
+        {"xbrl_index": 0, "end_date": "2023-09-30", "period_type": "duration"},
+        {"xbrl_index": 1, "end_date": "2015-09-03", "period_type": "duration"},
+    ]
+
+    built = _build_statement(xbrls, "income", max_periods=16)
+
+    assert isinstance(built, Statement)
+    edges = built.calc_edges
+    assert list(edges.columns) == list(CALC_EDGE_COLUMNS)
+    new_edges = {
+        ("us-gaap_IncomeBeforeTax", "us-gaap_NetIncomeLoss", 1.0),
+        ("us-gaap_IncomeTaxExpenseBenefit", "us-gaap_NetIncomeLoss", -1.0),
+        ("aapl_NotPresented", "us-gaap_IncomeBeforeTax", 1.0),
+    }
+    assert _edges(edges, "2024-09-28") == new_edges
+    # A filing contributing two periods gives both its tree.
+    assert _edges(edges, "2023-09-30") == new_edges
+    assert _edges(edges, "2015-09-03") == {
+        ("us-gaap_ProfitLoss", "us-gaap_NetIncomeLoss", 1.0),
+        ("us-gaap_MinorityInterest", "us-gaap_NetIncomeLoss", -1.0),
+    }
+    for xbrl in (newest, older):
+        xbrl.find_statement.assert_called_once_with("income")
+
+    statement = Statement(built.frame, "income", calc_edges=edges)
+    pd.testing.assert_frame_equal(statement.calc_edges, edges)
+
+
+@patch("src.api.edgartools.source.determine_optimal_periods")
+def test_build_normalizes_colon_element_ids(mock_periods: MagicMock) -> None:
+    tree = {
+        "us-gaap:NetIncomeLoss": (None, 1.0),
+        "us-gaap:ProfitLoss": ("us-gaap:NetIncomeLoss", 1.0),
+        "us-gaap_Tax": ("us-gaap:NetIncomeLoss", -1.0),
+    }
+    xbrl = _mock_xbrl(
+        {"income": _filing_df("2024-09-28 (FY)", [{"concept": "X", "value": 1.0}])},
+        calc_trees={"income": tree},
+    )
+    xbrls = MagicMock()
+    xbrls.xbrl_list = [xbrl]
+    mock_periods.return_value = [
+        {"xbrl_index": 0, "end_date": "2024-09-28", "period_type": "duration"}
+    ]
+
+    edges = _build_statement(xbrls, "income", max_periods=16).calc_edges
+
+    assert _edges(edges, "2024-09-28") == {
+        ("us-gaap_ProfitLoss", "us-gaap_NetIncomeLoss", 1.0),
+        ("us-gaap_Tax", "us-gaap_NetIncomeLoss", -1.0),
+    }
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        StatementNotFound("IncomeStatement", 0.0, []),
+        "no-role",
+        "no-tree",
+    ],
+    ids=["not-found", "no-role", "no-tree"],
+)
+@patch("src.api.edgartools.source.determine_optimal_periods")
+def test_build_role_lookup_failure_gives_no_edges(
+    mock_periods: MagicMock, failure: object, caplog: pytest.LogCaptureFixture
+) -> None:
+    xbrl = _mock_xbrl(
+        {"income": _filing_df("2024-09-28 (FY)", [{"concept": "X", "value": 1.0}])},
+        calc_trees={"income": _NEW_TREE},
+    )
+    if isinstance(failure, Exception):
+        xbrl.find_statement.side_effect = failure
+    elif failure == "no-role":
+        xbrl.find_statement.side_effect = lambda key: ([], None, key)
+    else:
+        xbrl.calculation_trees = {}
+    xbrls = MagicMock()
+    xbrls.xbrl_list = [xbrl]
+    mock_periods.return_value = [
+        {"xbrl_index": 0, "end_date": "2024-09-28", "period_type": "duration"}
+    ]
+
+    with caplog.at_level("WARNING", logger="src.api.edgartools.source"):
+        built = _build_statement(xbrls, "income", max_periods=16)
+
+    assert built.calc_edges.empty
+    assert list(built.calc_edges.columns) == list(CALC_EDGE_COLUMNS)
+    assert built.frame["row_id"].tolist() == ["X"]
+    assert any("calc" in r.getMessage().lower() for r in caplog.records)
 
 
 def _rows(frame: pd.DataFrame, positions: list[int]) -> pd.DataFrame:
@@ -519,7 +741,7 @@ def test_build_stores_in_standard_from_newest_filing(mock_periods: MagicMock) ->
         {"xbrl_index": 1, "end_date": "2023-09-30", "period_type": "duration"},
     ]
 
-    df = _build_statement_dataframe(xbrls, "income", max_periods=16)
+    df = _build_statement(xbrls, "income", max_periods=16).frame
 
     flags = dict(zip(df["row_id"], df["in_standard"], strict=True))
     assert flags == {
@@ -530,7 +752,7 @@ def test_build_stores_in_standard_from_newest_filing(mock_periods: MagicMock) ->
         "Cost": True,
         "Old|X=Y": False,
     }
-    standard = Statement(df, "income").project("standard")
+    standard = make_statement(df, "income").project("standard")
     assert standard["row_id"].tolist() == [
         "Rev",
         "Rev|ProductOrServiceAxis=us-gaap:ProductMember",
@@ -570,10 +792,9 @@ def test_build_in_standard_falls_back_to_default(
         {"xbrl_index": 0, "end_date": "2024-09-28", "period_type": "duration"}
     ]
 
-    df = _build_statement_dataframe(xbrls, "income", max_periods=16)
+    df = _build_statement(xbrls, "income", max_periods=16).frame
 
-    assert df["in_standard"].isna().all()
-    assert Statement(df, "income").frame["in_standard"].tolist() == [True, True, False]
+    assert df["in_standard"].tolist() == [True, True, False]
 
 
 # --- _align -----------------------------------------------------------------
@@ -615,15 +836,30 @@ def _patch_fetch(
     mock_periods: MagicMock,
     xbrl: MagicMock,
     period_meta: dict,
+    *,
+    filing_dates: dict[str, str | None] | None = None,
 ) -> MagicMock:
+    """Mock ``Company``; ``filing_dates`` maps form -> latest filing date
+    (``None`` = no filings of that form). Every form defaults to 2024-11-01."""
     xbrls = MagicMock()
     xbrls.xbrl_list = [xbrl]
     mock_xbrls_cls.from_filings.return_value = xbrls
     company = MagicMock()
     company.cik = 320193
-    filings = MagicMock()
-    filings.end_date = "2024-11-01"
-    company.get_filings.return_value.head.return_value = filings
+    filing_dates = filing_dates or {}
+    filings_by_form: dict[str, MagicMock] = {}
+
+    def get_filings(*, form: str, amendments: bool) -> MagicMock:
+        if form not in filings_by_form:
+            filings = MagicMock()
+            latest = filing_dates.get(form, "2024-11-01")
+            filings.end_date = latest
+            filings.__iter__.return_value = iter([])
+            filings.head.return_value = filings
+            filings_by_form[form] = filings
+        return filings_by_form[form]
+
+    company.get_filings.side_effect = get_filings
     mock_company_cls.return_value = company
     mock_periods.return_value = [{"xbrl_index": 0, **period_meta}]
     return company
@@ -647,7 +883,7 @@ STATEMENT_CASES = [
 @patch.dict("os.environ", {"EDGAR_IDENTITY": "ScreenerApp/1.0 test@example.com"})
 @patch("src.api.edgartools.source.touch_company_cache")
 @patch("src.api.edgartools.source.save_period_bundle")
-@patch("src.api.edgartools.source.load_period_bundle")
+@patch("src.api.edgartools.source.read_period_bundle")
 @patch("src.api.edgartools.source.find_cached_cik")
 @patch("src.api.edgartools.source.determine_optimal_periods")
 @patch("src.api.edgartools.source.XBRLS")
@@ -687,8 +923,12 @@ def test_load_statement_set_fetches_builds_and_saves(
 
     expected_form = "10-K" if period == "annual" else "10-Q"
     expected_cap = MAX_CACHE_YEARS if period == "annual" else MAX_CACHE_QUARTERS
-    company.get_filings.assert_called_once_with(form=expected_form, amendments=False)
-    company.get_filings.return_value.head.assert_called_once_with(expected_cap)
+    assert company.get_filings.call_args_list[0] == call(
+        form=expected_form, amendments=False
+    )
+    company.get_filings(
+        form=expected_form, amendments=False
+    ).head.assert_called_once_with(expected_cap)
     assert all(c.kwargs["max_periods"] == expected_cap for c in mock_periods.mock_calls)
     for st in _GETTERS:
         assert _to_dataframe_mock(xbrl, st).call_args_list == [
@@ -701,11 +941,73 @@ def test_load_statement_set_fetches_builds_and_saves(
     assert save_kwargs["cik"] == 320193
     assert save_kwargs["period"] == period
     assert save_kwargs["latest_filing_date"] == date(2024, 11, 1)
-    assert set(save_kwargs["frames"]) == {"income", "balance", "cashflow"}
+    assert save_kwargs["statement_set"] is statement_set
     mock_touch_cache.assert_called_once()
 
 
-def _cached_bundle() -> dict[str, pd.DataFrame]:
+FRESHNESS_CASES = [
+    # (period, latest 10-K, latest 10-Q, stored freshness date, stale on
+    # 2026-10-05); quarterly max age 3 months, annual 12.
+    ("quarterly", "2026-08-20", "2026-05-01", date(2026, 8, 20), False),
+    ("quarterly", "2025-08-20", "2026-05-01", date(2026, 5, 1), True),
+    ("quarterly", None, "2026-05-01", date(2026, 5, 1), True),
+    ("annual", "2025-08-20", "2026-09-01", date(2025, 8, 20), True),
+    ("annual", "2026-08-20", "2026-05-01", date(2026, 8, 20), False),
+]
+
+
+@pytest.mark.parametrize(
+    ("period", "latest_10k", "latest_10q", "expected", "stale"), FRESHNESS_CASES
+)
+@patch.dict("os.environ", {"EDGAR_IDENTITY": "ScreenerApp/1.0 test@example.com"})
+@patch("src.api.edgartools.source.touch_company_cache")
+@patch("src.api.edgartools.source.save_period_bundle")
+@patch("src.api.edgartools.source.read_period_bundle")
+@patch("src.api.edgartools.source.find_cached_cik")
+@patch("src.api.edgartools.source.determine_optimal_periods")
+@patch("src.api.edgartools.source.XBRLS")
+@patch("src.api.edgartools.source.Company")
+def test_load_statement_set_freshness_date_uses_10k_for_quarterly(
+    mock_company_cls: MagicMock,
+    mock_xbrls_cls: MagicMock,
+    mock_periods: MagicMock,
+    mock_find_cached_cik: MagicMock,
+    mock_load_bundle: MagicMock,
+    mock_save_bundle: MagicMock,
+    mock_touch_cache: MagicMock,
+    period: str,
+    latest_10k: str | None,
+    latest_10q: str,
+    expected: date,
+    stale: bool,
+) -> None:
+    """Quarterly bundles store the newer of the latest 10-K and 10-Q dates
+    (a year-end 10-K replaces the Q4 10-Q); annual stores the latest 10-K."""
+    mock_find_cached_cik.return_value = None
+    mock_load_bundle.return_value = None
+    period_meta = {"end_date": "2026-03-31", "period_type": "duration"}
+    rows = [{"concept": "Revenue", "label": "Revenue", "value": 1.0}]
+    xbrl = _mock_xbrl({st: _filing_df("2026-03-31 (Q)", rows) for st in _GETTERS})
+    _patch_fetch(
+        mock_company_cls,
+        mock_xbrls_cls,
+        mock_periods,
+        xbrl,
+        period_meta,
+        filing_dates={"10-K": latest_10k, "10-Q": latest_10q},
+    )
+
+    load_statement_set("MU", period)
+
+    stored = mock_save_bundle.call_args.kwargs["latest_filing_date"]
+    assert stored == expected
+    assert (
+        is_period_bundle_stale(stored, period=period, reference=date(2026, 10, 5))
+        is stale
+    )
+
+
+def _cached_set() -> StatementSet:
     raw = pd.DataFrame(
         {
             "concept": ["Revenue", "Capex", "Rev"],
@@ -723,13 +1025,21 @@ def _cached_bundle() -> dict[str, pd.DataFrame]:
             "2022-09-24": [80.0, 3.0, 40.0],
         }
     )
-    return {st: Statement(raw, st).frame for st in ("income", "balance", "cashflow")}
+    edges = pd.DataFrame(
+        {
+            "period": ["2024-09-28", "2022-09-24"],
+            "concept": ["Capex", "Capex"],
+            "parent_concept": ["Revenue", "Revenue"],
+            "weight": [-1.0, 1.0],
+        }
+    )
+    return make_statement_set(make_statement(raw, "income").frame, edges)
 
 
 @patch.dict("os.environ", {"EDGAR_IDENTITY": "ScreenerApp/1.0 test@example.com"})
 @patch("src.api.edgartools.source.touch_company_cache")
 @patch("src.api.edgartools.source.save_period_bundle")
-@patch("src.api.edgartools.source.load_period_bundle")
+@patch("src.api.edgartools.source.read_period_bundle")
 @patch("src.api.edgartools.source.find_cached_cik")
 @patch("src.api.edgartools.source.Company")
 def test_load_statement_set_returns_cached_without_sec_fetch(
@@ -740,11 +1050,16 @@ def test_load_statement_set_returns_cached_without_sec_fetch(
     mock_touch_cache: MagicMock,
 ) -> None:
     mock_find_cached_cik.return_value = "320193"
-    mock_load_bundle.return_value = _cached_bundle()
+    mock_load_bundle.return_value = CachedStatementSet(
+        _cached_set(), date(2024, 11, 1), "annual", reference=date(2024, 12, 1)
+    )
 
     statement_set = load_statement_set("AAPL", "annual")
 
     assert statement_set.periods == ("2024-09-28", "2023-09-30", "2022-09-24")
+    pd.testing.assert_frame_equal(
+        statement_set.income.calc_edges, _cached_set().income.calc_edges
+    )
     mock_load_bundle.assert_called_once_with(
         cik="320193",
         period="annual",
@@ -752,9 +1067,220 @@ def test_load_statement_set_returns_cached_without_sec_fetch(
     )
     mock_company_cls.assert_not_called()
     mock_save_bundle.assert_not_called()
-    mock_touch_cache.assert_called_once_with(
-        cik="320193",
-        ticker="AAPL",
-        cache_dir=mock_touch_cache.call_args.kwargs["cache_dir"],
-        max_companies=mock_touch_cache.call_args.kwargs["max_companies"],
+    mock_touch_cache.assert_called_once_with(cik="320193", ticker="AAPL")
+
+
+@patch.dict("os.environ", {"EDGAR_IDENTITY": "ScreenerApp/1.0 test@example.com"})
+@patch("src.api.edgartools.source.read_period_bundle")
+@patch("src.api.edgartools.source.find_cached_cik")
+@patch("src.api.edgartools.source.Company")
+def test_load_statement_set_does_not_reread_missing_bundle_for_same_cik(
+    mock_company_cls: MagicMock,
+    mock_find_cached_cik: MagicMock,
+    mock_read_bundle: MagicMock,
+) -> None:
+    mock_find_cached_cik.return_value = "320193"
+    mock_read_bundle.return_value = None
+    mock_company_cls.return_value.cik = 320193
+    mock_company_cls.return_value.get_filings.side_effect = RuntimeError("stop")
+
+    with pytest.raises(RuntimeError, match="stop"):
+        load_statement_set("AAPL", "annual")
+
+    mock_read_bundle.assert_called_once()
+
+
+# --- stale bundles: rebuilt only when SEC has a newer filing ----------------
+# These use the real cache module on the autouse fixture's tmp_path cache dir.
+
+_TODAY = datetime.now(UTC).date()
+_STALE_DATE = date(_TODAY.year - 2, 1, 2)  # stale for annual and quarterly
+
+
+def _seed_cache(cache_dir: Path, period: str, latest_filing_date: date) -> None:
+    save_period_bundle(
+        cik=320193,
+        period=period,
+        latest_filing_date=latest_filing_date,
+        statement_set=_cached_set(),
+        cache_dir=cache_dir,
     )
+    touch_company_cache(cik=320193, ticker="AAPL")
+
+
+def _last_accessed(cache_dir: Path) -> str:
+    return _load_index(cache_dir)["companies"]["320193"]["last_accessed"]
+
+
+def _stored_filing_date(cache_dir: Path, period: str) -> str:
+    meta = cache_dir / "companies" / "320193" / period / "meta.json"
+    return json.loads(meta.read_text())["latest_filing_date"]
+
+
+@pytest.fixture
+def _sec(tmp_path):
+    """Patch SEC access for load_statement_set; yields the mocks."""
+    with (
+        patch.dict(
+            "os.environ", {"EDGAR_IDENTITY": "ScreenerApp/1.0 test@example.com"}
+        ),
+        patch.object(source, "Company") as company_cls,
+        patch.object(source, "XBRLS") as xbrls_cls,
+        patch.object(source, "determine_optimal_periods") as periods,
+    ):
+        yield SimpleNamespace(company=company_cls, xbrls=xbrls_cls, periods=periods)
+
+
+def _patch_sec_filings(sec, filing_dates: dict[str, str | None]) -> MagicMock:
+    rows = [{"concept": "Revenue", "label": "Revenue", "value": 1.0}]
+    xbrl = _mock_xbrl({st: _filing_df("2026-03-31 (Q)", rows) for st in _GETTERS})
+    return _patch_fetch(
+        sec.company,
+        sec.xbrls,
+        sec.periods,
+        xbrl,
+        {"end_date": "2026-03-31", "period_type": "duration"},
+        filing_dates=filing_dates,
+    )
+
+
+def test_fresh_bundle_makes_no_sec_calls(tmp_path, _sec) -> None:
+    _seed_cache(tmp_path, "annual", _TODAY)
+
+    statement_set = load_statement_set("AAPL", "annual")
+
+    assert statement_set.periods == ("2024-09-28", "2023-09-30", "2022-09-24")
+    _sec.company.assert_not_called()
+    _sec.xbrls.from_filings.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("period", "filing_dates"),
+    [
+        ("annual", {"10-K": _STALE_DATE.isoformat()}),
+        # Freshness date is the latest 10-K, newer than the latest 10-Q.
+        (
+            "quarterly",
+            {"10-K": _STALE_DATE.isoformat(), "10-Q": "2000-01-01"},
+        ),
+        ("quarterly", {"10-K": "2000-01-01", "10-Q": _STALE_DATE.isoformat()}),
+    ],
+)
+def test_stale_bundle_without_newer_filing_is_served_from_cache(
+    tmp_path, _sec, period: str, filing_dates: dict[str, str]
+) -> None:
+    _seed_cache(tmp_path, period, _STALE_DATE)
+    before = _last_accessed(tmp_path)
+    company = _patch_sec_filings(_sec, filing_dates)
+
+    statement_set = load_statement_set("AAPL", period)
+
+    assert statement_set.periods == ("2024-09-28", "2023-09-30", "2022-09-24")
+    assert company.get_filings.call_args_list[0] == call(
+        form=source.FORM_BY_PERIOD[period], amendments=False
+    )
+    _sec.xbrls.from_filings.assert_not_called()
+    _sec.periods.assert_not_called()
+    assert _stored_filing_date(tmp_path, period) == _STALE_DATE.isoformat()
+    assert _last_accessed(tmp_path) > before
+
+
+@pytest.mark.parametrize(
+    ("period", "filing_dates", "expected"),
+    [
+        ("annual", {"10-K": "2026-09-01"}, "2026-09-01"),
+        ("quarterly", {"10-K": "2000-01-01", "10-Q": "2026-08-01"}, "2026-08-01"),
+        # A year-end 10-K is the newer filing for a quarterly bundle.
+        (
+            "quarterly",
+            {"10-K": "2026-09-01", "10-Q": _STALE_DATE.isoformat()},
+            "2026-09-01",
+        ),
+    ],
+)
+def test_stale_bundle_with_newer_filing_is_rebuilt(
+    tmp_path, _sec, period: str, filing_dates: dict[str, str], expected: str
+) -> None:
+    _seed_cache(tmp_path, period, _STALE_DATE)
+    _patch_sec_filings(_sec, filing_dates)
+
+    statement_set = load_statement_set("AAPL", period)
+
+    assert statement_set.periods == ("2026-03-31",)
+    _sec.xbrls.from_filings.assert_called_once()
+    assert _stored_filing_date(tmp_path, period) == expected
+
+
+@pytest.mark.parametrize("damage", ["schema", "corrupt"])
+def test_unusable_bundle_is_rebuilt_even_without_newer_filing(
+    tmp_path, _sec, damage: str
+) -> None:
+    _seed_cache(tmp_path, "annual", _STALE_DATE)
+    bundle_dir = tmp_path / "companies" / "320193" / "annual"
+    if damage == "schema":
+        meta_path = bundle_dir / "meta.json"
+        meta = json.loads(meta_path.read_text())
+        meta["schema_version"] = -1
+        meta_path.write_text(json.dumps(meta))
+    else:
+        (bundle_dir / "income.parquet").write_bytes(b"not parquet")
+    _patch_sec_filings(_sec, {"10-K": _STALE_DATE.isoformat()})
+
+    statement_set = load_statement_set("AAPL", "annual")
+
+    assert statement_set.periods == ("2026-03-31",)
+    _sec.xbrls.from_filings.assert_called_once()
+    assert _stored_filing_date(tmp_path, "annual") == _STALE_DATE.isoformat()
+
+
+def _write_app_cache(cache_dir: Path, http_cache_bytes: int) -> list[Path]:
+    """Write an edgartools HTTP cache entry plus our own cache files."""
+    host = cache_dir / "_tcache" / "www.sec.gov"
+    host.mkdir(parents=True)
+    (host / "doc").write_bytes(b"x" * http_cache_bytes)
+    (host / "doc.meta").write_bytes(b"{}")
+    ours = [
+        cache_dir / "companies" / "320193" / "annual.parquet",
+        cache_dir / "company_lru.json",
+    ]
+    for path in ours:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"ours")
+    return ours
+
+
+@patch.dict("os.environ", {"EDGAR_IDENTITY": "ScreenerApp/1.0 test@example.com"})
+def test_setup_edgartools_clears_http_cache_over_limit(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(source, "EDGARTOOLS_HTTP_CACHE_MAX_MB", 1)
+    monkeypatch.setattr(source, "load_project_dotenv", lambda: None)
+    ours = _write_app_cache(tmp_path, 1_100_000)
+
+    setup_edgartools()
+
+    tcache = tmp_path / "_tcache"
+    assert not tcache.exists() or not any(p.is_file() for p in tcache.rglob("*"))
+    assert all(path.read_bytes() == b"ours" for path in ours)
+
+
+def test_clear_http_cache_if_over_keeps_cache_under_limit(tmp_path) -> None:
+    ours = _write_app_cache(tmp_path, 400)
+
+    source._clear_http_cache_if_over(max_bytes=1_000)
+
+    assert (tmp_path / "_tcache" / "www.sec.gov" / "doc").stat().st_size == 400
+    assert (tmp_path / "_tcache" / "www.sec.gov" / "doc.meta").exists()
+    assert all(path.exists() for path in ours)
+
+
+def test_clear_http_cache_if_over_uses_edgartools_clear_cache(monkeypatch) -> None:
+    clear = MagicMock(
+        side_effect=[
+            {"files_deleted": 2, "bytes_freed": 501, "errors": 0},
+            {"files_deleted": 2, "bytes_freed": 501, "errors": 0},
+        ]
+    )
+    monkeypatch.setattr(source, "clear_cache", clear)
+
+    source._clear_http_cache_if_over(max_bytes=500)
+
+    assert clear.call_args_list == [call(dry_run=True), call(dry_run=False)]
