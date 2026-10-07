@@ -35,6 +35,7 @@ from src.models.statement import (
     Statement,
     StatementSet,
 )
+from tests.statement_fixtures import make_statement
 
 _GETTERS = {
     "income": "income_statement",
@@ -288,7 +289,7 @@ def test_build_one_raw_frame_with_newest_metadata(mock_periods: MagicMock) -> No
     ]
     assert pd.isna(by_id.loc["OldOnly", "2024-09-28"])
 
-    statement = Statement(df, "cashflow")
+    statement = make_statement(df, "cashflow")
     assert statement.periods == ["2024-09-28", "2023-09-30"]
 
 
@@ -373,7 +374,7 @@ def test_build_keys_multi_axis_rows_by_every_axis(mock_periods: MagicMock) -> No
         "|us-gaap:SegmentsAxis=AmericasMember"
     )
     assert pd.isna(by_id.loc["Rev", "dimension_key"])
-    Statement(df, "income")  # unique row ids
+    make_statement(df, "income")  # unique row ids
 
 
 @patch("src.api.edgartools.source.determine_optimal_periods")
@@ -515,7 +516,7 @@ def test_build_weight_is_newest_non_nan_across_filings(
 def test_build_empty_when_no_periods(mock_periods: MagicMock) -> None:
     mock_periods.return_value = []
     df = _build_statement_dataframe(MagicMock(), "income", max_periods=16).frame
-    statement = Statement(df, "income")
+    statement = make_statement(df, "income")
     assert statement.periods == []
     assert statement.project("summary").empty
 
@@ -748,7 +749,7 @@ def test_build_stores_in_standard_from_newest_filing(mock_periods: MagicMock) ->
         "Cost": True,
         "Old|X=Y": False,
     }
-    standard = Statement(df, "income").project("standard")
+    standard = make_statement(df, "income").project("standard")
     assert standard["row_id"].tolist() == [
         "Rev",
         "Rev|ProductOrServiceAxis=us-gaap:ProductMember",
@@ -791,7 +792,11 @@ def test_build_in_standard_falls_back_to_default(
     df = _build_statement_dataframe(xbrls, "income", max_periods=16).frame
 
     assert df["in_standard"].isna().all()
-    assert Statement(df, "income").frame["in_standard"].tolist() == [True, True, False]
+    assert make_statement(df, "income").frame["in_standard"].tolist() == [
+        True,
+        True,
+        False,
+    ]
 
 
 # --- _align -----------------------------------------------------------------
@@ -1037,7 +1042,7 @@ def _cached_bundle() -> dict[str, StatementFrames]:
         }
     )
     return {
-        st: StatementFrames(Statement(raw, st).frame, edges)
+        st: StatementFrames(make_statement(raw, st).frame, edges)
         for st in ("income", "balance", "cashflow")
     }
 

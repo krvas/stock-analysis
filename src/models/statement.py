@@ -30,6 +30,8 @@ from typing import Any, Literal
 import numpy as np
 import pandas as pd
 
+from src.utils.text import clean_str, is_missing
+
 StatementType = Literal["income", "balance", "cashflow"]
 StatementView = Literal["summary", "standard", "detailed"]
 
@@ -112,26 +114,9 @@ class DuplicateRowIdError(ValueError):
 
 def is_total_label(label: object) -> bool:
     """Return whether ``label`` looks like a total row (contains the word 'total')."""
-    if _is_missing(label):
+    if is_missing(label):
         return False
     return bool(_TOTAL_LABEL_RE.search(str(label)))
-
-
-def _is_missing(value: object) -> bool:
-    if value is None:
-        return True
-    try:
-        return bool(pd.isna(value))
-    except (TypeError, ValueError):
-        # list-like values: not a scalar missing marker
-        return False
-
-
-def _clean_str(value: object) -> str | None:
-    if _is_missing(value):
-        return None
-    text = str(value).strip()
-    return text or None
 
 
 _DIMENSION_PAIR_SEPARATOR = "|"
@@ -147,8 +132,8 @@ def format_dimension_key(pairs: Sequence[tuple[str, str]]) -> str | None:
     """
     parts = []
     for axis, member in pairs:
-        axis_text = _clean_str(axis)
-        member_text = _clean_str(member)
+        axis_text = clean_str(axis)
+        member_text = clean_str(member)
         if axis_text is None and member_text is None:
             continue
         parts.append(f"{axis_text or ''}={member_text or ''}")
@@ -181,11 +166,11 @@ def dimension_pairs(row: Mapping[str, Any] | pd.Series) -> list[tuple[str, str]]
     """All ``(axis, member)`` pairs of a row: from ``dimension_key`` when present,
     else the primary ``dimension_axis`` / ``dimension_member``; ``[]`` if none.
     """
-    key = _clean_str(row.get("dimension_key"))
+    key = clean_str(row.get("dimension_key"))
     if key is not None:
         return _parse_dimension_key(key)
-    axis = _clean_str(row.get("dimension_axis"))
-    member = _clean_str(row.get("dimension_member"))
+    axis = clean_str(row.get("dimension_axis"))
+    member = clean_str(row.get("dimension_member"))
     if axis is None and member is None:
         return []
     return [(axis or "", member or "")]
@@ -218,7 +203,7 @@ def get_row_id(row: Mapping[str, Any] | pd.Series, *, occurrence: int = 1) -> st
     """
     if occurrence < 1:
         raise ValueError("occurrence must be >= 1")
-    concept = _clean_str(row.get("concept"))
+    concept = clean_str(row.get("concept"))
     if concept is None:
         raise ValueError("cannot form a row id for a row without a concept")
     pairs = sorted(
@@ -239,7 +224,7 @@ def _normalize_tags(value: object) -> tuple[str, ...]:
     """
     if isinstance(value, str):
         return (value,)
-    if value is None or (np.ndim(value) == 0 and _is_missing(value)):
+    if value is None or (np.ndim(value) == 0 and is_missing(value)):
         return ()
     return tuple(sorted({str(tag) for tag in value}))
 
@@ -270,52 +255,17 @@ def _presentation_ancestors(df: pd.DataFrame, rows: pd.Series) -> set[str]:
         return set()
     parent_of: dict[str, str] = {}
     for concept, parent in zip(df["concept"], df["parent_abstract_concept"]):
-        parent_text = _clean_str(parent)
+        parent_text = clean_str(parent)
         if parent_text is not None and concept not in parent_of:
             parent_of[concept] = parent_text
 
     ancestors: set[str] = set()
     for parent in df.loc[rows, "parent_abstract_concept"]:
-        current = _clean_str(parent)
+        current = clean_str(parent)
         while current is not None and current not in ancestors:
             ancestors.add(current)
             current = parent_of.get(current)
     return ancestors
-
-
-def _derived_calc_edges(df: pd.DataFrame, periods: Sequence[str]) -> pd.DataFrame:
-    """Calc edges of a single-filing statement, from the frame's own columns.
-
-    Every non-dimensional row with a ``parent_concept`` and a known
-    ``weight`` (1 when the frame has no ``weight`` column) becomes an edge in
-    every period; a concept presented twice keeps its first row's edge.
-    Rows whose ``weight`` is NaN are left out (edges never carry NaN).
-    """
-    if "parent_concept" not in df.columns or not periods:
-        return _empty_calc_edges()
-    rows = df[~bool_flag(df, "dimension")]
-    parents = rows["parent_concept"].map(_clean_str)
-    if "weight" in rows.columns:
-        weights = pd.to_numeric(rows["weight"], errors="coerce").astype(float)
-    else:
-        weights = pd.Series(1.0, index=rows.index)
-    edges = pd.DataFrame(
-        {
-            "concept": rows["concept"].map(_clean_str),
-            "parent_concept": parents,
-            "weight": weights,
-        }
-    )
-    edges = edges.dropna().drop_duplicates("concept", keep="first")
-    return _normalize_calc_edges(
-        pd.concat(
-            [edges.assign(period=period) for period in periods], ignore_index=True
-        )
-    )
-
-
-def _empty_calc_edges() -> pd.DataFrame:
-    return _normalize_calc_edges(pd.DataFrame(columns=list(CALC_EDGE_COLUMNS)))
 
 
 def _normalize_calc_edges(edges: pd.DataFrame) -> pd.DataFrame:
@@ -368,16 +318,15 @@ class Statement:
     :class:`Statement`.
 
     ``calc_edges`` is the per-period calc tree (see the module doc and
-    :attr:`calc_edges`). When omitted it is derived from the frame's
-    ``parent_concept`` / ``weight`` columns, broadcast to every period: the
-    semantics of a statement built from a single filing.
+    :attr:`calc_edges`); it is required and validated against the frame's
+    periods.
     """
 
     def __init__(
         self,
         frame: pd.DataFrame,
         statement_type: StatementType,
-        calc_edges: pd.DataFrame | None = None,
+        calc_edges: pd.DataFrame,
     ) -> None:
         if statement_type not in STATEMENT_TYPES:
             raise ValueError(f"unknown statement_type '{statement_type}'")
@@ -417,11 +366,7 @@ class Statement:
         self._frame = df
         self.statement_type: StatementType = statement_type
         periods = self.periods
-        self._calc_edges = (
-            _derived_calc_edges(df, periods)
-            if calc_edges is None
-            else _validated_calc_edges(calc_edges, periods)
-        )
+        self._calc_edges = _validated_calc_edges(calc_edges, periods)
 
     def __repr__(self) -> str:
         return (
@@ -515,7 +460,7 @@ class Statement:
         calc edges here (wiring inserted rows into the calc tree is the
         adjustments engine's job).
         """
-        if _clean_str(row.get("origin")) is None:
+        if clean_str(row.get("origin")) is None:
             raise ValueError("inserted rows must supply an 'origin'")
         allowed = set(self._frame.columns) | STATEMENT_METADATA_COLUMNS
         unknown = sorted(set(row) - allowed)
@@ -526,7 +471,7 @@ class Statement:
         for col in STATEMENT_METADATA_COLUMNS - set(self._frame.columns):
             if col in row:
                 record[col] = row[col]
-        record["row_id"] = _clean_str(row.get("row_id")) or get_row_id(row)
+        record["row_id"] = clean_str(row.get("row_id")) or get_row_id(row)
         record["tags"] = _normalize_tags(row.get("tags"))
         if "is_total" not in row:
             record["is_total"] = is_total_label(row.get("label"))

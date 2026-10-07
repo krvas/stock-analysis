@@ -18,7 +18,16 @@ from src.models.statement import (
     is_total_label,
 )
 from src.models.table import STATEMENT_VIEW_METADATA_COLUMNS
-from tests.statement_fixtures import P1, P2, P3, _income, _income_frame, _row
+from tests.statement_fixtures import (
+    P1,
+    P2,
+    P3,
+    _income,
+    _income_frame,
+    _row,
+    derived_calc_edges,
+    make_statement,
+)
 
 # --- get_row_id --------------------------------------------------------------
 
@@ -136,7 +145,7 @@ def test_is_total_label() -> None:
 def test_constructor_fills_added_columns_without_mutating_input() -> None:
     frame = _income_frame()
     before = frame.copy()
-    statement = Statement(frame, "income")
+    statement = make_statement(frame, "income")
 
     pd.testing.assert_frame_equal(frame, before)
     df = statement.frame
@@ -162,7 +171,7 @@ def test_constructor_fills_added_columns_without_mutating_input() -> None:
 def test_constructor_fills_missing_in_standard_cells_with_default() -> None:
     frame = _income_frame()
     frame["in_standard"] = [True, True, False, None, None, True, True, True]
-    df = Statement(frame, "income").frame
+    df = make_statement(frame, "income").frame
     assert df["in_standard"].dtype == bool
     # Stored flags win; missing cells get the default (US is a breakdown).
     assert df["in_standard"].tolist() == [
@@ -180,7 +189,7 @@ def test_constructor_fills_missing_in_standard_cells_with_default() -> None:
 def test_constructor_normalizes_parquet_style_tags() -> None:
     frame = _income_frame()
     frame["tags"] = [None] * (len(frame) - 1) + [["da", "b"]]
-    statement = Statement(frame, "income")
+    statement = make_statement(frame, "income")
     assert statement.frame["tags"].iloc[-1] == ("b", "da")
     assert statement.frame["tags"].iloc[0] == ()
 
@@ -190,12 +199,12 @@ def test_constructor_raises_on_duplicate_row_ids() -> None:
         [_row("Revenues", "Revenue"), _row("Revenues", "Revenue again")]
     )
     with pytest.raises(DuplicateRowIdError, match="Revenues"):
-        Statement(frame, "income")
+        make_statement(frame, "income")
 
 
 def test_constructor_rejects_unknown_statement_type() -> None:
     with pytest.raises(ValueError):
-        Statement(_income_frame(), "equity")  # type: ignore[arg-type]
+        make_statement(_income_frame(), "equity")  # type: ignore[arg-type]
 
 
 # --- find / children ---------------------------------------------------------
@@ -264,7 +273,7 @@ def test_project_standard_filters_on_stored_in_standard() -> None:
     drops (``in_standard`` False) is hidden in standard, shown in detailed."""
     frame = _income_frame()
     frame["in_standard"] = [True, True, False, False, True, True, True, True]
-    statement = Statement(frame, "income")
+    statement = make_statement(frame, "income")
     product = "Revenues|ProductOrServiceAxis=ProductMember"
     assert product not in statement.project("standard")["row_id"].tolist()
     assert product in statement.project("detailed")["row_id"].tolist()
@@ -305,7 +314,7 @@ def test_project_keeps_only_abstracts_with_kept_descendants() -> None:
         _row("Dead", "Dead", parent_abstract_concept="Empty", **{P2: 2.0}),
         _row("Orphan", "Orphan header", abstract=True),
     ]
-    statement = Statement(pd.DataFrame(rows), "income")
+    statement = make_statement(pd.DataFrame(rows), "income")
 
     # Nested ancestors of a kept row survive; headers over empty rows do not.
     assert statement.project("detailed", periods=[P1])["row_id"].tolist() == [
@@ -334,7 +343,7 @@ def test_project_drops_abstract_whose_only_descendants_are_filtered_by_view() ->
             **{P1: 1.0},
         ),
     ]
-    statement = Statement(pd.DataFrame(rows), "income")
+    statement = make_statement(pd.DataFrame(rows), "income")
     assert statement.project("summary").empty
     assert statement.project("detailed")["row_id"].tolist() == [
         "Geo",
@@ -438,7 +447,7 @@ def _per_period_edges() -> pd.DataFrame:
     )
 
 
-def test_calc_edges_default_broadcasts_frame_tree_to_every_period() -> None:
+def test_derived_calc_edges_broadcasts_frame_tree_to_every_period() -> None:
     frame = _income_frame()
     # A NaN-weight child carries no edge; a duplicated concept keeps its first.
     frame.loc[frame["concept"] == "ResearchAndDevelopmentExpense", "parent_concept"] = (
@@ -452,7 +461,7 @@ def test_calc_edges_default_broadcasts_frame_tree_to_every_period() -> None:
         "CostOfRevenue#2",
     ]
 
-    edges = Statement(frame, "income").calc_edges
+    edges = derived_calc_edges(frame)
 
     assert list(edges.columns) == list(CALC_EDGE_COLUMNS)
     expected = {
@@ -464,9 +473,9 @@ def test_calc_edges_default_broadcasts_frame_tree_to_every_period() -> None:
     assert len(edges) == 3 * len(expected)
 
 
-def test_calc_edges_default_empty_without_parent_column() -> None:
+def test_derived_calc_edges_empty_without_parent_column() -> None:
     frame = _income_frame().drop(columns=["parent_concept"])
-    edges = Statement(frame, "income").calc_edges
+    edges = derived_calc_edges(frame)
     assert edges.empty
     assert list(edges.columns) == list(CALC_EDGE_COLUMNS)
 
@@ -525,7 +534,7 @@ def test_calc_edges_carried_by_with_values_and_insert() -> None:
 
 def _minimal(statement_type: str) -> Statement:
     frame = pd.DataFrame([_row("A", "A", **{P1: 1.0})])
-    return Statement(frame, statement_type)  # type: ignore[arg-type]
+    return make_statement(frame, statement_type)  # type: ignore[arg-type]
 
 
 def test_statement_set_get_and_project() -> None:
