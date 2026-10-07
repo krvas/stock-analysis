@@ -17,9 +17,9 @@ from src.api.edgartools.cache import (
     find_cached_cik,
     get_cached_company_list,
     get_pinned_tickers,
-    is_period_bundle_stale,
-    read_period_bundle,
-    save_period_bundle,
+    is_entry_stale,
+    read_cache_entry,
+    save_cache_entry,
     set_pinned_tickers,
     touch_company_cache,
 )
@@ -104,12 +104,12 @@ def _save(cache_dir: Path, **overrides) -> None:
         "cache_dir": cache_dir,
     }
     kwargs.update(overrides)
-    save_period_bundle(**kwargs)
+    save_cache_entry(**kwargs)
 
 
 def _load(cache_dir: Path, period: str = "annual", reference=date(2025, 1, 1)):
     """The bundle if usable and fresh, else None (unusable ones are pruned)."""
-    cached = read_period_bundle(
+    cached = read_cache_entry(
         cik=320193, period=period, cache_dir=cache_dir, reference=reference
     )
     return cached.statement_set if cached is not None and not cached.stale else None
@@ -120,8 +120,8 @@ def test_save_and_load_round_trips_raw_frames(tmp_path: Path) -> None:
     statement_set = _sample_set()
     _save(cache_dir, statement_set=statement_set)
 
-    bundle_dir = cache_dir / "companies" / "320193" / "annual"
-    assert sorted(p.name for p in bundle_dir.iterdir()) == [
+    entry_dir = cache_dir / "companies" / "320193" / "annual"
+    assert sorted(p.name for p in entry_dir.iterdir()) == [
         "balance.parquet",
         "balance_calc.parquet",
         "cashflow.parquet",
@@ -130,7 +130,7 @@ def test_save_and_load_round_trips_raw_frames(tmp_path: Path) -> None:
         "income_calc.parquet",
         "meta.json",
     ]
-    meta = json.loads((bundle_dir / "meta.json").read_text())
+    meta = json.loads((entry_dir / "meta.json").read_text())
     assert meta == {
         "schema_version": CACHE_SCHEMA_VERSION,
         "period": "annual",
@@ -260,7 +260,7 @@ def test_stale_bundle_is_kept_when_not_pruning(tmp_path: Path) -> None:
     cache_dir = tmp_path / "edgartools_cache"
     _save(cache_dir, period="quarterly", latest_filing_date=date(2024, 1, 1))
 
-    cached = read_period_bundle(
+    cached = read_cache_entry(
         cik=320193,
         period="quarterly",
         cache_dir=cache_dir,
@@ -276,21 +276,19 @@ def test_stale_bundle_is_kept_when_not_pruning(tmp_path: Path) -> None:
 def test_unusable_bundle_is_kept_when_not_pruning(tmp_path: Path, damage: str) -> None:
     cache_dir = tmp_path / "edgartools_cache"
     _save(cache_dir)
-    bundle_dir = cache_dir / "companies" / "320193" / "annual"
+    entry_dir = cache_dir / "companies" / "320193" / "annual"
     if damage == "meta":
-        (bundle_dir / "meta.json").write_text("{not json")
+        (entry_dir / "meta.json").write_text("{not json")
     elif damage == "corrupt":
-        (bundle_dir / "income_calc.parquet").write_bytes(b"not parquet")
+        (entry_dir / "income_calc.parquet").write_bytes(b"not parquet")
     else:
-        (bundle_dir / "balance.parquet").unlink()
+        (entry_dir / "balance.parquet").unlink()
 
     assert (
-        read_period_bundle(
-            cik=320193, period="annual", cache_dir=cache_dir, prune=False
-        )
+        read_cache_entry(cik=320193, period="annual", cache_dir=cache_dir, prune=False)
         is None
     )
-    assert bundle_dir.exists()
+    assert entry_dir.exists()
 
 
 def test_read_period_bundle_returns_fresh_bundle_with_filing_date(
@@ -299,7 +297,7 @@ def test_read_period_bundle_returns_fresh_bundle_with_filing_date(
     cache_dir = tmp_path / "edgartools_cache"
     _save(cache_dir)
 
-    cached = read_period_bundle(
+    cached = read_cache_entry(
         cik=320193, period="annual", cache_dir=cache_dir, reference=date(2025, 1, 1)
     )
 
@@ -313,7 +311,7 @@ def test_read_period_bundle_keeps_and_returns_stale_bundle(tmp_path: Path) -> No
     cache_dir = tmp_path / "edgartools_cache"
     _save(cache_dir, period="quarterly", latest_filing_date=date(2024, 1, 1))
 
-    cached = read_period_bundle(
+    cached = read_cache_entry(
         cik=320193, period="quarterly", cache_dir=cache_dir, reference=date(2024, 4, 2)
     )
 
@@ -330,49 +328,49 @@ def test_read_period_bundle_discards_unusable_stale_bundle(
 ) -> None:
     cache_dir = tmp_path / "edgartools_cache"
     _save(cache_dir, latest_filing_date=date(2020, 1, 1))
-    bundle_dir = cache_dir / "companies" / "320193" / "annual"
+    entry_dir = cache_dir / "companies" / "320193" / "annual"
     if damage == "schema":
-        meta = json.loads((bundle_dir / "meta.json").read_text())
+        meta = json.loads((entry_dir / "meta.json").read_text())
         meta["schema_version"] = CACHE_SCHEMA_VERSION + 1
-        (bundle_dir / "meta.json").write_text(json.dumps(meta))
+        (entry_dir / "meta.json").write_text(json.dumps(meta))
     elif damage == "meta":
-        (bundle_dir / "meta.json").write_text("{not json")
+        (entry_dir / "meta.json").write_text("{not json")
     elif damage == "corrupt":
-        (bundle_dir / "income_calc.parquet").write_bytes(b"not parquet")
+        (entry_dir / "income_calc.parquet").write_bytes(b"not parquet")
     else:
-        (bundle_dir / "balance.parquet").unlink()
+        (entry_dir / "balance.parquet").unlink()
 
-    assert read_period_bundle(cik=320193, period="annual", cache_dir=cache_dir) is None
-    assert not bundle_dir.exists()
+    assert read_cache_entry(cik=320193, period="annual", cache_dir=cache_dir) is None
+    assert not entry_dir.exists()
 
 
-def test_is_period_bundle_stale_respects_configured_threshold(monkeypatch) -> None:
+def test_is_entry_stale_respects_configured_threshold(monkeypatch) -> None:
     monkeypatch.setattr(cache_mod, "EDGARTOOLS_QUARTERLY_CACHE_MAX_AGE_MONTHS", 3)
     latest = date(2024, 1, 1)
-    assert not is_period_bundle_stale(latest, reference=date(2024, 4, 1))
-    assert is_period_bundle_stale(latest, reference=date(2024, 4, 2))
+    assert not is_entry_stale(latest, reference=date(2024, 4, 1))
+    assert is_entry_stale(latest, reference=date(2024, 4, 2))
 
 
-def test_is_period_bundle_stale_clips_to_month_end(monkeypatch) -> None:
+def test_is_entry_stale_clips_to_month_end(monkeypatch) -> None:
     monkeypatch.setattr(cache_mod, "EDGARTOOLS_QUARTERLY_CACHE_MAX_AGE_MONTHS", 1)
     latest = date(2024, 1, 31)  # + 1 month clips to 2024-02-29
-    assert not is_period_bundle_stale(latest, reference=date(2024, 2, 29))
-    assert is_period_bundle_stale(latest, reference=date(2024, 3, 1))
+    assert not is_entry_stale(latest, reference=date(2024, 2, 29))
+    assert is_entry_stale(latest, reference=date(2024, 3, 1))
 
 
 def test_default_cache_age_differs_by_period() -> None:
     latest = date(2024, 1, 1)
-    assert not is_period_bundle_stale(
+    assert not is_entry_stale(
         latest,
         period="annual",
         reference=date(2024, 12, 1),
     )
-    assert is_period_bundle_stale(
+    assert is_entry_stale(
         latest,
         period="annual",
         reference=date(2025, 1, 2),
     )
-    assert is_period_bundle_stale(
+    assert is_entry_stale(
         latest,
         period="quarterly",
         reference=date(2024, 4, 2),
@@ -514,7 +512,7 @@ def test_pinned_company_bundle_is_still_reported_stale(tmp_path: Path) -> None:
     _save(cache_dir, period="quarterly", latest_filing_date=date(2024, 1, 1))
     touch_company_cache(cik=320193, ticker="AAPL")
 
-    cached = read_period_bundle(
+    cached = read_cache_entry(
         cik=320193, period="quarterly", cache_dir=cache_dir, reference=date(2024, 4, 2)
     )
     assert cached is not None

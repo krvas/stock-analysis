@@ -206,7 +206,7 @@ Cache-level tests use `tmp_path` and `touch_company_cache`, no network.
 - **AC-9 (report).** Index with one CIK holding GOOG and GOOGL and a valid
   bundle: `collect_residuals(["GOOG", "GOOGL"])` yields rows for both ticker
   values with identical residuals; `collect_residuals(None)` also contains both;
-  `collect_residuals(["GOOGL"])` contains only GOOGL. `read_period_bundle` is
+  `collect_residuals(["GOOGL"])` contains only GOOGL. `read_cache_entry` is
   called once per CIK per period (patch/spy).
 - **AC-10 (regression).** Existing tests in `test_edgartools_cache.py`,
   `test_edgartools_source.py`, `test_calc_residual_report.py` pass, aside from

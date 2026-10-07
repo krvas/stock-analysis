@@ -16,8 +16,8 @@ thread pool and requests overlap. The CLIs (`calc_residual_report`, the
 `data/edgartools_cache/`. None of the cache code was written with overlap in
 mind. Verified by reading `cache.py` and `source.py`:
 
-**P1. `save_period_bundle` is not atomic for readers.** It calls
-`delete_period_bundle` (`shutil.rmtree` of `companies/{cik}/{period}/`), then
+**P1. `save_cache_entry` is not atomic for readers.** It calls
+`delete_cache_entry` (`shutil.rmtree` of `companies/{cik}/{period}/`), then
 `mkdir`, then writes six parquet files, then `meta.json` last. "meta last"
 protects a reader that arrives *before* the write finishes (no meta → miss),
 but not one that arrives *during* the next save of an existing bundle:
@@ -25,8 +25,8 @@ but not one that arrives *during* the next save of an existing bundle:
 1. Reader sees `meta.json` of the old bundle (`meta_path.exists()` is true).
 2. Writer's `rmtree` removes the files; reader's `pd.read_parquet` raises
    `FileNotFoundError` (an `OSError`).
-3. `read_period_bundle` treats that as a corrupt bundle and calls `discard()`
-   → `delete_period_bundle` → `rmtree` of the directory the writer has just
+3. `read_cache_entry` treats that as a corrupt bundle and calls `discard()`
+   → `delete_cache_entry` → `rmtree` of the directory the writer has just
    recreated and is filling.
 4. The writer's next `to_parquet` fails (`FileNotFoundError`) or, worse,
    leaves a bundle with some files missing; `meta.json` may still land. The
@@ -49,7 +49,7 @@ lookup). A `set_pinned_tickers` racing a touch can silently drop the pins
 (the exact thing the pinning spec protects). `_save_index` also writes to the
 fixed name `company_lru.tmp`: two concurrent saves interleave writes into one
 file, or the second `replace` raises `FileNotFoundError` because the first
-already renamed it. `save_period_bundle`'s `meta.tmp` has the same fixed-name
+already renamed it. `save_cache_entry`'s `meta.tmp` has the same fixed-name
 problem for two writers of the same bundle.
 
 **P3. `setup_edgartools()` runs on every call, and its cache cap races
@@ -62,7 +62,7 @@ deletes every file under those directories, including files another thread is
 in the middle of downloading for a build. And because nothing coordinates
 builds, two requests for the same cold company both pass the cache check, both
 call `Company`, `get_filings` and `XBRLS.from_filings`, both rebuild (minutes
-of SEC traffic each, against SEC's rate limit), and both `save_period_bundle`
+of SEC traffic each, against SEC's rate limit), and both `save_cache_entry`
 into the same directory, which is P1 again, writer against writer.
 
 Consequences today are intermittent 500s on `/statements/{ticker}`, a bundle
@@ -98,7 +98,7 @@ app rarely hits this by accident, but `pytest -m data` plus a browser session
   only; the residual cross-process risk is documented (Risks, R3).
 - **No change to the cache layout, `CACHE_SCHEMA_VERSION` semantics, staleness
   rules, `load_statement_set`'s signature or the `Statement`/`StatementSet`
-  contracts.** One additive, optional `meta.json` field (`bundle_id`) is
+  contracts.** One additive, optional `meta.json` field (`entry_id`) is
   introduced; old bundles remain valid without it.
 - **No async rewrite** of the route or the loader, and no move to a worker
   queue or background build with a "loading" page. Waiters block (bounded by a
@@ -110,13 +110,13 @@ app rarely hits this by accident, but `pytest -m data` plus a browser session
 
 ### P0
 
-**R1. Atomic bundle swap.** `save_period_bundle` builds the new bundle in a
+**R1. Atomic bundle swap.** `save_cache_entry` builds the new bundle in a
 sibling temp directory `companies/{cik}/.{period}.tmp-{uuid4hex}/` (parquet
 files, then `meta.json` inside it), then swaps it in under the per-bundle
 lock (R3): rename any existing `{period}/` to `.{period}.old-{uuid4hex}/`,
 `os.replace` the temp dir to `{period}/`, then `rmtree` the old directory
 (outside the lock; failure is only a warning). The final directory is only
-ever a complete bundle or absent. `delete_period_bundle` is no longer called
+ever a complete bundle or absent. `delete_cache_entry` is no longer called
 from inside save. (Directories cannot be `os.replace`d over a non-empty
 directory on POSIX, hence the two-step; the window between the two renames
 shows readers a missing bundle, which is a cache miss, not corruption; R2.)
@@ -124,22 +124,22 @@ If any write fails, the temp dir is removed and the existing bundle is left
 untouched.
 
 **R2. Reads never destroy healthy data.**
-- `meta.json` gains `bundle_id` (uuid4 hex, new per save). `read_period_bundle`
+- `meta.json` gains `entry_id` (uuid4 hex, new per save). `read_cache_entry`
   reads meta, reads all files, re-reads meta, and retries (up to 3 times,
-  short sleep) when `bundle_id` changed or a file is missing. A bundle without
-  `bundle_id` (written before this feature) is read as before, with one
+  short sleep) when `entry_id` changed or a file is missing. A bundle without
+  `entry_id` (written before this feature) is read as before, with one
   retry on missing file.
 - A read that still fails after retries does **not** discard directly. It
   takes the per-bundle lock (R3), re-reads once under the lock (no writer can
   be mid-swap), and only if the bundle is still invalid under the lock does it
   delete it. `FileNotFoundError` on the first look with a changed or vanished
   directory returns `None` (miss) without deleting anything.
-- `discard()` (`delete_period_bundle` on the prune path, schema mismatch,
-  stale-in-`load_period_bundle`) always runs under the per-bundle lock and
-  rechecks that the directory it is removing still has the `bundle_id` (or the
+- `discard()` (`delete_cache_entry` on the prune path, schema mismatch,
+  stale-in-`load_cache_entry`) always runs under the per-bundle lock and
+  rechecks that the directory it is removing still has the `entry_id` (or the
   mtime and meta contents) that was judged bad.
 - `prune=False` callers (reports) take no lock, delete nothing, and apply the
-  same retry on a changed `bundle_id`.
+  same retry on a changed `entry_id`.
 
 **R3. Per-bundle file lock.** One lock file per `(cik, period)` at
 `{cache_dir}/.locks/bundle-{cik}-{period}.lock`, via the `filelock` package
@@ -163,7 +163,7 @@ so a pin list is not silently lost.
 
 **R5. Lock ordering (no deadlocks).** Order is: `index lock` → `bundle lock`.
 Code holding a bundle lock must never take the index lock.
-`save_period_bundle` therefore does not touch the index (it already doesn't;
+`save_cache_entry` therefore does not touch the index (it already doesn't;
 `source.py` calls `_touch` after it returns), and eviction (which holds the
 index lock) acquires bundle locks only for the evicted CIK's periods, and
 never the reverse. Every lock acquisition has a timeout (default 60 s for
@@ -187,7 +187,7 @@ outside the locks. Readers mid-read get a miss, never a half-deleted tree.
 - `load_statement_set` does **not** call `setup_edgartools()` on the cache-hit
   path unless it needs `Company` (network). A fully cached, fresh bundle is
   served without importing/touching edgartools state. (`find_cached_cik` +
-  `read_period_bundle` + `_serve_cached` need none of it.)
+  `read_cache_entry` + `_serve_cached` need none of it.)
 - The HTTP cache size check (`_clear_http_cache_if_over`) moves out of
   configuration into the build path only (R8).
 
@@ -207,9 +207,9 @@ so it also serializes the CLI against the server; distinct from the bundle
 lock of R3, which is short-lived). Inside it, it **re-reads the cache**
 (double-checked): if a fresh bundle appeared while it waited, it serves that
 and does not build. Only the lock holder runs `company.get_filings`,
-`XBRLS.from_filings`, the statement loop and `save_period_bundle`.
+`XBRLS.from_filings`, the statement loop and `save_cache_entry`.
 Builds for different `(cik, period)` do not block each other. Lock order for
-this: `build lock` → (`bundle lock` inside `save_period_bundle`) → release
+this: `build lock` → (`bundle lock` inside `save_cache_entry`) → release
 build lock → `_touch` (index lock). Build-lock wait timeout default 15 minutes
 (builds take minutes), configurable; on timeout raise `CacheLockTimeout`
 (surfaces as a 500 with a clear message today; mapping to 503 is P1).
@@ -254,7 +254,7 @@ and every reader function stay the same. Pros: no layout change, no reader
 cost on the happy path (no lock), crash-safe (a half-written temp dir is never
 a bundle). Cons: a microsecond window where `{period}/` is absent (a miss →
 at worst a redundant rebuild; with R9's double check that rebuild finds the
-new bundle); readers rely on the `bundle_id` check to detect a swap between
+new bundle); readers rely on the `entry_id` check to detect a swap between
 file reads.
 
 **B. Versioned dirs plus a `CURRENT` pointer.** Each save writes
@@ -270,7 +270,7 @@ grace-period sweep), more code than the problem justifies for one user.
 and readers would hold a lock while reading six parquet files. Rejected for
 cost and complexity.
 
-Recommendation: **A**, with the `bundle_id` re-check for mixed-read detection.
+Recommendation: **A**, with the `entry_id` re-check for mixed-read detection.
 B stays a P2 if retries prove noisy.
 
 ### Locking mechanism
@@ -313,10 +313,10 @@ the open question about where edgartools writes (below).
 
 | Where | Change |
 | --- | --- |
-| `src/api/edgartools/cache.py` `save_period_bundle` | Temp dir build, `bundle_id` in meta, swap under bundle lock; unique temp names |
-| `read_period_bundle`, `delete_period_bundle`, `load_period_bundle` | Retry on `bundle_id` change; discard only under the lock after re-verify; `FileNotFoundError` on a vanished dir is a miss |
+| `src/api/edgartools/cache.py` `save_cache_entry` | Temp dir build, `entry_id` in meta, swap under bundle lock; unique temp names |
+| `read_cache_entry`, `delete_cache_entry`, `load_cache_entry` | Retry on `entry_id` change; discard only under the lock after re-verify; `FileNotFoundError` on a vanished dir is a miss |
 | `_save_index`, `touch_company_cache`, `set_pinned_tickers`, `_evict_company` | Index lock, unique temp file, fsync, rename-to-trash eviction, corrupt-index backup |
-| new private helpers in `cache.py` | `_bundle_lock(cache_dir, cik, period)`, `_index_lock(cache_dir)`, `build_lock(...)` (public: `source.py` imports it, so no leading underscore, per STATE.md §3), `CacheLockTimeout`, `_sweep_stale_temp` |
+| new private helpers in `cache.py` | `_entry_lock(cache_dir, cik, period)`, `_index_lock(cache_dir)`, `build_lock(...)` (public: `source.py` imports it, so no leading underscore, per STATE.md §3), `CacheLockTimeout`, `_sweep_stale_temp` |
 | `src/api/edgartools/source.py` `setup_edgartools`, `_configure_edgartools_cache` | Configure once; size check removed from configuration |
 | `_clear_http_cache_if_over` | Called only from the build path, behind the build gate and rate limit |
 | `load_statement_set` | No setup on pure cache hits; build lock plus re-read before building; build gate counter around the build |
@@ -325,7 +325,7 @@ the open question about where edgartools writes (below).
 | `pyproject.toml` | Declare `filelock` |
 | `src/web/routes/statements.py` | P1 only: map `CacheLockTimeout` → 503 |
 | `tests/test_edgartools_cache.py`, `tests/test_edgartools_source.py` | New tests (§7); existing tests keep passing unchanged |
-| `specs/STATE.md`, `cache.py` module docstring | Doc update: locking model, `bundle_id`, `.locks/`, build-path-only size check |
+| `specs/STATE.md`, `cache.py` module docstring | Doc update: locking model, `entry_id`, `.locks/`, build-path-only size check |
 
 `src/pipelines/calc_residual_report.py` needs no change (`prune=False`,
 lock-free reads). The pinning spec's index schema change composes with this
@@ -343,28 +343,28 @@ monkeypatch `Company`, `XBRLS`, `_build_statement` and `clear_cache`
 
 - **AC-1 (the bug, deterministic).** Save bundle v1. Patch `pd.read_parquet` so
   the first call in thread R blocks on an Event after `meta.json` was read.
-  Thread W calls `save_period_bundle` with v2 and completes. Release R. Then:
+  Thread W calls `save_cache_entry` with v2 and completes. Release R. Then:
   R returns v2 or `None`, never raises, the directory still holds v2 with a
-  valid meta, W raised nothing, and a following `read_period_bundle` returns
+  valid meta, W raised nothing, and a following `read_cache_entry` returns
   v2. (Regression of the discard-deletes-writer's-dir bug.)
 - **AC-2 (no mixed reads).** Each generation `g` stores `g` in every frame and
   calc-edge cell of all three statements. One writer saves generations 1..50
-  continuously; 8 reader threads call `read_period_bundle` 200 times each.
+  continuously; 8 reader threads call `read_cache_entry` 200 times each.
   Assert: no exception, and every returned bundle has a single generation
   across all six frames. After the first save, `None` is allowed only during
   the brief swap window; assert it is never followed by the directory being
   deleted (final read returns generation 50).
 - **AC-3 (failed write keeps the old bundle).** Patch `to_parquet` to raise on
-  the 4th file. `save_period_bundle` raises; the previous bundle is still
+  the 4th file. `save_cache_entry` raises; the previous bundle is still
   readable and equal to the old content; no `.tmp-*` directory remains.
 - **AC-4 (crash leftovers are invisible).** Create `.annual.tmp-dead/` with
-  partial files and no meta; `read_period_bundle` returns the real bundle (or
+  partial files and no meta; `read_cache_entry` returns the real bundle (or
   `None`), never the temp. The R11 sweep removes it once older than 1 hour and
   leaves a fresh one.
 - **AC-5 (real corruption is still discarded).** Truncate a parquet file in a
   stored bundle with no writer active: read returns `None` and the directory
   is deleted (existing behaviour preserved), including after retries.
-- **AC-6 (concurrent same-bundle writers).** 6 threads `save_period_bundle`
+- **AC-6 (concurrent same-bundle writers).** 6 threads `save_cache_entry`
   the same `(cik, period)` with different generations. No exception; the final
   directory is exactly one of the generations, complete and self-consistent;
   no temp or old dir remains.
@@ -372,7 +372,7 @@ monkeypatch `Company`, `XBRLS`, `_build_statement` and `clear_cache`
   `touch_company_cache` then evicts: reader returns `None` or the full bundle
   (it started before the swap), raises nothing; the trash directory is gone
   afterward.
-- **AC-8 (legacy meta).** A bundle written without `bundle_id` still reads
+- **AC-8 (legacy meta).** A bundle written without `entry_id` still reads
   fine and is not rebuilt.
 - **AC-9 (`prune=False`).** With a writer mid-swap, `prune=False` reads never
   delete anything and never raise.
@@ -396,7 +396,7 @@ monkeypatch `Company`, `XBRLS`, `_build_statement` and `clear_cache`
 - **AC-14 (corrupt index backup).** A corrupt `company_lru.json` followed by a
   locked write leaves `company_lru.json.corrupt` holding the original bytes.
 - **AC-15 (no deadlock).** A stress test combining `touch_company_cache` (with
-  eviction), `save_period_bundle`, and `read_period_bundle(prune=True)` on
+  eviction), `save_cache_entry`, and `read_cache_entry(prune=True)` on
   the same CIKs from 12 threads finishes within 30 s with no exception;
   lock timeouts patched to 5 s turn any deadlock into a failure, not a hang.
 
@@ -406,7 +406,7 @@ monkeypatch `Company`, `XBRLS`, `_build_statement` and `clear_cache`
   `XBRLS.from_filings` and `_build_statement` with a counter and
   `time.sleep(0.3)`. 8 threads call `load_statement_set("AAPL", "annual")` on
   a cold cache. Build counter == 1; all 8 return equal `StatementSet`s;
-  exactly one `save_period_bundle`; every thread's request completed.
+  exactly one `save_cache_entry`; every thread's request completed.
 - **AC-17 (different keys run in parallel).** Two builds for different CIKs
   (and the same CIK, annual vs. quarterly) rendezvous on a
   `Barrier(2, timeout=5)` inside the patched builder; both pass (they are not
@@ -433,7 +433,7 @@ monkeypatch `Company`, `XBRLS`, `_build_statement` and `clear_cache`
   build proceeds, and `clear_cache` was called at most once per
   `EDGARTOOLS_HTTP_CACHE_CHECK_SECONDS` window (patch the clock).
 - **AC-23 (lock timeout).** Hold a bundle lock in the test thread with the
-  timeout patched to 0.2 s: `read_period_bundle`'s verification path raises
+  timeout patched to 0.2 s: `read_cache_entry`'s verification path raises
   `CacheLockTimeout`, quickly, and deletes nothing.
 
 Existing tests in `tests/test_edgartools_cache.py` and
@@ -466,7 +466,7 @@ format --check` pass.
   INFO; real corruption still ends in a verified discard (AC-5).
 - **R7. Extra disk during save.** Old and new bundle coexist briefly (each is a
   few MB of parquet). Negligible.
-- **R8. `bundle_id` re-read cost.** One extra tiny JSON read per cache hit.
+- **R8. `entry_id` re-read cost.** One extra tiny JSON read per cache hit.
   Negligible next to six parquet reads.
 - **R9. Lock leakage.** A killed process releases its `flock` automatically
   (kernel-held), so no stale-lock cleanup is needed; leftover empty `.lock`
@@ -478,16 +478,16 @@ format --check` pass.
    and the lock helpers in `cache.py`. No behaviour change yet.
 2. Index: lock `touch_company_cache` / `set_pinned_tickers`, unique temp name,
    fsync, corrupt-file backup. Tests AC-10..AC-15 (AC-15 once step 3 exists).
-3. Bundle: temp-dir build plus swap in `save_period_bundle`, `bundle_id`,
+3. Bundle: temp-dir build plus swap in `save_cache_entry`, `entry_id`,
    unique meta temp. Tests AC-3, AC-4, AC-6, AC-8.
-4. Reads: retry on `bundle_id`, discard only under lock after re-verify,
+4. Reads: retry on `entry_id`, discard only under lock after re-verify,
    trash-rename eviction. Tests AC-1, AC-2, AC-5, AC-7, AC-9, AC-23.
 5. `source.py`: configure-once, no setup on pure hits, build-path-only
    gated size check. Tests AC-20..AC-22.
 6. `source.py`: build lock, double-checked read, single-flight. Tests
    AC-16..AC-19.
 7. Stale temp sweep (R11), logging (R13), optional 503 mapping (R14).
-8. Docs: `specs/STATE.md` §4 (locking model, `bundle_id`, `.locks/`,
+8. Docs: `specs/STATE.md` §4 (locking model, `entry_id`, `.locks/`,
    size-check placement) and the `cache.py` docstring. Run the AC-15 stress
    test and `ruff` before committing.
 
@@ -504,7 +504,7 @@ Assumptions made (no one was asked):
   redundant cache re-check, never a wrong result).
 - Waiting up to minutes for another request's build is preferable to a
   duplicate build; failing with a timeout error after 15 minutes is acceptable.
-- No schema bump: `bundle_id` is an optional field; old bundles remain valid.
+- No schema bump: `entry_id` is an optional field; old bundles remain valid.
 - Request volume is a handful of concurrent requests, so a coarse design is
   adequate.
 

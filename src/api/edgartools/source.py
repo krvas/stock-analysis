@@ -23,8 +23,8 @@ from edgar.xbrl.stitching.periods import determine_optimal_periods
 from src.api.edgartools.cache import (
     CachedStatementSet,
     find_cached_cik,
-    read_period_bundle,
-    save_period_bundle,
+    read_cache_entry,
+    save_cache_entry,
     touch_company_cache,
 )
 from src.config import (
@@ -579,7 +579,7 @@ def load_statement_set(ticker: str, period: PeriodType) -> StatementSet:
     cached = None
     cached_cik = find_cached_cik(EDGARTOOLS_CACHE_DIR, ticker)
     if cached_cik is not None:
-        cached = read_period_bundle(
+        cached = read_cache_entry(
             cik=cached_cik, period=period, cache_dir=EDGARTOOLS_CACHE_DIR
         )
         if cached is not None and not cached.stale:
@@ -587,7 +587,7 @@ def load_statement_set(ticker: str, period: PeriodType) -> StatementSet:
 
     company = Company(ticker)
     if cached_cik is None or int(cached_cik) != int(company.cik):
-        cached = read_period_bundle(
+        cached = read_cache_entry(
             cik=company.cik, period=period, cache_dir=EDGARTOOLS_CACHE_DIR
         )
         if cached is not None and not cached.stale:
@@ -613,7 +613,7 @@ def load_statement_set(ticker: str, period: PeriodType) -> StatementSet:
         **{st: _build_statement(xbrls, st, max_periods) for st in STATEMENT_TYPES}
     )
 
-    save_period_bundle(
+    save_cache_entry(
         cik=company.cik,
         period=period,
         latest_filing_date=latest_filing_date,

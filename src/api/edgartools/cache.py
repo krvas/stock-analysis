@@ -14,7 +14,7 @@ period's calc tree from the filing its values came from). Layout::
 Bundles are discarded when ``meta.json`` carries a different
 :data:`CACHE_SCHEMA_VERSION` and when files are missing or unreadable. A
 bundle is stale when the stored latest filing date is more than the
-period-specific cache age old (:func:`read_period_bundle` reports it; the
+period-specific cache age old (:func:`read_cache_entry` reports it; the
 caller rebuilds it only if SEC has a newer filing). For quarterly bundles that
 date is the newer of the latest 10-Q and the latest 10-K (set by the caller),
 so a bundle stays fresh after a fiscal-year 10-K.
@@ -75,7 +75,7 @@ class CachedStatementSet:
     @property
     def stale(self) -> bool:
         """Whether ``latest_filing_date`` is older than the period's max cache age."""
-        return is_period_bundle_stale(
+        return is_entry_stale(
             self.latest_filing_date, period=self.period, reference=self.reference
         )
 
@@ -92,18 +92,16 @@ def _company_dir(cache_dir: Path, cik: int | str) -> Path:
     return cache_dir / "companies" / _cik_key(cik)
 
 
-def _bundle_dir(cache_dir: Path, cik: int | str, period: PeriodType) -> Path:
+def _entry_dir(cache_dir: Path, cik: int | str, period: PeriodType) -> Path:
     return _company_dir(cache_dir, cik) / period
 
 
-def _bundle_meta_path(cache_dir: Path, cik: int | str, period: PeriodType) -> Path:
-    return _bundle_dir(cache_dir, cik, period) / "meta.json"
+def _entry_meta_path(cache_dir: Path, cik: int | str, period: PeriodType) -> Path:
+    return _entry_dir(cache_dir, cik, period) / "meta.json"
 
 
-def _bundle_file(
-    cache_dir: Path, cik: int | str, period: PeriodType, name: str
-) -> Path:
-    return _bundle_dir(cache_dir, cik, period) / name
+def _entry_file(cache_dir: Path, cik: int | str, period: PeriodType, name: str) -> Path:
+    return _entry_dir(cache_dir, cik, period) / name
 
 
 def _normalize_tickers(tickers: Iterable[object]) -> list[str]:
@@ -172,7 +170,7 @@ def _parse_iso_date(value: str) -> date:
     return date.fromisoformat(str(value)[:10])
 
 
-def is_period_bundle_stale(
+def is_entry_stale(
     latest_filing_date: date,
     *,
     period: PeriodType = "quarterly",
@@ -210,21 +208,21 @@ def find_cached_cik(cache_dir: Path, ticker: str) -> str | None:
     return None
 
 
-def delete_period_bundle(
+def delete_cache_entry(
     *,
     cik: int | str,
     period: PeriodType,
     cache_dir: Path,
 ) -> None:
-    bundle_dir = _bundle_dir(cache_dir, cik, period)
-    if bundle_dir.exists():
+    entry_dir = _entry_dir(cache_dir, cik, period)
+    if entry_dir.exists():
         try:
-            shutil.rmtree(bundle_dir)
+            shutil.rmtree(entry_dir)
         except OSError as exc:
-            logger.warning("Failed to delete period bundle %s: %s", bundle_dir, exc)
+            logger.warning("Failed to delete period bundle %s: %s", entry_dir, exc)
 
 
-def read_period_bundle(
+def read_cache_entry(
     *,
     cik: int | str,
     period: PeriodType,
@@ -244,11 +242,11 @@ def read_period_bundle(
 
     def discard() -> None:
         if prune:
-            delete_period_bundle(cik=cik, period=period, cache_dir=cache_dir)
+            delete_cache_entry(cik=cik, period=period, cache_dir=cache_dir)
 
-    meta_path = _bundle_meta_path(cache_dir, cik, period)
+    meta_path = _entry_meta_path(cache_dir, cik, period)
     if not meta_path.exists():
-        if _bundle_dir(cache_dir, cik, period).exists():
+        if _entry_dir(cache_dir, cik, period).exists():
             discard()
         return None
 
@@ -276,8 +274,8 @@ def read_period_bundle(
     statements: dict[str, Statement] = {}
     for statement_type in STATEMENT_TYPES:
         paths = (
-            _bundle_file(cache_dir, cik, period, f"{statement_type}.parquet"),
-            _bundle_file(cache_dir, cik, period, f"{statement_type}_calc.parquet"),
+            _entry_file(cache_dir, cik, period, f"{statement_type}.parquet"),
+            _entry_file(cache_dir, cik, period, f"{statement_type}_calc.parquet"),
         )
         try:
             frame, calc_edges = (pd.read_parquet(path) for path in paths)
@@ -310,7 +308,7 @@ def read_period_bundle(
     return cached
 
 
-def save_period_bundle(
+def save_cache_entry(
     *,
     cik: int | str,
     period: PeriodType,
@@ -323,17 +321,17 @@ def save_period_bundle(
     ``meta.json`` is written last so a partially written bundle has no meta
     and is treated as missing.
     """
-    delete_period_bundle(cik=cik, period=period, cache_dir=cache_dir)
-    bundle_dir = _bundle_dir(cache_dir, cik, period)
-    bundle_dir.mkdir(parents=True, exist_ok=True)
+    delete_cache_entry(cik=cik, period=period, cache_dir=cache_dir)
+    entry_dir = _entry_dir(cache_dir, cik, period)
+    entry_dir.mkdir(parents=True, exist_ok=True)
 
     for statement_type in STATEMENT_TYPES:
         statement = statement_set.get(statement_type)
         statement.frame.to_parquet(
-            _bundle_file(cache_dir, cik, period, f"{statement_type}.parquet")
+            _entry_file(cache_dir, cik, period, f"{statement_type}.parquet")
         )
         statement.calc_edges.to_parquet(
-            _bundle_file(cache_dir, cik, period, f"{statement_type}_calc.parquet")
+            _entry_file(cache_dir, cik, period, f"{statement_type}_calc.parquet")
         )
 
     meta = {
@@ -341,7 +339,7 @@ def save_period_bundle(
         "period": period,
         "latest_filing_date": latest_filing_date.isoformat(),
     }
-    meta_path = _bundle_meta_path(cache_dir, cik, period)
+    meta_path = _entry_meta_path(cache_dir, cik, period)
     tmp_meta = meta_path.with_suffix(".tmp")
     with tmp_meta.open("w", encoding="utf-8") as handle:
         json.dump(meta, handle, indent=2, sort_keys=True)
