@@ -45,11 +45,12 @@ _GETTERS = {
 
 
 @pytest.fixture(autouse=True)
-def _isolated_edgartools_cache(monkeypatch, tmp_path) -> None:
-    """Keep setup_edgartools (run by load_statement_set) off the real data/
-    cache: our cache dir and edgartools' data dir point at tmp_path."""
+def _isolated_edgartools_cache(monkeypatch, tmp_path, use_cache_dir) -> None:
+    """Keep setup_edgartools (run by load_statement_set) and the cache index
+    off the real data/ cache: every cache dir points at tmp_path."""
     monkeypatch.setenv("EDGAR_LOCAL_DATA_DIR", str(tmp_path))
     monkeypatch.setattr(source, "EDGARTOOLS_CACHE_DIR", tmp_path)
+    use_cache_dir(tmp_path)
 
 
 def _filing_df(period_column: str, rows: list[dict]) -> pd.DataFrame:
@@ -1078,12 +1079,27 @@ def test_load_statement_set_returns_cached_without_sec_fetch(
     )
     mock_company_cls.assert_not_called()
     mock_save_bundle.assert_not_called()
-    mock_touch_cache.assert_called_once_with(
-        cik="320193",
-        ticker="AAPL",
-        cache_dir=mock_touch_cache.call_args.kwargs["cache_dir"],
-        max_companies=mock_touch_cache.call_args.kwargs["max_companies"],
-    )
+    mock_touch_cache.assert_called_once_with(cik="320193", ticker="AAPL")
+
+
+@patch.dict("os.environ", {"EDGAR_IDENTITY": "ScreenerApp/1.0 test@example.com"})
+@patch("src.api.edgartools.source.read_period_bundle")
+@patch("src.api.edgartools.source.find_cached_cik")
+@patch("src.api.edgartools.source.Company")
+def test_load_statement_set_does_not_reread_missing_bundle_for_same_cik(
+    mock_company_cls: MagicMock,
+    mock_find_cached_cik: MagicMock,
+    mock_read_bundle: MagicMock,
+) -> None:
+    mock_find_cached_cik.return_value = "320193"
+    mock_read_bundle.return_value = None
+    mock_company_cls.return_value.cik = 320193
+    mock_company_cls.return_value.get_filings.side_effect = RuntimeError("stop")
+
+    with pytest.raises(RuntimeError, match="stop"):
+        load_statement_set("AAPL", "annual")
+
+    mock_read_bundle.assert_called_once()
 
 
 # --- stale bundles: rebuilt only when SEC has a newer filing ----------------
@@ -1101,7 +1117,7 @@ def _seed_cache(cache_dir: Path, period: str, latest_filing_date: date) -> None:
         bundle=_cached_bundle(),
         cache_dir=cache_dir,
     )
-    touch_company_cache(cik=320193, ticker="AAPL", cache_dir=cache_dir)
+    touch_company_cache(cik=320193, ticker="AAPL")
 
 
 def _last_accessed(cache_dir: Path) -> str:

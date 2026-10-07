@@ -32,6 +32,12 @@ from tests.statement_fixtures import make_statement
 P1, P2 = "2024-12-31", "2023-12-31"
 
 
+@pytest.fixture(autouse=True)
+def _cache_dir_global(tmp_path: Path, use_cache_dir) -> None:
+    """``touch_company_cache`` takes no dir: point it at the tests' cache dir."""
+    use_cache_dir(tmp_path / "edgartools_cache")
+
+
 def _frame(total_p2: float) -> pd.DataFrame:
     raw = pd.DataFrame(
         {
@@ -60,7 +66,7 @@ def _cache(tmp_path: Path) -> Path:
             bundle=dict.fromkeys(("income", "balance", "cashflow"), frames),
             cache_dir=cache_dir,
         )
-        touch_company_cache(cik=cik, ticker=ticker, cache_dir=cache_dir)
+        touch_company_cache(cik=cik, ticker=ticker)
     return cache_dir
 
 
@@ -328,7 +334,7 @@ def test_stale_bundle_is_still_reported(
         bundle=dict.fromkeys(("income", "balance", "cashflow"), frames),
         cache_dir=cache_dir,
     )
-    touch_company_cache(cik=1, ticker="AAA", cache_dir=cache_dir)
+    touch_company_cache(cik=1, ticker="AAA")
 
     residuals = collect_residuals(None, ("annual",), cache_dir)
 
