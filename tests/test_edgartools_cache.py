@@ -14,10 +14,10 @@ from src.api.edgartools import cache as cache_mod
 from src.api.edgartools.cache import (
     CACHE_SCHEMA_VERSION,
     _load_index,
-    cached_companies,
     find_cached_cik,
+    get_cached_company_list,
+    get_pinned_tickers,
     is_period_bundle_stale,
-    pinned_tickers,
     read_period_bundle,
     save_period_bundle,
     set_pinned_tickers,
@@ -428,11 +428,11 @@ def test_find_cached_cik_by_ticker(tmp_path: Path) -> None:
 
 def test_cached_companies_lists_index(tmp_path: Path) -> None:
     cache_dir = tmp_path / "edgartools_cache"
-    assert cached_companies(cache_dir) == {}
+    assert get_cached_company_list(cache_dir) == {}
     touch_company_cache(cik=320193, ticker="aapl")
     touch_company_cache(cik=789019, ticker="MSFT")
 
-    assert cached_companies(cache_dir) == {"320193": "AAPL", "789019": "MSFT"}
+    assert get_cached_company_list(cache_dir) == {"320193": "AAPL", "789019": "MSFT"}
 
 
 def _touch_at(cache_dir: Path, cik: int, ticker: str, when: datetime) -> list[str]:
@@ -476,7 +476,7 @@ def test_set_pinned_tickers_replaces_list(tmp_path: Path) -> None:
     assert _load_index(cache_dir)["pinned_tickers"] == ["AAPL", "MSFT"]
 
     set_pinned_tickers(["MU"], cache_dir)
-    assert pinned_tickers(cache_dir) == frozenset({"MU"})
+    assert get_pinned_tickers(cache_dir) == frozenset({"MU"})
 
 
 def test_pin_set_before_entry_exists_applies_on_touch(
@@ -532,6 +532,6 @@ def test_missing_or_invalid_pinned_tickers_tolerated(
     cache_mod._save_index(cache_dir, index)
 
     expected = frozenset({"AAPL"}) if isinstance(pinned, list) else frozenset()
-    assert pinned_tickers(cache_dir) == expected
+    assert get_pinned_tickers(cache_dir) == expected
     touch_company_cache(cik=789019, ticker="MSFT")
     assert set(_load_index(cache_dir)["companies"]) == {"789019"}

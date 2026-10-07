@@ -146,7 +146,7 @@ def _save_index(cache_dir: Path, index: dict[str, Any]) -> None:
     tmp_path.replace(path)
 
 
-def pinned_tickers(cache_dir: Path | None = None) -> frozenset[str]:
+def get_pinned_tickers(cache_dir: Path | None = None) -> frozenset[str]:
     """Tickers exempt from company LRU eviction (uppercased)."""
     cache_dir = Path(cache_dir) if cache_dir is not None else EDGARTOOLS_CACHE_DIR
     return frozenset(_load_index(cache_dir)["pinned_tickers"])
@@ -192,7 +192,7 @@ def is_period_bundle_stale(
     return reference > expires
 
 
-def cached_companies(cache_dir: Path) -> dict[str, str]:
+def get_cached_company_list(cache_dir: Path) -> dict[str, str]:
     """``{cik: ticker}`` for every company in the LRU index (index only; bundles
     may still be missing or stale)."""
     return {

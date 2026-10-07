@@ -34,8 +34,8 @@ import pandas as pd
 from edgar import Company
 
 from src.api.edgartools.cache import (
-    cached_companies,
     find_cached_cik,
+    get_cached_company_list,
     read_period_bundle,
 )
 from src.api.edgartools.source import (
@@ -106,7 +106,7 @@ _JOIN_KEYS = [*_GROUP_KEYS, "concept", "period"]
 def _companies(tickers: Sequence[str] | None, cache_dir: Path) -> dict[str, str]:
     """``{cik: ticker}`` to report on: requested tickers, else the whole index."""
     if not tickers:
-        return cached_companies(cache_dir)
+        return get_cached_company_list(cache_dir)
     companies: dict[str, str] = {}
     for ticker in tickers:
         cik = find_cached_cik(cache_dir, ticker)
