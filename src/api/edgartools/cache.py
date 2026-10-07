@@ -61,6 +61,25 @@ CACHE_SCHEMA_VERSION = 7
 _INDEX_FILENAME = "company_lru.json"
 
 
+@dataclass(frozen=True)
+class CachedStatementSet:
+    """A readable cached statement set with its ``meta.json`` freshness date."""
+
+    statement_set: StatementSet
+    # ``meta.json``'s ``latest_filing_date`` (the freshness date it was built at).
+    latest_filing_date: date
+    period: PeriodType
+    # Date staleness is judged against (None: today).
+    reference: date | None = None
+
+    @property
+    def stale(self) -> bool:
+        """Whether ``latest_filing_date`` is older than the period's max cache age."""
+        return is_period_bundle_stale(
+            self.latest_filing_date, period=self.period, reference=self.reference
+        )
+
+
 def _utc_now_iso() -> str:
     return datetime.now(UTC).isoformat()
 
@@ -203,25 +222,6 @@ def delete_period_bundle(
             shutil.rmtree(bundle_dir)
         except OSError as exc:
             logger.warning("Failed to delete period bundle %s: %s", bundle_dir, exc)
-
-
-@dataclass(frozen=True)
-class CachedStatementSet:
-    """A readable cached statement set with its ``meta.json`` freshness date."""
-
-    statement_set: StatementSet
-    # ``meta.json``'s ``latest_filing_date`` (the freshness date it was built at).
-    latest_filing_date: date
-    period: PeriodType
-    # Date staleness is judged against (None: today).
-    reference: date | None = None
-
-    @property
-    def stale(self) -> bool:
-        """Whether ``latest_filing_date`` is older than the period's max cache age."""
-        return is_period_bundle_stale(
-            self.latest_filing_date, period=self.period, reference=self.reference
-        )
 
 
 def read_period_bundle(
