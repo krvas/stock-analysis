@@ -1,0 +1,30 @@
+{% extends "wizard/base_subpage.html" %}
+{% import "macros/line_item_table.html" as table_macro %}
+{% import "macros/wizard_form.html" as form_macro %}
+
+{% block subpage_content %}
+<div class="wizard-intro">
+  <p>
+    Owner earnings is the cash a business could hand its owners while keeping
+    its competitive position. Accounting has no line for it: it needs a
+    judgment about how much depreciation and working capital is
+    <em>maintenance</em> rather than growth.
+  </p>
+  <p class="wizard-formula">
+    Owner earnings = Pretax income + D&amp;A + ΔNWC − maintenance D&amp;A − maintenance ΔNWC
+  </p>
+</div>
+
+<h2 class="wizard-table-title">Change in net working capital</h2>
+<p class="wizard-table-note">Working-capital lines from the cash-flow statement, on the operating cash-flow sign: negative means cash tied up.</p>
+{{ table_macro.table('nwc-table', nwc_table) }}
+
+<h2 class="wizard-table-title">Owner earnings</h2>
+<p class="wizard-table-note">Enter the share of D&amp;A and ΔNWC that only maintains the business. Owner earnings update as you type.</p>
+{% call form_macro.form(post_url, form_id='owner-earnings-form', wizard_save='owner-earnings', data_table_id='oe-table') %}
+{{ table_macro.table('oe-table', oe_table) }}
+{% endcall %}
+<p class="wizard-next-link">
+  <a href="/statements/{{ ticker }}?basis=adjusted">View adjusted statements →</a>
+</p>
+{% endblock %}

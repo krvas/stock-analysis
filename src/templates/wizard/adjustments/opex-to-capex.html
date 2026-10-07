@@ -3,7 +3,23 @@
 {% import "macros/wizard_form.html" as form_macro %}
 
 {% block subpage_content %}
+<div class="wizard-intro">
+  <p>
+    Some expenses build long-lived assets. Buffett treats GEICO's advertising
+    as an investment in future policyholders; a drug company's R&amp;D builds a
+    pipeline that earns for years. Accounting expenses these costs as they are
+    incurred, out of conservatism. When valuing a business, you may
+    re-classify them as capital expenditure instead.
+  </p>
+  <p>
+    Tick <strong>Capitalize</strong> for each expense that builds an asset and
+    enter its useful life in years.
+  </p>
+</div>
 {% call form_macro.form(post_url, form_id='opex-to-capex-form', wizard_save='opex-to-capex', data_table_id='opex-to-capex-table') %}
 {{ table_macro.table('opex-to-capex-table', opex_table) }}
 {% endcall %}
+<p class="wizard-next-link">
+  <a href="/statements/{{ ticker }}?basis=adjusted">View adjusted statements →</a>
+</p>
 {% endblock %}

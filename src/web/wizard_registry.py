@@ -12,7 +12,11 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Final, Literal
 
-from src.web.routes.wizard_pages import adjustments_context, adjustments_post
+from src.web.routes.wizard_pages import (
+    adjustments_context,
+    adjustments_post,
+    owner_earnings,
+)
 
 PageGroup = Literal["business", "people", "price", "red_flags"]
 
@@ -81,7 +85,13 @@ WIZARD_PAGES: list[Page] = [
                 context_builder=adjustments_context.opex_to_capex_context,
                 post_handler=adjustments_post.opex_to_capex_post,
             ),
-            SubPage(slug="owner-earnings", title="Owner Earnings", order=3),
+            SubPage(
+                slug="owner-earnings",
+                title="Owner Earnings",
+                order=3,
+                context_builder=owner_earnings.owner_earnings_context,
+                post_handler=owner_earnings.owner_earnings_post,
+            ),
             SubPage(slug="assets-in-use", title="Assets in Use", order=4),
         ],
     ),
