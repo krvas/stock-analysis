@@ -103,12 +103,20 @@ def period_column_specs(df: pd.DataFrame) -> list[ColumnSpec]:
 
 
 def statement_table_from_dataframe(df: pd.DataFrame) -> Table:
-    """Build a :class:`Table` for a standard multi-period statement view."""
+    """Build a :class:`Table` for a standard multi-period statement view.
+
+    Rows are keyed by the frame's ``row_id`` column, which every
+    :meth:`~src.models.statement.Statement.project` frame carries (formed by
+    :func:`~src.models.statement.get_row_id`). A frame without ``row_id``
+    raises :class:`TableSerializationError` rather than having ids re-derived
+    here: a re-derivation could not know a row's within-filing occurrence, so
+    it could silently disagree with the ids the statement cache assigned.
+    """
     return Table(
         df,
         period_column_specs(df),
         linked_groups={},
-        row_id_col="concept",
+        row_id_col="row_id",
         level_col="level",
         parent_id_col=None,
         is_total_col="is_total",
@@ -228,22 +236,18 @@ class Table:
         """Alias for :meth:`serialize` (template / API embedding)."""
         return self.serialize()
 
-    def find_row_id(self, base_concept: str) -> str | None:
-        """Map a stored ``base_concept`` key to this table's ``row_id_col`` value."""
-        key = str(base_concept).strip()
-        if not key:
+    def find_row_id(self, key: str) -> str | None:
+        """Return ``key`` if it exactly matches a value of ``row_id_col``, else None.
+
+        Surrounding whitespace in ``key`` is ignored; a blank key returns None.
+        No other column is consulted, so callers must pass keys in the same
+        form as this table's row ids.
+        """
+        row_key = str(key).strip()
+        if not row_key:
             return None
-
-        concepts = self._df[self._row_id_col].astype(str)
-        if key in concepts.values:
-            return key
-
-        if "standard_concept" in self._df.columns:
-            standard = self._df["standard_concept"].astype(str)
-            match = standard == key
-            if match.any():
-                return str(self._df.loc[match, self._row_id_col].iloc[0])
-
+        if row_key in self._df[self._row_id_col].astype(str).values:
+            return row_key
         return None
 
     def set_cell(self, column_id: str, row_id: str, value: Any) -> None:

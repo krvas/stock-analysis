@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -110,6 +111,63 @@ class WizardDatabaseManager(BaseDatabaseManager):
             """,
             [ticker.upper(), exchange.upper()],
         )
+
+    def read_all_adjustment_preferences(self) -> pd.DataFrame:
+        """Return every stored adjustment preference (all tickers/exchanges)."""
+        if wt.ADJUSTMENT_PREFERENCES not in self.list_tables():
+            return pd.DataFrame(
+                columns=list(wt.TABLE_COLUMNS[wt.ADJUSTMENT_PREFERENCES])
+            )
+        return self.query(
+            """
+            SELECT *
+            FROM adjustment_preferences
+            ORDER BY ticker, exchange, adjustment_type, base_concept
+            """
+        )
+
+    def rename_adjustment_preference_keys(
+        self,
+        renames: Mapping[str, str],
+    ) -> int:
+        """Change ``base_concept`` for preferences keyed by ``adjustment_id``.
+
+        ``renames`` maps ``adjustment_id`` → new ``base_concept``; every other
+        column (including ``updated_at``) is kept. All renames run in one
+        transaction: if any would violate the unique key
+        ``(ticker, exchange, adjustment_type, base_concept)`` or names an
+        unknown ``adjustment_id``, nothing is written and the error is raised.
+        Returns the number of rows renamed.
+        """
+        table = wt.ADJUSTMENT_PREFERENCES
+        if not renames:
+            logger.debug("Skipping empty rename for %s", table)
+            return 0
+        if self.read_only:
+            raise RuntimeError("Cannot rename on a read-only connection.")
+
+        self._ensure_schema()
+        con = self.connection
+        con.execute("BEGIN TRANSACTION")
+        try:
+            for adjustment_id, base_concept in renames.items():
+                updated = con.execute(
+                    f"""
+                    UPDATE {table} SET base_concept = ?
+                    WHERE adjustment_id = ?
+                    RETURNING adjustment_id
+                    """,
+                    [base_concept, str(adjustment_id)],
+                ).fetchall()
+                if not updated:
+                    raise KeyError(f"unknown adjustment_id {adjustment_id!r}")
+            con.execute("COMMIT")
+        except Exception:
+            con.execute("ROLLBACK")
+            raise
+
+        logger.info("Renamed base_concept of %d rows in %s", len(renames), table)
+        return len(renames)
 
     def delete_adjustment_preferences(
         self,
