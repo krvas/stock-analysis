@@ -15,7 +15,7 @@ CIK, but every ticker-facing piece of it assumes one ticker per CIK:
 - Pins are tickers (`set_pinned_tickers`, index key `pinned_tickers`), and
   eviction exempts an entry only if `entry.get("ticker") in pinned`.
 - `find_cached_cik(cache_dir, ticker)` matches `entry.get("ticker") == ticker`.
-- `cached_companies()` returns `{cik: ticker}`; `_companies()` in
+- `get_cached_company_list()` returns `{cik: ticker}`; `_companies()` in
   `calc_residual_report.py` has the same shape.
 
 Several listed companies have more than one ticker on one CIK (GOOG/GOOGL,
@@ -54,7 +54,7 @@ because `{cik: ticker}` can hold only one.
   `set_pinned_tickers` in `tests/test_edgar_data.py`. Pins stay a programmatic
   API.
 - **No change to the public pin API shape.** Pins stay ticker strings
-  (`set_pinned_tickers(tickers)` / `pinned_tickers()`), because a pin must be
+  (`set_pinned_tickers(tickers)` / `get_pinned_tickers()`), because a pin must be
   settable before the company has an entry, i.e. before its CIK is known
   without a network call (current documented behaviour).
 - **No ticker → CIK resolution via SEC at pin time**, and no discovery of
@@ -86,7 +86,7 @@ returns the CIK key, or `None`. If a ticker appears under more than one CIK
 (stale data after a ticker reassignment), return the most recently accessed
 entry and log a warning.
 
-**R4. `cached_companies` returns all tickers per CIK:**
+**R4. `get_cached_company_list` returns all tickers per CIK:**
 `dict[str, tuple[str, ...]]` (`{cik: sorted tickers}`), index only, as today.
 Entries with no tickers are skipped.
 
@@ -160,7 +160,7 @@ until then (see Risks).
 
 | File | Change |
 | --- | --- |
-| `src/api/edgartools/cache.py` | `_load_index` migration (R6); `touch_company_cache` ticker union + per-CIK pinned test (R1, R2); `find_cached_cik` (R3); `cached_companies` (R4); `_evict_company` log line; docstring. Optional small helper `_entry_tickers(entry) -> list[str]` (private to the module) |
+| `src/api/edgartools/cache.py` | `_load_index` migration (R6); `touch_company_cache` ticker union + per-CIK pinned test (R1, R2); `find_cached_cik` (R3); `get_cached_company_list` (R4); `_evict_company` log line; docstring. Optional small helper `_entry_tickers(entry) -> list[str]` (private to the module) |
 | `src/pipelines/calc_residual_report.py` | `_companies` and `collect_residuals` loop (R5) |
 | `src/api/edgartools/source.py` | No expected change; verify only (P1) |
 | `tests/test_edgartools_cache.py` | Update `test_cached_companies_lists_index` (shape change); add tests below |
@@ -194,10 +194,10 @@ Cache-level tests use `tmp_path` and `touch_company_cache`, no network.
   `Company("GOOG").cik` to the same CIK, serves the cached bundle with no
   filing-list request, and touches the CIK with `ticker="GOOG"`; afterwards
   `find_cached_cik(..., "GOOG")` hits and no `Company(...)` call is needed.
-- **AC-7.** `cached_companies` returns `{"1652044": ("GOOG", "GOOGL"), ...}`.
+- **AC-7.** `get_cached_company_list` returns `{"1652044": ("GOOG", "GOOGL"), ...}`.
 - **AC-8 (migration).** Write a legacy file (`{"companies": {"320193":
   {"ticker": "AAPL", "last_accessed": ...}}, "pinned_tickers": ["AAPL"]}`) by
-  hand. `find_cached_cik("AAPL")` == `"320193"`, `cached_companies` ==
+  hand. `find_cached_cik("AAPL")` == `"320193"`, `get_cached_company_list` ==
   `{"320193": ("AAPL",)}`, pin still protects it, and the file on disk is
   unchanged after read-only calls. After one `touch_company_cache`, the file
   contains `tickers` and no `ticker`. Running the migration twice is a no-op.
@@ -223,7 +223,7 @@ Cache-level tests use `tmp_path` and `touch_company_cache`, no network.
   inherent to ticker pins without a ticker→CIK map. Mitigation: loading the
   pinned ticker through the app (as the data test does) adds it. Not fixed in
   this feature (non-goal: SEC resolution at pin time).
-- **Test churn.** `cached_companies` return type changes (callers: only
+- **Test churn.** `get_cached_company_list` return type changes (callers: only
   `calc_residual_report`; one test). Low.
 - **Wider pin effect.** Pinning one class pins the company, which is the
   intent, but a user who "unpins" by removing a ticker from the list while
@@ -241,7 +241,7 @@ Cache-level tests use `tmp_path` and `touch_company_cache`, no network.
    `test_edgartools_cache.py`.
 2. `_load_index` migration + `_entry_tickers` helper (R6).
 3. `touch_company_cache` ticker union and per-CIK pin test (R1, R2); AC-1–3.
-4. `find_cached_cik` (R3) and `cached_companies` (R4); AC-4, 5, 7; fix the
+4. `find_cached_cik` (R3) and `get_cached_company_list` (R4); AC-4, 5, 7; fix the
    existing shape test.
 5. `calc_residual_report._companies` / `collect_residuals` (R5); AC-9.
 6. Source-level test AC-6; confirm `source.py` needs no change.

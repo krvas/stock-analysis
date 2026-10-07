@@ -155,7 +155,7 @@ and waiters block for milliseconds.
 `_save_index` writes to a unique temp file in the same directory
 (`company_lru.json.{uuid4hex}.tmp`), `fsync`s, `os.replace`s, and removes its
 temp file on error. Read-only index accessors (`_load_index` as used by
-`pinned_tickers`, `find_cached_cik`, `cached_companies`) stay lock-free: the
+`pinned_tickers`, `find_cached_cik`, `get_cached_company_list`) stay lock-free: the
 file is only ever replaced whole, so they see either the old or the new index.
 A corrupt index is still treated as empty, but when that happens inside a
 locked write the corrupt file is first copied to `company_lru.json.corrupt`
@@ -381,7 +381,7 @@ monkeypatch `Company`, `XBRLS`, `_build_statement` and `clear_cache`
 
 - **AC-10 (no lost touches).** 16 threads, each `touch_company_cache` for a
   distinct CIK, `max_companies=100`, started on a barrier. Afterwards all 16
-  CIKs are in the index and `cached_companies` returns all of them.
+  CIKs are in the index and `get_cached_company_list` returns all of them.
 - **AC-11 (pins survive touches).** One thread loops `set_pinned_tickers`
   with a growing list while 8 threads touch; the final index has the last
   pin list *and* all touched companies. Eviction never removes a pinned
