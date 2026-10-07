@@ -107,9 +107,9 @@ only touches `_cache`/`_tcache`, never our `companies/` bundles).
 only entry point. Cache key `(cik, period)`, no `num_periods`:
 `companies/{cik}/{period}/{income,balance,cashflow}.parquet` +
 `{statement}_calc.parquet` + `meta.json` (`schema_version`, `period`,
-`latest_filing_date`); `read_period_bundle` returns a `CachedPeriodBundle` whose `bundle` is `{statement:
-StatementFrames(frame, calc_edges)}`, and a missing calc file makes the
-bundle unusable. Builds from up
+`latest_filing_date`); `read_period_bundle` returns a `CachedStatementSet` (a `StatementSet` plus
+`latest_filing_date` and a `stale` property); a missing calc file, or a frame
+`Statement` rejects, makes the bundle unusable. Builds from up
 to `MAX_CACHE_YEARS` (16) 10-Ks or `MAX_CACHE_QUARTERS` (64) 10-Qs: XBRLS only
 picks filings/periods (`determine_optimal_periods`); each filing gets
 `to_dataframe(view="detailed", presentation=False)` per statement (the stored

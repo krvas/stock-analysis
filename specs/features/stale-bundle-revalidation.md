@@ -154,7 +154,7 @@ bundle directory). `touch_period_bundle_checked`:
 trigger a full SEC rebuild per company (minutes each) for a field whose absence
 has a safe meaning ("never confirmed → check now"). Old bundles are upgraded
 lazily: the first stale request after deploy does one SEC check, then records
-`checked_at`. `CachedPeriodBundle` gains `checked_at: datetime | None`
+`checked_at`. `CachedStatementSet` gains `checked_at: datetime | None`
 (`None` when absent or unparseable; unparseable also logs at INFO, no discard:
 a bad timestamp is not corrupt data). The module docstring's meta line
 becomes `# schema_version, period, latest_filing_date, checked_at (optional)`.
@@ -224,7 +224,7 @@ changes the bundle on every confirmation; rejected (R6).
 | Where | Change |
 | --- | --- |
 | `src/config.py` | `EDGARTOOLS_REVALIDATE_TTL_HOURS` (default 24, `max(0, ...)`), commented like the max-age settings |
-| `src/api/edgartools/cache.py` | `touch_period_bundle_checked`, `is_recheck_due`, `CachedPeriodBundle.checked_at`; `read_period_bundle` parses optional `checked_at`; `save_period_bundle` writes `checked_at`; docstring; no change to `CACHE_SCHEMA_VERSION` |
+| `src/api/edgartools/cache.py` | `touch_period_bundle_checked`, `is_recheck_due`, `CachedStatementSet.checked_at`; `read_period_bundle` parses optional `checked_at`; `save_period_bundle` writes `checked_at`; docstring; no change to `CACHE_SCHEMA_VERSION` |
 | `src/api/edgartools/source.py` `load_statement_set` | TTL skip before `setup_edgartools`/`Company`; call `touch_period_bundle_checked` in the "no newer filing" branch; wrap the freshness check in the offline fallback; update the docstring ("a stale bundle costs one filing-list request" → "at most one per TTL") |
 | `src/api/edgartools/__init__.py` | Export only if `source.py` imports across the package boundary in a way STATE.md §3 requires (the new functions are imported from `cache` directly like `read_period_bundle` today) |
 | `src/pipelines/calc_residual_report.py` | No behaviour change. `prune=False` reads, never writes `checked_at`, never does SEC. Optionally (R10) append `checked_at` to its stale warning |
@@ -245,7 +245,7 @@ Residual report and data test behaviour in detail:
   calls `touch_period_bundle_checked`, never contacts SEC, and its "stale;
   reporting on it anyway" path is unchanged, because the report's job is to
   describe what is on disk. It must tolerate bundles with and without
-  `checked_at` (it only reads the `CachedPeriodBundle` fields it uses).
+  `checked_at` (it only reads the `CachedStatementSet` fields it uses).
 - **`tests/test_edgar_data.py`** (`pytest -m data`) calls `load_statement_set`
   for each test ticker; stale-but-current bundles it touches now record
   `checked_at` and are not re-checked for 24 h, which makes repeat data runs
@@ -367,7 +367,7 @@ the intentional `_seed_cache`/assert updates above.
 
 1. `config.py`: `EDGARTOOLS_REVALIDATE_TTL_HOURS`.
 2. `cache.py`: `is_recheck_due`, `checked_at` parse in `read_period_bundle` and
-   `CachedPeriodBundle`, `save_period_bundle` writes it. Tests AC-4..AC-6.
+   `CachedStatementSet`, `save_period_bundle` writes it. Tests AC-4..AC-6.
 3. `cache.py`: `touch_period_bundle_checked` with guard and unique temp name.
    Tests AC-1..AC-3, AC-7.
 4. `source.py`: record the check (AC-8), TTL skip (AC-9..AC-13, AC-16..AC-17).

@@ -336,7 +336,7 @@ lock-free reads). The pinning spec's index schema change composes with this
 All with real threads and `tmp_path`; no network; small synthetic frames. Tests
 use `threading.Barrier` / `Event` for determinism, with a hard per-test
 timeout so a regression hangs for seconds, not forever. Source-level tests
-monkeypatch `Company`, `XBRLS`, `_build_statement_dataframe` and `clear_cache`
+monkeypatch `Company`, `XBRLS`, `_build_statement` and `clear_cache`
 (patterns already used in `tests/test_edgartools_source.py`).
 
 **Bundle atomicity (R1–R3, R6)**
@@ -403,7 +403,7 @@ monkeypatch `Company`, `XBRLS`, `_build_statement_dataframe` and `clear_cache`
 **Single-flight and setup (R7–R9)**
 
 - **AC-16 (single flight).** Monkeypatch `Company` (fixed CIK), `get_filings`,
-  `XBRLS.from_filings` and `_build_statement_dataframe` with a counter and
+  `XBRLS.from_filings` and `_build_statement` with a counter and
   `time.sleep(0.3)`. 8 threads call `load_statement_set("AAPL", "annual")` on
   a cold cache. Build counter == 1; all 8 return equal `StatementSet`s;
   exactly one `save_period_bundle`; every thread's request completed.
