@@ -5,6 +5,7 @@ test:
 	.venv/bin/ruff check .
 	.venv/bin/ruff format --check .
 	.venv/bin/python -m pytest -q
+	.venv/bin/python -m pytest -m data -q
 
 # Apply what ruff can fix (lint autofixes and formatting).
 fix:
