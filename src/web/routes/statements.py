@@ -43,6 +43,7 @@ def statement_view(
         "statements/statement_view.html",
         {
             "statement_data": statement_data,
+            "ticker": symbol,
             "active_nav": "statements",
         },
     )

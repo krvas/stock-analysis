@@ -9,9 +9,10 @@
 </head>
 <body>
   <nav class="site-nav" aria-label="Primary">
-    <a href="/statements/AAPL" {% if active_nav == 'statements' %}aria-current="page"{% endif %}>Statements</a>
-    <a href="/wizard/AAPL" {% if active_nav == 'wizard' %}aria-current="page"{% endif %}>Wizard</a>
-    <a href="/screener" {% if active_nav == 'screener' %}aria-current="page"{% endif %}>Screener</a>
+    {% set nav_ticker = ticker or "AAPL" %}
+    <a href="/statements/{{ nav_ticker }}" {% if active_nav == 'statements' %}aria-current="page"{% endif %}>Statements</a>
+    <a href="/wizard/{{ nav_ticker }}" {% if active_nav == 'wizard' %}aria-current="page"{% endif %}>Wizard</a>
+    <a href="/screener?ticker={{ nav_ticker }}" {% if active_nav == 'screener' %}aria-current="page"{% endif %}>Screener</a>
   </nav>
   {% block content %}{% endblock %}
   {% block scripts %}{% endblock %}
