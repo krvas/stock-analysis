@@ -100,6 +100,7 @@ PROJECTION_METADATA_COLUMNS: tuple[str, ...] = (
     "standard_concept",
     "level",
     "is_total",
+    "origin",
 )
 
 REPORTED_ORIGIN = "reported"

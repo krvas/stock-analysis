@@ -7,6 +7,7 @@ import pytest
 
 from src.models.statement import Statement, get_row_id
 from src.models.table import (
+    CalculatedCellSpec,
     ColumnSpec,
     LinkedGroupSpec,
     Table,
@@ -30,7 +31,16 @@ def test_table_serialize_statement_shape() -> None:
     )
     payload = statement_table_from_dataframe(df).serialize()
 
-    assert list(payload.keys()) == ["columns", "linked_groups", "rows"]
+    assert list(payload.keys()) == [
+        "columns",
+        "linked_groups",
+        "rows",
+        "calculated_cells",
+        "no_input_cells",
+    ]
+    assert payload["calculated_cells"] == []
+    assert payload["no_input_cells"] == []
+    assert "origin" not in payload["rows"][0]
     assert len(payload["columns"]) == 2
     assert payload["columns"][0]["kind"] == "static"
     assert payload["columns"][0]["format"] == "financial"
@@ -259,3 +269,125 @@ def test_table_input_columns_without_dataframe_column() -> None:
     row = table.serialize()["rows"][0]
     assert row["cells"]["note"] is None
     assert row["cells"]["2024"] == 5.0
+
+
+def _calc_table_parts() -> tuple[pd.DataFrame, list[ColumnSpec]]:
+    df = pd.DataFrame(
+        {
+            "row_id": ["r1", "r2"],
+            "label": ["A", "B"],
+            "amount": [100.0, 50.0],
+            "years": [None, 5.0],
+        }
+    )
+    columns = [
+        ColumnSpec(id="amount", label="Amount", kind="static", dtype="number"),
+        ColumnSpec(id="years", label="Years", kind="input", dtype="number"),
+    ]
+    return df, columns
+
+
+def test_table_serializes_calculated_cells() -> None:
+    df, columns = _calc_table_parts()
+    expr = {
+        "op": "add",
+        "args": [
+            {"cell": ["r1", "amount"]},
+            {"op": "mul", "args": [{"const": -1}, {"cell": ["r2", "years"]}]},
+        ],
+    }
+    table = Table(
+        df,
+        columns,
+        linked_groups={},
+        row_id_col="row_id",
+        calculated_cells=[CalculatedCellSpec(row_id="r2", col_id="amount", expr=expr)],
+    )
+
+    payload = table.serialize()
+
+    assert payload["calculated_cells"] == [
+        {"row_id": "r2", "col_id": "amount", "expr": expr}
+    ]
+    assert payload["rows"][0]["cells"]["amount"] == 100.0
+
+
+@pytest.mark.parametrize(
+    ("row_id", "col_id", "expr"),
+    [
+        ("missing", "amount", {"const": 1}),
+        ("r1", "missing", {"const": 1}),
+        ("r1", "amount", {"cell": ["missing", "amount"]}),
+        ("r1", "amount", {"cell": ["r1", "missing"]}),
+        ("r1", "amount", {"cell": ["r1"]}),
+        ("r1", "amount", {"const": "1"}),
+        ("r1", "amount", {"const": True}),
+        ("r1", "amount", {"op": "sub", "args": [{"const": 1}]}),
+        ("r1", "amount", {"op": "add", "args": []}),
+        ("r1", "amount", {"op": "add", "args": [{"bogus": 1}]}),
+        ("r1", "amount", {}),
+    ],
+)
+def test_table_rejects_invalid_calculated_cell(
+    row_id: str, col_id: str, expr: dict
+) -> None:
+    df, columns = _calc_table_parts()
+    with pytest.raises(TableSerializationError):
+        Table(
+            df,
+            columns,
+            linked_groups={},
+            row_id_col="row_id",
+            calculated_cells=[
+                CalculatedCellSpec(row_id=row_id, col_id=col_id, expr=expr)
+            ],
+        )
+
+
+def test_statement_table_passes_row_origin_through() -> None:
+    df = pd.DataFrame(
+        {
+            "row_id": ["c1", "c2"],
+            "concept": ["c1", "c2"],
+            "label": ["Revenue", "Capitalized R&D"],
+            "level": [0, 0],
+            "origin": ["reported", "adjustment:opex_to_capex"],
+            "2024-12-31": [100.0, 10.0],
+        }
+    )
+
+    payload = statement_table_from_dataframe(df).serialize()
+
+    assert [col["id"] for col in payload["columns"]] == ["2024-12-31"]
+    assert [row["origin"] for row in payload["rows"]] == [
+        "reported",
+        "adjustment:opex_to_capex",
+    ]
+
+
+def test_table_serializes_no_input_cells() -> None:
+    df, columns = _calc_table_parts()
+    table = Table(
+        df,
+        columns,
+        linked_groups={},
+        row_id_col="row_id",
+        no_input_cells=[("r1", "years")],
+    )
+
+    assert table.serialize()["no_input_cells"] == [["r1", "years"]]
+
+
+@pytest.mark.parametrize(
+    "cell", [("missing", "years"), ("r1", "missing"), ("r1", "amount")]
+)
+def test_table_rejects_invalid_no_input_cells(cell: tuple[str, str]) -> None:
+    df, columns = _calc_table_parts()
+    with pytest.raises(TableSerializationError):
+        Table(
+            df,
+            columns,
+            linked_groups={},
+            row_id_col="row_id",
+            no_input_cells=[cell],
+        )

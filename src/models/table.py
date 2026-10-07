@@ -57,8 +57,67 @@ class LinkedGroupSpec:
     value_col: str
 
 
+@dataclass(frozen=True)
+class CalculatedCellSpec:
+    """A cell the frontend computes from other cells of the same table.
+
+    ``expr`` is a JSON expression tree evaluated client-side
+    (``components/calculated_cell.js``). Node shapes:
+    ``{"cell": [row_id, col_id]}``, ``{"const": number}``,
+    ``{"op": "add" | "mul", "args": [expr, ...]}``.
+    """
+
+    row_id: str
+    col_id: str
+    expr: dict[str, Any]
+
+
 class TableSerializationError(ValueError):
     """Invalid table configuration or source data for serialization."""
+
+
+_EXPR_OPS: frozenset[str] = frozenset({"add", "mul"})
+
+
+def _validate_expr(
+    expr: object, row_ids: set[str], column_ids: set[str], where: str
+) -> None:
+    """Check an expression tree's node shapes and that cell refs exist."""
+    if not isinstance(expr, dict) or len(expr) == 0:
+        raise TableSerializationError(f"{where}: expression node must be a dict")
+    if "cell" in expr:
+        ref = expr["cell"]
+        if len(expr) != 1 or not isinstance(ref, list) or len(ref) != 2:
+            raise TableSerializationError(
+                f"{where}: cell node must be {{'cell': [row_id, col_id]}}"
+            )
+        row_id, col_id = ref
+        if row_id not in row_ids:
+            raise TableSerializationError(f"{where}: unknown row '{row_id}'")
+        if col_id not in column_ids:
+            raise TableSerializationError(f"{where}: unknown column '{col_id}'")
+        return
+    if "const" in expr:
+        value = expr["const"]
+        if (
+            len(expr) != 1
+            or isinstance(value, bool)
+            or not isinstance(value, (int, float))
+        ):
+            raise TableSerializationError(f"{where}: const node must be a number")
+        return
+    if "op" in expr:
+        args = expr.get("args")
+        if set(expr) != {"op", "args"} or expr["op"] not in _EXPR_OPS:
+            raise TableSerializationError(
+                f"{where}: op node must be {{'op': 'add'|'mul', 'args': [...]}}"
+            )
+        if not isinstance(args, list) or len(args) == 0:
+            raise TableSerializationError(f"{where}: op args must be a non-empty list")
+        for arg in args:
+            _validate_expr(arg, row_ids, column_ids, where)
+        return
+    raise TableSerializationError(f"{where}: unknown expression node {expr!r}")
 
 
 def _validate_column_spec(spec: ColumnSpec) -> None:
@@ -161,6 +220,9 @@ class Table:
         parent_id_col: str | None = None,
         label_col: str | None = "label",
         is_total_col: str | None = "is_total",
+        origin_col: str | None = "origin",
+        calculated_cells: list[CalculatedCellSpec] | None = None,
+        no_input_cells: list[tuple[str, str]] | None = None,
         partial: bool = False,
     ) -> None:
         if not row_id_col:
@@ -210,6 +272,31 @@ class Table:
         ):
             resolved_is_total_col = None
 
+        resolved_origin_col = origin_col
+        if resolved_origin_col is not None and resolved_origin_col not in df.columns:
+            resolved_origin_col = None
+
+        row_ids = set(df[row_id_col].astype(str))
+        calc_specs = list(calculated_cells or [])
+        if calc_specs:
+            for spec in calc_specs:
+                where = f"calculated cell ({spec.row_id!r}, {spec.col_id!r})"
+                if spec.row_id not in row_ids:
+                    raise TableSerializationError(f"{where}: unknown row")
+                if spec.col_id not in column_id_set:
+                    raise TableSerializationError(f"{where}: unknown column")
+                _validate_expr(spec.expr, row_ids, column_id_set, where)
+
+        input_column_ids = {spec.id for spec in columns if spec.kind == "input"}
+        omitted_inputs = [(str(r), str(c)) for r, c in no_input_cells or []]
+        for row_id, col_id in omitted_inputs:
+            if row_id not in row_ids:
+                raise TableSerializationError(f"no_input_cells: unknown row '{row_id}'")
+            if col_id not in input_column_ids:
+                raise TableSerializationError(
+                    f"no_input_cells: '{col_id}' is not an input column"
+                )
+
         self._df = df
         self._columns = columns
         self._linked_groups = linked_groups
@@ -218,6 +305,9 @@ class Table:
         self._parent_id_col = parent_id_col
         self._label_col = label_col
         self._is_total_col = resolved_is_total_col
+        self._origin_col = resolved_origin_col
+        self._calculated_cells = calc_specs
+        self._no_input_cells = omitted_inputs
         self._partial = partial
 
     def serialize(self) -> dict[str, Any]:
@@ -230,6 +320,8 @@ class Table:
                 name: asdict(spec) for name, spec in self._linked_groups.items()
             },
             "rows": self._serialize_rows(),
+            "calculated_cells": [asdict(spec) for spec in self._calculated_cells],
+            "no_input_cells": [[r, c] for r, c in self._no_input_cells],
         }
 
     def to_dict(self) -> dict[str, Any]:
@@ -358,14 +450,15 @@ class Table:
                 else:
                     cells[spec.id] = None
 
-            rows.append(
-                {
-                    "id": row_id_str,
-                    "label": str(record.get(self._label_col, "") or ""),
-                    "level": level,
-                    "is_total": is_total,
-                    "parent_id": parent_id,
-                    "cells": cells,
-                }
-            )
+            row: dict[str, Any] = {
+                "id": row_id_str,
+                "label": str(record.get(self._label_col, "") or ""),
+                "level": level,
+                "is_total": is_total,
+                "parent_id": parent_id,
+                "cells": cells,
+            }
+            if self._origin_col is not None:
+                row["origin"] = _cell_value_from_raw(record.get(self._origin_col))
+            rows.append(row)
         return rows
