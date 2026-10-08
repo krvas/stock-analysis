@@ -2,11 +2,17 @@
 
 What exists today (not vision). Product intent: `specs/vision.md`.
 Adjustments/statement-model redesign: `specs/adjustments_architecture.md` —
-phase 1 (cache + `Statement`) implemented; phases 2–5 not.
+phases 1–2 (cache + `Statement`; row-id unification) implemented; phases
+3–5 (adjustment engine, opex-to-capex type, consumers) not.
 Audience: planning and coding agents — prefer this file over guessing layout.
 
 Python 3.12, pandas, FastAPI + Jinja SSR, vanilla JS (no frontend libs). Local
 single-user; no auth. Keep UI simple while building features.
+
+Under development, not deployed: there is no production data to preserve.
+The databases (`indian_stocks.duckdb`, `wizard.duckdb` in `data/duckdb/`, see
+`DEFAULT_DB_PATH` / `DEFAULT_WIZARD_DB_PATH` in `src/config.py`) can be deleted
+and rebuilt (`src.database.init_schema`, `src.database.init_wizard_schema`).
 
 ## 1. Three disconnected slices (do not “unify” as a bugfix)
 
@@ -14,7 +20,7 @@ single-user; no auth. Keep UI simple while building features.
 | --- | --- | --- |
 | Vendor ingest | IndianAPI / Alpha Vantage / Finnhub → schema-shaped DataFrames | `data/duckdb/indian_stocks.duckdb` |
 | EDGAR viewer | US 10-K/10-Q, 3 statements × `summary\|standard\|detailed` | parquet under `data/edgartools_cache/` |
-| Wizard (active work) | Per-ticker pages/sub-pages; user processing choices | `data/duckdb/wizard.duckdb` (prefs; UI not wired) |
+| Wizard (active work) | Per-ticker pages/sub-pages; user processing choices | `data/duckdb/wizard.duckdb` (prefs; opex-to-capex only) |
 
 They do not share data. Standardized DuckDB is easy to query across companies
 but loses XBRL detail; edgartools keeps full line items but is not
@@ -41,7 +47,7 @@ src/ingestion/             vendor DataFrame → DatabaseManager
 src/pipelines/             CLIs (load_from_names, calc_residual_report)
 src/database/              schema.sql + tables.py; wizard.sql + wizard_tables.py
                            manager.py (BaseDatabaseManager, DatabaseManager)
-                           wizard_manager.py, adjustments.py
+                           wizard_manager.py (WizardDatabaseManager: prefs I/O)
 src/models/statement.py    Statement / StatementSet / get_row_id
                            (pure domain: pandas only, no I/O)
 src/models/calc_residuals.py  calc_residuals (calc-linkbase residuals; pure)
@@ -50,7 +56,8 @@ src/models/edgartools/html_renderer.py   DataFrames → Table.serialize() payloa
 src/web/app.py             FastAPI; / → {statements, wizard, screener, docs}
 src/web/wizard_registry.py page/sub-page identity (only place)
 src/web/routes/            statements.py, wizard.py, screener.py
-src/web/routes/wizard_pages/  context builders (adjustments.py)
+src/web/routes/wizard_pages/  adjustments_context.py (builder),
+                           adjustments_post.py (POST handler)
 src/templates/wizard/      landing, base_subpage, _nav, not_implemented,
                            {page}/{subpage}.html
 src/templates/macros/line_item_table.html
@@ -66,8 +73,11 @@ tests/                     pytest; no HTTP/route tests
 ## 3. Hard rules
 
 - `src/api/` returns DataFrames. Vendor writes only via `DatabaseManager`.
-  Wizard prefs only via `WizardDatabaseManager` / `adjustments.py`.
+  Wizard prefs only via `WizardDatabaseManager` (`wizard_manager.py`).
+- Row ids only via `get_row_id` (§4); never re-derive ids elsewhere.
 - Schema truth: `schema.sql` / `wizard.sql`; Python mirrors must change with them.
+- No migrations, backfills, or legacy-format fallbacks (pre-deployment): edit
+  the schema/code directly and reset the DB.
 - Config only in `src/config.py`. Routers in `src/web/routes/`, registered in
   `routes/__init__.py`. Templates extend `base.html`; pass `active_nav`.
 - New financial tables: pandas → `Table` → `serialize()` → `{columns,
@@ -153,9 +163,11 @@ statement to every view over `periods[:num_periods]`. Payload is nested Table JS
 `statement_view.js` toggles type/level and balance-sheet fund-flow
 client-side.
 
-`get_row_id` (only place ids are formed): `concept`, plus
-`|Axis=member` for every axis of a dimensional row (sorted by axis, axis
-prefix stripped, member QName kept), `#n` for repeats within one filing.
+`get_row_id` (`statement.py`; only place ids are formed): `concept`, plus
+`|Axis=member` for every axis of a dimensional row (axis local name, sorted;
+member QName kept), `#n` (n ≥ 2) for repeats within one filing. Stored in the
+cache's `row_id` column; `Table` rows (§5) and opex-to-capex pref keys use it
+verbatim.
 `calc_residuals(statement)` (`src/models/calc_residuals.py`): per period,
 `reported(parent) − Σ weight·child` on that period's own `calc_edges` (raw
 signs; edge weights; first non-dimensional row per concept). NaN child values
@@ -185,9 +197,20 @@ per-sub-page routes.
 
 Slots match `vision.md`; **only `adjustments/opex-to-capex` has UI.** That
 builder: `load_statement_set(...).income.project("detailed")` over the newest
-2 periods, `standard_concept` in `OPERATING_EXPENSES`, `Table` (rows still
-keyed by `standard_concept` until row-id unification, phase 2)
-with period cols + input `capitalize` (bool) + `years` (number). Saves: POSTs
+2 periods, `standard_concept` in `OPERATING_EXPENSES` (selection only),
+`Table` keyed by `row_id` (from `get_row_id`) with period cols + input
+`capitalize` (bool) + `years` (number). The posted row `id` is that row id
+and is stored verbatim in `adjustment_preferences.base_concept` (column name
+<<<<<<< HEAD
+kept); prefill matches it exactly via `find_row_id`. Saves: POSTs
+=======
+kept); prefill matches it exactly via `find_row_id`.
+Legacy prefs keyed by `standard_concept`/`concept` are re-keyed to row ids
+by the one-off `convert_adjustment_pref_keys` CLI (`--dry-run`; reads each
+ticker's `Statement`; skips keys already row ids; ambiguous/conflicting keys
+logged and left; writes via
+`WizardDatabaseManager.rename_adjustment_preference_keys`). Saves: POSTs
+>>>>>>> 5d095de (docs(state): document row-id unification)
 to `/wizard/{ticker}/{page_slug}/{subpage_slug}` →
 `wizard_pages/adjustments_post.py::opex_to_capex_post` →
 `WizardDatabaseManager.upsert_adjustment_preferences` (writes
@@ -197,7 +220,8 @@ to `/wizard/{ticker}/{page_slug}/{subpage_slug}` →
 No restatement (prefs only, not applied to displayed numbers).
 
 **wizard.duckdb** `adjustment_preferences`: PK `adjustment_id`, unique
-`(ticker, exchange, adjustment_type, base_concept)`. Types intended:
+`(ticker, exchange, adjustment_type, base_concept)`; `base_concept` holds a
+row id (name predates row ids). Types intended:
 `opex_to_capex` | `maintenance_capex` | `assets_in_use`; `value` is years or
 %. Tested; written/read by `adjustments_post.py` / `adjustments_context.py`
 for `opex_to_capex` — other adjustment types still unused by routes.
@@ -221,7 +245,8 @@ serialize() → {
   periods. Metadata = `STATEMENT_VIEW_METADATA_COLUMNS`: `label, concept,
   standard_concept, preferred_sign, level, is_total, is_abstract` plus every
   `Statement` column from `statement.py` (`STATEMENT_METADATA_COLUMNS`, incl.
-  `row_id`).
+  `row_id`). Rows keyed by `row_id` (`row_id_col="row_id"`); a frame without
+  it raises `TableSerializationError` (no ad-hoc id derivation).
 - Missing input cols → `null`. NaN → `null`. Bad spec → `TableSerializationError`.
 - **Model** (`components/table_model.js`): receives table data
   (`fromSerialized`), owns cell state (`getCell`/`setCell`/`subscribe`/
@@ -265,10 +290,10 @@ serialize() → {
   `table_wiring.js`; shared component files must not scrape input DOM for
   save payloads and must not hold per-sub-page field-shaping logic. Generalizes
   the "registry = identity, builders = data" split in §4.
-- `find_row_id(base_concept)` / `set_cell(column_id, row_id, value)`: write
+- `find_row_id(key)` / `set_cell(column_id, row_id, value)`: write
   helpers used to inject saved wizard prefs into a `Table` before
   `serialize()`. `find_row_id` maps a stored pref key to a row id (exact match
-  on `row_id_col`, else exact match on `standard_concept`); `set_cell` mutates
+  on `row_id_col` only); `set_cell` mutates
   the underlying DataFrame (adding the column if missing). `Table` is not
   read-only.
 
@@ -283,12 +308,13 @@ Working: vendor DuckDB + IndianAPI/AlphaVantage; edgartools fetch/cache;
 `/statements`; wizard shell + opex table; Table used by statements + opex;
 `TableModel` + `linked_groups` + view slots + `GenericInput` subscriptions in
 `table_wiring.js` wired for opex-to-capex (receive, render, live edits,
-linked-group math); prefs store (no UI).
+linked-group math); prefs store (opex-to-capex save/prefill).
 
 Partial: opex (save/prefill for `adjustments/opex-to-capex` only; no
 restatement); Finnhub; `load_to_database.py`.
 
-NYI: every other wizard sub-page; wizard UI ↔ DuckDB; screener; analytics;
+NYI: every other wizard sub-page; adjustment engine / restatement
+(design phases 3–5); screener; analytics;
 finfetch.
 
 Tests cover clients, DBs, edgartools, Table, wizard DB. No web tests. Cache
@@ -299,7 +325,8 @@ app cache).
 
 ## 7. Debt agents should not paper over
 
-- No schema migrations (`CREATE TABLE IF NOT EXISTS` only).
+- No schema migrations by design (`CREATE TABLE IF NOT EXISTS` only); reset the
+  DB after schema changes.
 - Schema currency default `INR`; US data is USD — no FX layer.
 - Alpha Vantage free tier 25/day.
 - Dead exploration: `finfetch_client.py`, root `test_api_clients.py`,

@@ -9,7 +9,10 @@ import pytest
 
 from src.database import wizard_tables as wt
 from src.database.wizard_manager import WizardDatabaseManager
+from src.models.statement import Statement, StatementSet
+from src.web.routes.wizard_pages import adjustments_context
 from src.web.routes.wizard_pages.adjustments_post import opex_to_capex_post
+from tests.statement_fixtures import derived_calc_edges
 
 
 @pytest.fixture
@@ -168,7 +171,7 @@ def test_opex_to_capex_post_uncheck_deletes_previously_saved_row(
         "exchange": "NASDAQ",
         "rows": [
             {
-                "id": "ResearchAndDevelopmentExpense",
+                "id": "us-gaap_ResearchAndDevelopmentExpense",
                 "cells": {"capitalize": True, "years": 5},
             }
         ],
@@ -184,7 +187,7 @@ def test_opex_to_capex_post_uncheck_deletes_previously_saved_row(
         "exchange": "NASDAQ",
         "rows": [
             {
-                "id": "ResearchAndDevelopmentExpense",
+                "id": "us-gaap_ResearchAndDevelopmentExpense",
                 "cells": {"capitalize": False, "years": None},
             }
         ],
@@ -195,3 +198,72 @@ def test_opex_to_capex_post_uncheck_deletes_previously_saved_row(
     with WizardDatabaseManager(wizard_db_path) as db:
         loaded = db.read_adjustment_preferences("AAPL", "NASDAQ")
     assert len(loaded) == 0
+
+
+def test_opex_to_capex_round_trip_keys_by_row_id(
+    wizard_db_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """builder -> serialize -> POST (rows' ids) -> stored key -> prefill."""
+    monkeypatch.setattr(
+        "src.database.wizard_manager.DEFAULT_WIZARD_DB_PATH", wizard_db_path
+    )
+    with WizardDatabaseManager(wizard_db_path) as db:
+        db.initialize_schema()
+
+    periods = ("2024-09-28", "2023-09-30")
+    raw = pd.DataFrame(
+        {
+            "concept": [
+                "us-gaap_ResearchAndDevelopmentExpense",
+                "us-gaap_SellingGeneralAndAdministrativeExpense",
+            ],
+            "label": ["R&D", "SG&A"],
+            "standard_concept": [
+                "ResearchAndDevelopmentExpenses",
+                "SellingGeneralAndAdminExpenses",
+            ],
+            "level": [1, 1],
+            periods[0]: [5.0, 7.0],
+            periods[1]: [4.0, 6.0],
+        }
+    )
+    income = Statement(raw, "income", derived_calc_edges(raw))
+    statements = StatementSet(
+        income=income,
+        balance=Statement(raw, "balance", derived_calc_edges(raw)),
+        cashflow=Statement(raw, "cashflow", derived_calc_edges(raw)),
+    )
+    monkeypatch.setattr(
+        adjustments_context, "load_statement_set", lambda *_args: statements
+    )
+
+    rows = adjustments_context.opex_to_capex_context("AAPL", "annual")["opex_table"][
+        "rows"
+    ]
+    assert [row["id"] for row in rows] == income.frame["row_id"].tolist()
+    assert all(row["cells"]["capitalize"] is None for row in rows)
+
+    rnd_id = rows[0]["id"]
+    body = {
+        "rows": [
+            {
+                "id": row["id"],
+                "cells": {"capitalize": row["id"] == rnd_id, "years": 5},
+            }
+            for row in rows
+        ]
+    }
+    assert opex_to_capex_post("AAPL", body)["rows_written"] == 1
+
+    with WizardDatabaseManager(wizard_db_path) as db:
+        stored = db.read_adjustment_preferences("AAPL", "NASDAQ")
+    assert stored["base_concept"].tolist() == [rnd_id]
+
+    rows = adjustments_context.opex_to_capex_context("AAPL", "annual")["opex_table"][
+        "rows"
+    ]
+    by_id = {row["id"]: row["cells"] for row in rows}
+    assert by_id[rnd_id]["capitalize"] is True
+    assert by_id[rnd_id]["years"] == 5.0
+    other_id = rows[1]["id"]
+    assert by_id[other_id]["capitalize"] is None
