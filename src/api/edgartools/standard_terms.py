@@ -33,6 +33,10 @@ EQUITY_PARENTS = (
     "us-gaap_StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest",
 )
 
+# Balance sheet calc-tree roots: assets side / liabilities-and-equity side.
+BALANCE_ASSETS_ROOT = "us-gaap_Assets"
+BALANCE_LIABILITIES_EQUITY_ROOT = "us-gaap_LiabilitiesAndStockholdersEquity"
+
 # Cash-flow subtotals.
 CFO = "us-gaap_NetCashProvidedByUsedInOperatingActivities"
 CFI = "us-gaap_NetCashProvidedByUsedInInvestingActivities"
