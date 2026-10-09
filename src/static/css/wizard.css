@@ -271,3 +271,35 @@
   font-size: 0.875rem;
   color: var(--muted);
 }
+
+.treemap-pair {
+  display: flex;
+  gap: 16px;
+  margin-top: 16px;
+}
+
+.treemap-panel {
+  flex: 1;
+  min-width: 0;
+}
+
+.treemap {
+  position: relative;
+  height: 420px;
+}
+
+.treemap-box {
+  position: absolute;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  padding: 6px;
+  border: 1px solid var(--surface);
+  overflow: hidden;
+  color: #fff;
+  font-size: 0.8125rem;
+}
+
+.treemap-assets { background: #2f6f9f; }
+.treemap-liabilities { background: #b0603a; }
+.treemap-equity { background: #3f8a5a; }

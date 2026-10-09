@@ -73,6 +73,12 @@ WIZARD_PAGES: list[Page] = [
                 order=1,
                 context_builder=business_understanding.one_line_answers_context,
             ),
+            SubPage(
+                slug="balance-sheet-size",
+                title="Balance Sheet Size",
+                order=2,
+                context_builder=business_understanding.balance_sheet_size_context,
+            ),
         ],
     ),
     Page(
