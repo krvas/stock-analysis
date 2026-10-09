@@ -3,9 +3,10 @@
 Two tables, both on the stage *before* owner earnings (after opex → capex):
 
 - ΔNWC build-up: the cash-flow working-capital change rows (CFO sign).
-- Owner earnings: pretax income, D&A, ΔNWC with a maintenance-% input on
-  D&A and ΔNWC, and an Owner Earnings row of calculated cells
-  (``pretax + D&A + ΔNWC − pct_da%·D&A − pct_nwc%·ΔNWC``).
+- Owner earnings: pretax income, one row per D&A item (note-reported
+  components and capitalized-opex amortization), ΔNWC — each D&A item and
+  ΔNWC with its own maintenance-% input — and an Owner Earnings row of
+  calculated cells.
 """
 
 from __future__ import annotations
@@ -28,8 +29,9 @@ NUM_PERIODS = 5
 PCT_COLUMN = ColumnSpec(
     id="maintenance_pct", label="Maintenance %", kind="input", dtype="number"
 )
-# Table row id → saved pref key (``base_concept``).
-PCT_ROWS = {"da": oe.MAINTENANCE_DA, "nwc": oe.MAINTENANCE_NWC}
+PRETAX_ROW = "pretax"
+NWC_ROW = "nwc"
+OE_ROW = "owner_earnings"
 
 
 def _period_specs(periods: list[str]) -> list[ColumnSpec]:
@@ -53,49 +55,63 @@ def _nwc_table(nwc: pd.DataFrame, periods: list[str]) -> Table:
     )
 
 
-def _oe_expr(period: str) -> dict[str, Any]:
-    def cell(row: str, col: str) -> dict[str, Any]:
-        return {"cell": [row, col]}
+def _cell(row: str, col: str) -> dict[str, Any]:
+    return {"cell": [row, col]}
 
-    def maintenance(row: str) -> dict[str, Any]:
-        return {
-            "op": "mul",
-            "args": [{"const": -0.01}, cell(row, PCT_COLUMN.id), cell(row, period)],
-        }
 
+def _maintenance(row: str, period: str) -> dict[str, Any]:
+    """``−pct%·value`` for ``row`` in ``period``."""
+    return {
+        "op": "mul",
+        "args": [{"const": -0.01}, _cell(row, PCT_COLUMN.id), _cell(row, period)],
+    }
+
+
+def _oe_expr(period: str, da_ids: list[str]) -> dict[str, Any]:
+    """``pretax + Σ D&A_i + ΔNWC − Σ pct_i%·D&A_i − pct_nwc%·ΔNWC``."""
+    pct_rows = [*da_ids, NWC_ROW]
     return {
         "op": "add",
         "args": [
-            cell("pretax", period),
-            cell("da", period),
-            cell("nwc", period),
-            maintenance("da"),
-            maintenance("nwc"),
+            _cell(PRETAX_ROW, period),
+            *(_cell(row, period) for row in pct_rows),
+            *(_maintenance(row, period) for row in pct_rows),
         ],
     }
 
 
-def _oe_table(parts: pd.DataFrame, periods: list[str], saved: dict) -> Table:
-    labels = {
-        "pretax": "Pretax income (after adjustments)",
-        "da": "Depreciation & amortization",
-        "nwc": "Change in NWC (CFO sign)",
-        "owner_earnings": "Owner earnings",
-    }
-    records = []
-    for row_id, label in labels.items():
-        record: dict[str, Any] = {
+def _oe_table(
+    parts: pd.DataFrame, items: pd.DataFrame, periods: list[str], saved: dict
+) -> Table:
+    """Pretax, one row per D&A item, ΔNWC (each with a maintenance %), OE."""
+
+    def record(row_id: str, label: str, values: dict, pct: object) -> dict:
+        return {
             "row_id": row_id,
             "label": label,
-            "level": 0,
-            "is_total": row_id == "owner_earnings",
+            "level": 1 if row_id not in (PRETAX_ROW, NWC_ROW, OE_ROW) else 0,
+            "is_total": row_id == OE_ROW,
+            **{p: values.get(p) for p in periods},
+            PCT_COLUMN.id: pct,
         }
-        for p in periods:
-            record[p] = parts.at[p, row_id] if row_id in parts.columns else None
-        record[PCT_COLUMN.id] = (
-            saved.get(PCT_ROWS[row_id]) if row_id in PCT_ROWS else None
-        )
-        records.append(record)
+
+    da_ids = items["row_id"].tolist()
+    records = [
+        record(PRETAX_ROW, "Pretax income (after adjustments)", parts["pretax"], None)
+    ]
+    records += [
+        record(item["row_id"], item["label"], item, saved.get(item["row_id"]))
+        for item in items.to_dict(orient="records")
+    ]
+    records += [
+        record(
+            NWC_ROW,
+            "Change in NWC (CFO sign)",
+            parts["nwc"],
+            saved.get(oe.MAINTENANCE_NWC),
+        ),
+        record(OE_ROW, "Owner earnings", {}, None),
+    ]
     return Table(
         pd.DataFrame(records),
         [*_period_specs(periods), PCT_COLUMN],
@@ -103,20 +119,22 @@ def _oe_table(parts: pd.DataFrame, periods: list[str], saved: dict) -> Table:
         row_id_col="row_id",
         level_col="level",
         calculated_cells=[
-            CalculatedCellSpec("owner_earnings", p, _oe_expr(p)) for p in periods
+            CalculatedCellSpec(OE_ROW, p, _oe_expr(p, da_ids)) for p in periods
         ],
-        no_input_cells=[("pretax", PCT_COLUMN.id), ("owner_earnings", PCT_COLUMN.id)],
+        no_input_cells=[(PRETAX_ROW, PCT_COLUMN.id), (OE_ROW, PCT_COLUMN.id)],
     )
 
 
 def owner_earnings_context(ticker: str, period: PeriodType) -> dict[str, object]:
     _, staged, specs = load_adjusted(ticker, period, until=oe.TYPE_ID)
     parts = oe.components(staged)
-    periods = [p for p in parts.index[:NUM_PERIODS]]
+    periods = list(parts.index[:NUM_PERIODS])
+    items = oe.da_items(staged.cashflow)
+    items = items[items[periods].notna().any(axis=1)]
     saved = next((dict(s.params) for s in specs if s.type_id == oe.TYPE_ID), {})
     return {
         "nwc_table": _nwc_table(oe.nwc_rows(staged.cashflow), periods).serialize(),
-        "oe_table": _oe_table(parts, periods, saved).serialize(),
+        "oe_table": _oe_table(parts, items, periods, saved).serialize(),
     }
 
 
@@ -127,9 +145,11 @@ def owner_earnings_post(ticker: str, body: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("rows is required")
     records = []
     for item in rows:
-        key = PCT_ROWS.get(item.get("id"))
-        if key is None:
+        row_id = str(item.get("id") or "")
+        if not row_id or row_id in (PRETAX_ROW, OE_ROW):
             continue
+        # D&A items are keyed by their statement row id; ΔNWC by a fixed key.
+        key = oe.MAINTENANCE_NWC if row_id == NWC_ROW else row_id
         value = (item.get("cells") or {}).get(PCT_COLUMN.id)
         if value is None or value == "":
             value = 0.0

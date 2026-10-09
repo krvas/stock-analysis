@@ -12,8 +12,9 @@ from src.adjustments.base import AdjustmentSpec
 from src.adjustments.engine import apply_adjustments, ordered_specs
 from src.adjustments.specs import from_prefs
 from src.adjustments.types.opex_to_capex import schedule
-from src.adjustments.types.owner_earnings import owner_earnings
+from src.adjustments.types.owner_earnings import maintenance_da, owner_earnings
 from src.api.edgartools.source import load_statement_set
+from src.api.edgartools.standard_terms import DA_COMPONENT_AXIS
 from src.config import load_project_dotenv
 from tests.test_edgar_data import TICKERS_FILE, _test_tickers
 
@@ -29,9 +30,16 @@ def test_schedule_straight_line_same_year_start() -> None:
     assert net == pytest.approx({"2022": 20.0, "2023": 30.0, "2024": 30.0})
 
 
-def test_owner_earnings_formula() -> None:
-    parts = pd.DataFrame({"pretax": [100.0], "da": [20.0], "nwc": [-10.0]})
-    out = owner_earnings(parts, da_pct=50, nwc_pct=100)
+def test_owner_earnings_formula_with_per_item_maintenance() -> None:
+    items = pd.DataFrame(
+        {"row_id": ["dep", "amort"], "label": ["Dep", "Amort"], "2024": [15.0, 5.0]}
+    )
+    maintenance = maintenance_da(items, {"dep": 60, "amort": 20})
+    assert maintenance["2024"] == pytest.approx(10.0)
+    parts = pd.DataFrame(
+        {"pretax": [100.0], "da": [20.0], "nwc": [-10.0]}, index=["2024"]
+    )
+    out = owner_earnings(parts, maintenance, nwc_pct=100)
     # 100 + 20 - 10 - 10 - (-10)
     assert out["owner_earnings"].iloc[0] == pytest.approx(110.0)
 
@@ -99,3 +107,27 @@ def test_engine_invariants_on_test_tickers() -> None:
             assert _value(adjusted, "cashflow", CASH_CHANGE, period) == pytest.approx(
                 _value(base, "cashflow", CASH_CHANGE, period)
             ), ticker
+
+
+@pytest.mark.data
+def test_da_breakdown_rows_sum_to_da_line() -> None:
+    load_project_dotenv()
+    if not os.environ.get("EDGAR_IDENTITY") or not TICKERS_FILE.exists():
+        pytest.skip("data test prerequisites missing")
+    for ticker in _test_tickers():
+        cashflow = load_statement_set(ticker, "annual").cashflow
+        frame = cashflow.frame
+        parts = frame[frame["dimension_axis"].eq(DA_COMPONENT_AXIS)]
+        if parts.empty:
+            continue
+        line = frame[frame["row_id"] == parts["concept"].iloc[0]].iloc[0]
+        assert (
+            parts["row_id"]
+            .str.startswith(f"{line['concept']}|{DA_COMPONENT_AXIS}=")
+            .all()
+        ), ticker
+        assert not parts["in_standard"].any(), ticker
+        for period in cashflow.periods:
+            values = pd.to_numeric(parts[period], errors="coerce")
+            if values.notna().any() and pd.notna(line[period]):
+                assert values.sum() == pytest.approx(line[period]), (ticker, period)

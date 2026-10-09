@@ -1,10 +1,13 @@
 """Owner earnings: memo rows on the cash-flow statement.
 
-``OE = pretax income + D&A + ΔNWC − maintenance D&A − maintenance ΔNWC``,
+``OE = pretax income + Σ D&A_i + ΔNWC − Σ pct_i·D&A_i − pct_nwc·ΔNWC``,
 with ΔNWC on the CFO sign convention (cash impact of the working-capital
-change rows) and maintenance amounts as user-chosen percentages. D&A and
-pretax income are read *after* earlier adjustments (opex → capex), so the
-capitalized-expense amortization (tag ``da``) is included.
+change rows) and maintenance amounts as user-chosen percentages.
+
+D&A items (:func:`da_items`) are the note-reported D&A components (cash-flow
+breakdown rows on ``DA_COMPONENT_AXIS``), else the D&A line itself, plus every
+``da``-tagged row added by earlier adjustments (capitalized-opex
+amortization). Each item's maintenance % is saved under its row id.
 """
 
 from __future__ import annotations
@@ -16,6 +19,7 @@ import pandas as pd
 from src.adjustments.base import AdjustmentResult, AdjustmentSpec, NewRow
 from src.api.edgartools.standard_terms import (
     CFO,
+    DA_COMPONENT_AXIS,
     DEPRECIATION_EXPENSE,
     NWC_ABSTRACT,
     NWC_PREFIX,
@@ -26,7 +30,6 @@ from src.models.statement import Statement, StatementSet, bool_flag
 TYPE_ID = "owner_earnings"
 LABEL = "Owner earnings"
 
-MAINTENANCE_DA = "maintenance_da"
 MAINTENANCE_NWC = "maintenance_nwc"
 
 
@@ -80,34 +83,58 @@ def _first_value(statement: Statement, mask: pd.Series) -> dict[str, float]:
     }
 
 
+def da_items(cashflow: Statement) -> pd.DataFrame:
+    """D&A items, one row each: ``row_id, label`` + periods (raw values).
+
+    Note-reported components when the cache has them, else the D&A line;
+    then every ``da``-tagged adjustment row.
+    """
+    frame = cashflow.frame
+    axis = frame.get("dimension_axis", pd.Series(None, index=frame.index))
+    components = frame[axis.eq(DA_COMPONENT_AXIS)]
+    if components.empty:
+        components = frame[
+            frame["standard_concept"].eq(DEPRECIATION_EXPENSE)
+            & ~bool_flag(frame, "dimension")
+        ].head(1)
+    tagged = frame[frame["tags"].map(lambda t: "da" in tuple(t or ()))]
+    items = pd.concat([components, tagged])
+    out = items[["row_id", "label"]].copy()
+    for period in cashflow.periods:
+        out[period] = pd.to_numeric(items[period], errors="coerce")
+    return out.reset_index(drop=True)
+
+
 def components(ss: StatementSet) -> pd.DataFrame:
-    """Per period: ``pretax``, ``da``, ``nwc`` (index = periods, newest first)."""
+    """Per period: ``pretax``, ``da`` (Σ items), ``nwc`` (index = periods)."""
     income, cashflow = ss.income, ss.cashflow
     pretax = _first_value(income, income.frame["standard_concept"].eq(PRETAX_INCOME))
-    da = _first_value(
-        cashflow, cashflow.frame["standard_concept"].eq(DEPRECIATION_EXPENSE)
-    )
-    tagged = cashflow.frame[
-        cashflow.frame["tags"].map(lambda t: "da" in tuple(t or ()))
-    ]
+    items = da_items(cashflow)
     nwc = nwc_rows(cashflow)
     periods = [p for p in cashflow.periods if p in pretax]
-    data = []
-    for p in periods:
-        extra = pd.to_numeric(tagged[p], errors="coerce").fillna(0).sum()
-        data.append(
-            {
-                "pretax": pretax.get(p),
-                "da": da.get(p, 0.0) + float(extra),
-                "nwc": float(pd.to_numeric(nwc[p], errors="coerce").fillna(0).sum()),
-            }
-        )
+    data = [
+        {
+            "pretax": pretax.get(p),
+            "da": float(items[p].fillna(0).sum()),
+            "nwc": float(pd.to_numeric(nwc[p], errors="coerce").fillna(0).sum()),
+        }
+        for p in periods
+    ]
     return pd.DataFrame(data, index=periods)
 
 
-def owner_earnings(parts: pd.DataFrame, da_pct: float, nwc_pct: float) -> pd.DataFrame:
+def maintenance_da(items: pd.DataFrame, pcts: dict[str, float]) -> pd.Series:
+    """Per period: Σ pct_i/100 · D&A_i over items (missing pct = 0)."""
+    periods = [c for c in items.columns if c not in ("row_id", "label")]
+    weights = items["row_id"].map(lambda r: pcts.get(r, 0.0) / 100)
+    return items[periods].fillna(0).mul(weights, axis=0).sum()
+
+
+def owner_earnings(
+    parts: pd.DataFrame, maintenance: pd.Series, nwc_pct: float
+) -> pd.DataFrame:
     out = parts.copy()
-    out["maintenance_da"] = out["da"] * da_pct / 100
+    out["maintenance_da"] = maintenance.reindex(out.index).fillna(0)
     out["maintenance_nwc"] = out["nwc"] * nwc_pct / 100
     out["owner_earnings"] = (
         out["pretax"]
@@ -120,13 +147,14 @@ def owner_earnings(parts: pd.DataFrame, da_pct: float, nwc_pct: float) -> pd.Dat
 
 
 def apply(ss: StatementSet, spec: AdjustmentSpec) -> AdjustmentResult:
-    da_pct = float(spec.params.get(MAINTENANCE_DA, 0.0))
     nwc_pct = float(spec.params.get(MAINTENANCE_NWC, 0.0))
-    oe = owner_earnings(components(ss), da_pct, nwc_pct)
+    pcts = {k: float(v) for k, v in spec.params.items() if k != MAINTENANCE_NWC}
+    maintenance = maintenance_da(da_items(ss.cashflow), pcts)
+    oe = owner_earnings(components(ss), maintenance, nwc_pct)
     rows = [
         (
             "adj_MaintenanceCapex",
-            f"Maintenance capex ({da_pct:g}% of D&A)",
+            "Maintenance capex (maintenance share of D&A)",
             "maintenance_da",
             False,
         ),
@@ -141,8 +169,9 @@ def apply(ss: StatementSet, spec: AdjustmentSpec) -> AdjustmentResult:
     frame = ss.cashflow.frame
     cfo = frame.loc[frame["concept"] == CFO, "row_id"]
     after = str(cfo.iloc[0]) if len(cfo) else None
-    return AdjustmentResult(
-        new_rows=[
+    new_rows = []
+    for concept, label, column, is_total in rows:
+        new_rows.append(
             NewRow(
                 "cashflow",
                 concept,
@@ -151,16 +180,17 @@ def apply(ss: StatementSet, spec: AdjustmentSpec) -> AdjustmentResult:
                 is_total=is_total,
                 after=after,
             )
-            for concept, label, column, is_total in rows
-        ]
-    )
+        )
+        after = concept  # keep the memo rows in order under CFO
+    return AdjustmentResult(new_rows=new_rows)
 
 
 def describe(spec: AdjustmentSpec) -> dict[str, Any]:
     return {
         "type": TYPE_ID,
         "label": (
-            f"{LABEL}: maintenance {spec.params.get(MAINTENANCE_DA, 0):g}% of D&A, "
+            f"{LABEL}: maintenance % set on "
+            f"{sum(k != MAINTENANCE_NWC for k in spec.params)} D&A item(s), "
             f"{spec.params.get(MAINTENANCE_NWC, 0):g}% of ΔNWC"
         ),
     }
