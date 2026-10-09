@@ -248,3 +248,26 @@
 .wizard-main td input[type="number"] {
   width: 5.5rem;
 }
+
+.wizard-answers {
+  max-width: 72ch;
+  margin: 16px 0 0;
+}
+
+.wizard-answers dt {
+  font-weight: 600;
+  margin-top: 16px;
+}
+
+.wizard-answers dd {
+  margin: 4px 0 0;
+}
+
+.wizard-answers p {
+  margin: 0 0 4px;
+}
+
+.wizard-answer-detail {
+  font-size: 0.875rem;
+  color: var(--muted);
+}

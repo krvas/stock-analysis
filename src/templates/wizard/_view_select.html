@@ -1,0 +1,14 @@
+{# Summary / standard / detailed view switch; reloads the page with ?view=. Expects `view` set by the including template. #}
+<form method="get" class="controls">
+  {% if request.query_params.get("period") %}
+  <input type="hidden" name="period" value="{{ request.query_params.get('period') }}">
+  {% endif %}
+  <div class="control-group">
+    <label for="view-select">View</label>
+    <select id="view-select" name="view" aria-label="View" onchange="this.form.submit()">
+      {% for option in ("summary", "standard", "detailed") %}
+      <option value="{{ option }}"{% if option == view %} selected{% endif %}>{{ option | capitalize }}</option>
+      {% endfor %}
+    </select>
+  </div>
+</form>

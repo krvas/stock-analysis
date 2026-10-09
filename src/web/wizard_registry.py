@@ -15,6 +15,7 @@ from typing import Any, Final, Literal
 from src.web.routes.wizard_pages import (
     adjustments_context,
     adjustments_post,
+    business_understanding,
     owner_earnings,
 )
 
@@ -66,7 +67,12 @@ WIZARD_PAGES: list[Page] = [
         order=1,
         group="business",
         subpages=[
-            SubPage(slug="one-line-answers", title="One-line Answers", order=1),
+            SubPage(
+                slug="one-line-answers",
+                title="One-line Answers",
+                order=1,
+                context_builder=business_understanding.one_line_answers_context,
+            ),
         ],
     ),
     Page(
