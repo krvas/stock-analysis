@@ -1,0 +1,23 @@
+{% extends "wizard/base_subpage.html" %}
+
+{% block subpage_content %}
+{% if ai_pending %}
+{% include "wizard/_ai_pending.html" %}
+{% else %}
+{% set view = request.query_params.get("view", "standard") %}
+{% set view = view if view in ("summary", "standard", "detailed") else "standard" %}
+{% include "wizard/_view_select.html" %}
+<dl class="wizard-answers">
+  {% for item in answers %}
+  <dt>{{ item.question }}</dt>
+  <dd>
+    <p>{{ item.answer }}</p>
+    {% if view == "detailed" %}
+    <p class="wizard-answer-detail">{{ item.justification }}</p>
+    <p class="wizard-answer-detail">Source: {{ item.source }}</p>
+    {% endif %}
+  </dd>
+  {% endfor %}
+</dl>
+{% endif %}
+{% endblock %}
