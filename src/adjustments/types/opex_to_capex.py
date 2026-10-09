@@ -19,18 +19,17 @@ from typing import Any
 import pandas as pd
 
 from src.adjustments.base import AdjustmentResult, AdjustmentSpec, NewRow, Override
+from src.api.edgartools.standard_terms import (
+    ASSET_PARENTS,
+    CFI,
+    CFO,
+    DEPRECIATION_EXPENSE,
+    EQUITY_PARENTS,
+)
 from src.models.statement import Statement, StatementSet
 
 TYPE_ID = "opex_to_capex"
 LABEL = "Opex capitalized"
-
-ASSET_PARENTS = ("us-gaap_AssetsNoncurrent", "us-gaap_Assets")
-EQUITY_PARENTS = (
-    "us-gaap_StockholdersEquity",
-    "us-gaap_StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest",
-)
-CFO = "us-gaap_NetCashProvidedByUsedInOperatingActivities"
-CFI = "us-gaap_NetCashProvidedByUsedInInvestingActivities"
 
 
 def from_prefs(rows: pd.DataFrame) -> AdjustmentSpec:
@@ -167,7 +166,7 @@ def apply(ss: StatementSet, spec: AdjustmentSpec) -> AdjustmentResult:
 
 def _dna_row(cashflow: Statement) -> str | None:
     frame = cashflow.frame
-    match = frame[frame["standard_concept"].eq("DepreciationExpense")]
+    match = frame[frame["standard_concept"].eq(DEPRECIATION_EXPENSE)]
     return None if match.empty else str(match["row_id"].iloc[0])
 
 

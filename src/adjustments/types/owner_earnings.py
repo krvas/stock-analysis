@@ -14,6 +14,13 @@ from typing import Any
 import pandas as pd
 
 from src.adjustments.base import AdjustmentResult, AdjustmentSpec, NewRow
+from src.api.edgartools.standard_terms import (
+    CFO,
+    DEPRECIATION_EXPENSE,
+    NWC_ABSTRACT,
+    NWC_PREFIX,
+    PRETAX_INCOME,
+)
 from src.models.statement import Statement, StatementSet, bool_flag
 
 TYPE_ID = "owner_earnings"
@@ -21,10 +28,6 @@ LABEL = "Owner earnings"
 
 MAINTENANCE_DA = "maintenance_da"
 MAINTENANCE_NWC = "maintenance_nwc"
-
-NWC_ABSTRACT = "us-gaap_IncreaseDecreaseInOperatingCapitalAbstract"
-NWC_PREFIX = "IncreaseDecreaseIn"
-CFO = "us-gaap_NetCashProvidedByUsedInOperatingActivities"
 
 
 def from_prefs(rows: pd.DataFrame) -> AdjustmentSpec:
@@ -80,11 +83,9 @@ def _first_value(statement: Statement, mask: pd.Series) -> dict[str, float]:
 def components(ss: StatementSet) -> pd.DataFrame:
     """Per period: ``pretax``, ``da``, ``nwc`` (index = periods, newest first)."""
     income, cashflow = ss.income, ss.cashflow
-    pretax = _first_value(
-        income, income.frame["standard_concept"].eq("PretaxIncomeLoss")
-    )
+    pretax = _first_value(income, income.frame["standard_concept"].eq(PRETAX_INCOME))
     da = _first_value(
-        cashflow, cashflow.frame["standard_concept"].eq("DepreciationExpense")
+        cashflow, cashflow.frame["standard_concept"].eq(DEPRECIATION_EXPENSE)
     )
     tagged = cashflow.frame[
         cashflow.frame["tags"].map(lambda t: "da" in tuple(t or ()))

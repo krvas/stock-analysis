@@ -20,6 +20,7 @@ import pandas as pd
 
 from src.adjustments.base import AdjustmentResult, AdjustmentSpec, NewRow
 from src.adjustments.registry import ADJUSTMENT_ORDER, get_adjustment_type
+from src.api.edgartools.standard_terms import NET_INCOME_CONCEPTS
 from src.models.calc_residuals import calc_residuals
 from src.models.statement import (
     STATEMENT_TYPES,
@@ -30,9 +31,6 @@ from src.models.statement import (
 )
 
 logger = logging.getLogger(__name__)
-
-# Concepts that carry the same value on the income and cashflow statements.
-SYNCED_CONCEPTS: tuple[str, ...] = ("us-gaap_NetIncomeLoss", "us-gaap_ProfitLoss")
 
 
 def ordered_specs(
@@ -184,7 +182,7 @@ def _sync_from_income(
 ) -> Statement:
     income_rows = _first_rows(income.frame)
     cash_rows = _first_rows(cashflow.frame)
-    for concept in SYNCED_CONCEPTS:
+    for concept in NET_INCOME_CONCEPTS:
         if concept not in dirty["income"]:
             continue
         if concept not in income_rows.index or concept not in cash_rows.index:
