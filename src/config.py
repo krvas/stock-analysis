@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import os
 from pathlib import Path
+from typing import Literal, cast, get_args
 
 from dotenv import load_dotenv
 
@@ -69,6 +70,24 @@ MAX_PERIODS_BY_PERIOD: dict[PeriodType, int] = {
     "quarterly": MAX_CACHE_QUARTERS,
 }
 
+# AI tools (src/ai_tools): 10-K section workspaces, validated-answer cache and
+# Claude Code request handoff files, all under one directory.
+AI_TOOLS_DIR = DATA_DIR / "ai_tools"
+AI_WORKSPACE_DIR = AI_TOOLS_DIR / "workspace"
+AI_CACHE_DIR = AI_TOOLS_DIR / "cache"
+AI_REQUESTS_DIR = AI_TOOLS_DIR / "requests"
+# Latest original 10-Ks one AI run reads together (one workspace subfolder each).
+AI_ANNUAL_REPORTS = 5
+# Which backend answers tasks and whether validated answers are cached are
+# read from AI_BACKEND / AI_CACHE_ENABLED at call time (after .env is loaded):
+# see ai_backend() / ai_cache_enabled() below.
+AiBackend = Literal["claude_code", "openrouter"]
+# Task name -> OpenRouter model id ("default" fallback); claude_code ignores it.
+AI_MODELS_PATH = Path(__file__).resolve().parent / "ai_tools" / "models.json"
+OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+# Most model turns (tool-call rounds) per OpenRouter task run.
+AI_MAX_TURNS = max(1, int(os.environ.get("AI_MAX_TURNS", "20")))
+
 # Logging
 LOG_DIR = PROJECT_ROOT / "logs"
 LOG_FILE = LOG_DIR / "platform.log"
@@ -103,3 +122,20 @@ def load_project_dotenv() -> None:
             env_path,
             exc,
         )
+
+
+def ai_backend() -> AiBackend:
+    """``AI_BACKEND`` from the environment / ``.env`` (default ``claude_code``)."""
+    load_project_dotenv()
+    value = os.environ.get("AI_BACKEND", "claude_code").strip().lower()
+    allowed = get_args(AiBackend)
+    if value not in allowed:
+        raise ValueError(f"AI_BACKEND must be one of {allowed}, not {value!r}")
+    return cast(AiBackend, value)
+
+
+def ai_cache_enabled() -> bool:
+    """``AI_CACHE_ENABLED`` from the environment / ``.env`` (default true)."""
+    load_project_dotenv()
+    value = os.environ.get("AI_CACHE_ENABLED", "true").strip().lower()
+    return value not in ("0", "false", "no", "off")
