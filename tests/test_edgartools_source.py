@@ -24,6 +24,7 @@ from src.api.edgartools.cache import (
 from src.api.edgartools.source import (
     _align,
     _build_statement,
+    _note_da_facts,
     load_statement_set,
     setup_edgartools,
 )
@@ -1281,3 +1282,38 @@ def test_clear_http_cache_if_over_uses_edgartools_clear_cache(monkeypatch) -> No
     source._clear_http_cache_if_over(max_bytes=500)
 
     assert clear.call_args_list == [call(dry_run=True), call(dry_run=False)]
+
+
+class _FakeFacts:
+    def __init__(self, frame: pd.DataFrame) -> None:
+        self._frame = frame
+
+    def to_dataframe(self) -> pd.DataFrame:
+        return self._frame
+
+
+class _FakeXbrl:
+    def __init__(self, frame: pd.DataFrame) -> None:
+        self.facts = _FakeFacts(frame)
+
+
+def test_note_da_facts_keeps_undimensioned_period_length_components() -> None:
+    facts = pd.DataFrame(
+        {
+            "concept": [
+                "us-gaap:Depreciation",
+                "us-gaap:Depreciation",
+                "us-gaap:Depreciation",
+                "us-gaap:Revenues",
+            ],
+            "is_dimensioned": [False, True, False, False],
+            "period_type": ["duration"] * 4,
+            "period_start": ["2023-10-01", "2023-10-01", "2024-07-01", "2023-10-01"],
+            "period_end": ["2024-09-28"] * 4,
+            "numeric_value": [8.2e9, 1.0, 2.0e9, 3.9e11],
+        }
+    )
+    out = _note_da_facts(_FakeXbrl(facts), "annual")
+    assert out.to_dict(orient="records") == [
+        {"concept": "us-gaap_Depreciation", "period_end": "2024-09-28", "value": 8.2e9}
+    ]

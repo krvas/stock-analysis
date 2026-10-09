@@ -27,6 +27,12 @@ from src.api.edgartools.cache import (
     save_cache_entry,
     touch_company_cache,
 )
+from src.api.edgartools.standard_terms import (
+    COMPONENT_DA_CONCEPTS,
+    DA_COMPONENT_AXIS,
+    DEPRECIATION_EXPENSE,
+    OTHER_DA_MEMBER,
+)
 from src.config import (
     EDGARTOOLS_CACHE_DIR,
     EDGARTOOLS_HTTP_CACHE_MAX_MB,
@@ -36,6 +42,7 @@ from src.config import (
 from src.models.statement import (
     CALC_EDGE_COLUMNS,
     EDGARTOOLS_METADATA_COLUMNS,
+    REPORTED_ORIGIN,
     STATEMENT_METADATA_COLUMNS,
     STATEMENT_TYPES,
     PeriodType,
@@ -520,6 +527,141 @@ def _build_statement(
     return Statement(pd.DataFrame(data), statement_type, calc_edges)
 
 
+# Fact duration (days) accepted as one period of each type.
+_PERIOD_DAYS: dict[PeriodType, tuple[int, int]] = {
+    "annual": (330, 400),
+    "quarterly": (80, 100),
+}
+
+_DA_COMPONENT_LABELS: dict[str, str] = {
+    "us-gaap_Depreciation": "Depreciation",
+    "us-gaap_AmortizationOfIntangibleAssets": "Amortization of intangible assets",
+    "us-gaap_FinanceLeaseRightOfUseAssetAmortization": (
+        "Amortization of finance lease right-of-use assets"
+    ),
+    OTHER_DA_MEMBER: "Other depreciation and amortization",
+}
+
+
+def _note_da_facts(xbrl, period: PeriodType) -> pd.DataFrame:
+    """Undimensioned D&A component facts of one filing (any XBRL role).
+
+    Columns ``concept`` (our ``prefix_Local`` form), ``period_end`` (ISO date
+    string), ``value``; only durations of one ``period`` length.
+    """
+    columns = ["concept", "period_end", "value"]
+    try:
+        facts = xbrl.facts.to_dataframe()
+    except Exception:  # noqa: BLE001 - a filing without usable facts adds nothing
+        logger.warning("Could not read XBRL facts for the D&A breakdown")
+        return pd.DataFrame(columns=columns)
+    if facts.empty or "concept" not in facts.columns:
+        return pd.DataFrame(columns=columns)
+    facts = facts.assign(concept=facts["concept"].map(_concept_id))
+    facts = facts[
+        facts["concept"].isin(COMPONENT_DA_CONCEPTS)
+        & ~facts["is_dimensioned"].fillna(False).astype(bool)
+        & facts["period_type"].eq("duration")
+    ]
+    if facts.empty:
+        return pd.DataFrame(columns=columns)
+    start = pd.to_datetime(facts["period_start"], errors="coerce")
+    end = pd.to_datetime(facts["period_end"], errors="coerce")
+    low, high = _PERIOD_DAYS[period]
+    days = (end - start).dt.days
+    facts = facts[days.between(low, high)]
+    return (
+        pd.DataFrame(
+            {
+                "concept": facts["concept"],
+                "period_end": end[facts.index].dt.date.astype(str),
+                "value": pd.to_numeric(facts["numeric_value"], errors="coerce"),
+            }
+        )
+        .dropna(subset=["value"])
+        .drop_duplicates(["concept", "period_end"])
+    )
+
+
+def _with_da_breakdown(
+    cashflow: Statement, xbrls: XBRLS, period: PeriodType, max_periods: int
+) -> Statement:
+    """Add note-reported D&A components under the cash-flow D&A line.
+
+    Each component becomes a dimensional row of the D&A line's concept on the
+    synthetic :data:`DA_COMPONENT_AXIS` (member = the note concept),
+    ``is_breakdown`` and not ``in_standard``, so it shows in the detailed
+    view only and never enters calc sums. Values come from the filing that
+    supplied that period's cash-flow values; an "other" row holds the
+    reported D&A minus the components when that is non-zero.
+    """
+    frame = cashflow.frame
+    parents = frame[
+        frame["standard_concept"].eq(DEPRECIATION_EXPENSE)
+        & ~frame["dimension"].fillna(False).astype(bool)
+    ]
+    if parents.empty:
+        return cashflow
+    parent = parents.iloc[0]
+    metas = determine_optimal_periods(
+        xbrls.xbrl_list,
+        _STATEMENT_XBRL_TYPES["cashflow"],
+        max_periods=max_periods,
+    )
+    facts_by_index: dict[int, pd.DataFrame] = {}
+    values: dict[str, dict[str, float]] = {}
+    for meta in metas:
+        label = str(_period_date(meta))
+        if label not in cashflow.periods:
+            continue
+        index = meta["xbrl_index"]
+        if index not in facts_by_index:
+            facts_by_index[index] = _note_da_facts(xbrls.xbrl_list[index], period)
+        facts = facts_by_index[index]
+        for fact in facts[facts["period_end"] == label].itertuples(index=False):
+            values.setdefault(fact.concept, {})[label] = float(fact.value)
+    if not values:
+        return cashflow
+
+    other: dict[str, float] = {}
+    for label in cashflow.periods:
+        total = pd.to_numeric(parent[label], errors="coerce")
+        parts = [v[label] for v in values.values() if label in v]
+        if pd.notna(total) and parts:
+            remainder = float(total) - sum(parts)
+            if abs(remainder) > 0.5:
+                other[label] = remainder
+    if other:
+        values[OTHER_DA_MEMBER] = other
+
+    after = str(parent["row_id"])
+    for member in [*COMPONENT_DA_CONCEPTS, OTHER_DA_MEMBER]:
+        if member not in values:
+            continue
+        pairs = [(DA_COMPONENT_AXIS, member)]
+        row = {
+            "concept": parent["concept"],
+            "label": _DA_COMPONENT_LABELS[member],
+            "standard_concept": parent.get("standard_concept"),
+            "level": int(parent.get("level", 0) or 0) + 1,
+            "abstract": False,
+            "dimension": True,
+            "is_breakdown": True,
+            "in_standard": False,
+            "dimension_axis": DA_COMPONENT_AXIS,
+            "dimension_member": member,
+            "dimension_member_label": _DA_COMPONENT_LABELS[member],
+            "dimension_key": format_dimension_key(pairs),
+            "parent_abstract_concept": parent.get("parent_abstract_concept"),
+            "origin": REPORTED_ORIGIN,
+            **values[member],
+        }
+        row["row_id"] = get_row_id(row)
+        cashflow = cashflow.insert(row, after=after)
+        after = row["row_id"]
+    return cashflow
+
+
 def _calc_edges_frame(
     records: Sequence[tuple[str, str, str, float]],
 ) -> pd.DataFrame:
@@ -609,9 +751,13 @@ def load_statement_set(ticker: str, period: PeriodType) -> StatementSet:
 
     xbrls = XBRLS.from_filings(filings, filter_amendments=True)
 
-    statement_set = StatementSet(
-        **{st: _build_statement(xbrls, st, max_periods) for st in STATEMENT_TYPES}
+    statements = {
+        st: _build_statement(xbrls, st, max_periods) for st in STATEMENT_TYPES
+    }
+    statements["cashflow"] = _with_da_breakdown(
+        statements["cashflow"], xbrls, period, max_periods
     )
+    statement_set = StatementSet(**statements)
 
     save_cache_entry(
         cik=company.cik,

@@ -44,3 +44,14 @@ NWC_PREFIX = "IncreaseDecreaseIn"
 
 # Concepts reported on both the income and cash-flow statements.
 NET_INCOME_CONCEPTS = ("us-gaap_NetIncomeLoss", "us-gaap_ProfitLoss")
+
+# D&A components reported in the notes, added to the cash-flow D&A line as
+# dimensional breakdown rows on a synthetic axis (member = the note concept,
+# or OTHER_DA_MEMBER for whatever the components don't explain).
+COMPONENT_DA_CONCEPTS = (
+    "us-gaap_Depreciation",
+    "us-gaap_AmortizationOfIntangibleAssets",
+    "us-gaap_FinanceLeaseRightOfUseAssetAmortization",
+)
+DA_COMPONENT_AXIS = "DepreciationAmortizationComponentAxis"
+OTHER_DA_MEMBER = "OtherDepreciationAndAmortization"
