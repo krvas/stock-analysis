@@ -16,7 +16,7 @@ from typing import Any
 
 import pandas as pd
 
-from src.adjustments.base import AdjustmentResult, AdjustmentSpec, NewRow
+from src.adjustments.base import MEMO_TAG, AdjustmentResult, AdjustmentSpec, NewRow
 from src.api.edgartools.standard_terms import (
     CFO,
     DA_COMPONENT_AXIS,
@@ -177,6 +177,7 @@ def apply(ss: StatementSet, spec: AdjustmentSpec) -> AdjustmentResult:
                 concept,
                 label,
                 oe[column].dropna().to_dict(),
+                tags=(MEMO_TAG,),
                 is_total=is_total,
                 after=after,
             )

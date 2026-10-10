@@ -4,7 +4,7 @@ from typing import Any
 
 import pandas as pd
 
-from src.adjustments.base import AdjustmentResult, AdjustmentSpec, NewRow
+from src.adjustments.base import MEMO_TAG, AdjustmentResult, AdjustmentSpec, NewRow
 from src.api.edgartools.standard_terms import BALANCE_ASSETS_ROOT
 from src.models.balance_leaves import balance_leaves
 from src.models.statement import Statement, StatementSet
@@ -65,6 +65,7 @@ def apply(ss: StatementSet, spec: AdjustmentSpec) -> AdjustmentResult:
                 GROSS_CONCEPT,
                 "Gross assets in use",
                 {p: gross for p, (gross, _) in values.items()},
+                tags=(MEMO_TAG,),
                 after=after,
             ),
             NewRow(
@@ -72,6 +73,7 @@ def apply(ss: StatementSet, spec: AdjustmentSpec) -> AdjustmentResult:
                 NET_CONCEPT,
                 "Net assets in use",
                 {p: net for p, (_, net) in values.items()},
+                tags=(MEMO_TAG,),
                 after=GROSS_CONCEPT,
             ),
         ]
