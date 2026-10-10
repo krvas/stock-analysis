@@ -78,6 +78,8 @@ def apply(ss: StatementSet, spec: AdjustmentSpec) -> AdjustmentResult:
     )
 
 
-def describe(spec: AdjustmentSpec) -> dict[str, Any]:
+def describe(spec: AdjustmentSpec) -> dict[str, Any] | None:
     changed = sum(float(v) != 100 for v in spec.params.values())
+    if not changed:
+        return None
     return {"type": TYPE_ID, "label": f"{LABEL}: {changed} line(s) changed"}
