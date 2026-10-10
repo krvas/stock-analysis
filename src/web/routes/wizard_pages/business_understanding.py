@@ -39,10 +39,6 @@ def one_line_answers_context(ticker: str, settings: Settings) -> dict[str, Any]:
 
 
 def _snapshot_items(balance: Statement, period: str) -> dict[str, list[dict[str, Any]]]:
-    """Balance-sheet leaves of ``period`` by side, on display signs.
-
-    Equity leaves are netted into one item; other non-positive leaves drop.
-    """
     items: dict[str, list[dict[str, Any]]] = {"assets": [], "liabilities": []}
     equity = 0.0
     for leaf in balance_leaves(balance, period):
