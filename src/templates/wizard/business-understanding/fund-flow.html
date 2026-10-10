@@ -1,0 +1,12 @@
+{% extends "wizard/base_subpage.html" %}
+{% import "macros/line_item_table.html" as table_macro %}
+
+{% block subpage_content %}
+{% include "shared/_adjustments_note.html" %}
+{% if not_enough_periods %}
+<p class="wizard-nyi">Not enough periods: Fund Flow needs two different balance sheets, and {{ ticker }} has fewer cached for these Settings.</p>
+{% else %}
+<p class="wizard-table-note">Where money moved between the two balance sheets: change = current − previous.</p>
+{{ table_macro.table("fund-flow-table", fund_flow_table) }}
+{% endif %}
+{% endblock %}
