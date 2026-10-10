@@ -1,4 +1,4 @@
-"""Tests for the statement-page payload and its StatementSet consumers (no network)."""
+"""Statement pages and the Capitalizing Opex builder over a fixture StatementSet."""
 
 from __future__ import annotations
 
@@ -9,13 +9,13 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from src.config import MAX_CACHE_QUARTERS, MAX_CACHE_YEARS
-from src.models.edgartools.html_renderer import build_statement_payload
+from src.adjustments.base import AdjustmentSpec
 from src.models.statement import StatementSet
 from src.web import adjusted_statements
-from src.web.routes.statements import clamp_num_periods
+from src.web.routes.statements import statement_context
 from src.web.routes.wizard_pages import adjustments_context
 from src.web.settings import Settings, resolve
+from src.web.statements_registry import get_statement_page
 from src.web.wizard_registry import get_subpage
 from tests.statement_fixtures import make_statement
 
@@ -65,78 +65,72 @@ def _rows_by_id(table: dict) -> dict[str, dict]:
     return {row["id"]: row for row in table["rows"]}
 
 
-def test_payload_shape_and_period_slicing() -> None:
-    payload = build_statement_payload(
-        _statement_set(), ticker="AAPL", period="annual", num_periods=2
+def _statement(slug: str, specs: list | None = None, **values: object) -> dict:
+    page = get_statement_page(slug)
+    with (
+        patch.object(
+            adjusted_statements, "load_statement_set", return_value=_statement_set()
+        ),
+        patch.object(adjusted_statements, "load_specs", return_value=specs or []),
+        patch.object(adjusted_statements, "apply_adjustments", lambda ss, _: ss),
+    ):
+        return statement_context(
+            "AAPL", page, resolve(json.dumps(values), page.settings)
+        )
+
+
+def test_statement_is_one_table_over_num_periods() -> None:
+    ctx = _statement("balance", num_periods=2)
+    table = ctx["statement_table"]
+    assert set(table) == {
+        "columns",
+        "linked_groups",
+        "rows",
+        "calculated_cells",
+        "no_input_cells",
+    }
+    # Only the newest two periods; no row_id (or other metadata) column.
+    assert [col["id"] for col in table["columns"]] == [P1, P2]
+    assert all(
+        col["kind"] == "static" and col["dtype"] == "number" for col in table["columns"]
+    )
+    assert (ctx["ticker"], ctx["period"], ctx["page"].slug) == (
+        "AAPL",
+        "annual",
+        "balance",
     )
 
-    assert payload["ticker"] == "AAPL"
-    assert payload["period"] == "annual"
-    assert set(payload["statements"]) == {"income", "balance", "cashflow"}
-    for views in payload["statements"].values():
-        assert set(views) == {"summary", "standard", "detailed"}
-        for table in views.values():
-            assert set(table) == {
-                "columns",
-                "linked_groups",
-                "rows",
-                "calculated_cells",
-                "no_input_cells",
-            }
-            # Only the newest two periods; no row_id (or other metadata) column.
-            assert [col["id"] for col in table["columns"]] == [P1, P2]
-            assert all(
-                col["kind"] == "static" and col["dtype"] == "number"
-                for col in table["columns"]
-            )
+
+@pytest.mark.parametrize(
+    ("view", "ids"),
+    [
+        ("summary", ["Revenue", RND]),
+        ("standard", ["Revenue", RND]),
+        ("detailed", ["Revenue", RND, "Rev|Axis=IphoneMember"]),
+    ],
+)
+def test_statement_follows_view(view: str, ids: list[str]) -> None:
+    table = _statement("income", view=view)["statement_table"]
+    assert [r["id"] for r in table["rows"]] == ids
 
 
-def test_payload_view_filtering_and_display_signs() -> None:
-    income = build_statement_payload(
-        _statement_set(), ticker="AAPL", period="annual", num_periods=3
-    )["statements"]["income"]
-
-    assert [r["id"] for r in income["summary"]["rows"]] == ["Revenue", RND]
-    assert [r["id"] for r in income["standard"]["rows"]] == ["Revenue", RND]
-    assert [r["id"] for r in income["detailed"]["rows"]] == [
-        "Revenue",
-        RND,
-        "Rev|Axis=IphoneMember",
-    ]
-
-    rows = _rows_by_id(income["summary"])
+def test_statement_uses_display_signs() -> None:
+    rows = _rows_by_id(_statement("income")["statement_table"])
     assert rows[RND]["cells"] == {P1: -5.0, P2: -4.0, P3: -3.0}
     assert rows["Revenue"]["cells"][P1] == 100.0
     assert rows[RND]["label"] == "Research and development"
     assert rows[RND]["level"] == 1
 
 
-def test_clamp_num_periods() -> None:
-    assert clamp_num_periods(10, "annual", 64) == min(10, MAX_CACHE_YEARS)
-    assert clamp_num_periods(10_000, "annual", 10_000) == MAX_CACHE_YEARS
-    assert clamp_num_periods(10_000, "quarterly", 10_000) == MAX_CACHE_QUARTERS
-    assert clamp_num_periods(10, "annual", 3) == 3
-
-
-def test_opex_to_capex_context_uses_detailed_projection() -> None:
-    with (
-        patch.object(
-            adjusted_statements, "load_statement_set", return_value=_statement_set()
-        ) as mock_load,
-        patch.object(adjusted_statements, "load_specs", return_value=[]),
-        patch.object(adjustments_context, "_apply_saved_opex_to_capex_preferences"),
-    ):
-        context = adjustments_context.opex_to_capex_context(
-            "AAPL", _opex_settings(num_periods=2)
-        )
-
-    mock_load.assert_called_once_with("AAPL", "annual")
-    table = context["opex_table"]
-    assert [col["id"] for col in table["columns"]] == [P1, P2, "capitalize", "years"]
-    rows = table["rows"]
-    # Keyed by get_row_id, not standard_concept (which only drives selection).
-    assert [row["id"] for row in rows] == [RND]
-    assert rows[0]["cells"] == {P1: -5.0, P2: -4.0, "capitalize": None, "years": None}
+def test_basis_decides_whether_saved_adjustments_load() -> None:
+    spec = AdjustmentSpec("opex_to_capex", {})
+    reported = _statement("income", specs=[spec])
+    assert (reported["basis"], reported["adjustments"]) == ("reported", [])
+    adjusted = _statement("income", specs=[spec], basis="adjusted")
+    assert adjusted["basis"] == "adjusted"
+    assert [a["label"] for a in adjusted["adjustments"]] == ["Opex capitalized (0)"]
+    no_saved = _statement("income", basis="adjusted")
+    assert (no_saved["basis"], no_saved["adjustments"]) == ("adjusted", [])
 
 
 @pytest.mark.parametrize(
