@@ -1,5 +1,3 @@
-"""Assets in use through the adjustments engine, on a fixture balance sheet."""
-
 from __future__ import annotations
 
 import os
@@ -24,7 +22,6 @@ SE = "us-gaap_StockholdersEquity"
 LE = "us-gaap_LiabilitiesAndStockholdersEquity"
 CAPITALIZED_RND = "adj_CapitalizedResearchAndDevelopmentExpense"
 
-# concept, label, parent, weight, P1, P2 (P3 is empty: no total assets there)
 BALANCE = [
     ("Cash", "Cash", AC, 1.0, 60.0, 50.0),
     ("Receivables", "Receivables", AC, 1.0, 40.0, 30.0),
@@ -92,8 +89,6 @@ def test_pct_in_use_reduces_gross_by_each_leaf_contribution() -> None:
     adjusted = _run(
         {"Construction": 0.0, "Allowance": 50.0, "Split": 50.0, "Cash": 100.0}
     )
-    # P1: 175 - 50 - (-5 * 0.5) - 30 * 0.5; P2: Split has children, so only
-    # construction and the contra allowance count: 136 - 40 - (-4 * 0.5)
     assert _memo(adjusted, GROSS_CONCEPT) == {P1: 112.5, P2: 98.0, P3: None}
     assert _memo(adjusted, NET_CONCEPT) == {P1: 112.5, P2: 98.0, P3: None}
 
@@ -116,7 +111,6 @@ def test_capitalized_opex_asset_counts_as_an_asset_leaf() -> None:
     opex = AdjustmentSpec(
         "opex_to_capex", {"rows": {"ResearchAndDevelopmentExpense": 2}}
     )
-    # R&D of 10 in P1 over 2 years leaves a net asset of 5, so total assets is 180.
     assert _memo(_run({}, opex), GROSS_CONCEPT)[P1] == 180.0
     assert _memo(_run({CAPITALIZED_RND: 0.0}, opex), GROSS_CONCEPT)[P1] == 175.0
 

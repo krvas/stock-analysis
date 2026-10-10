@@ -1,12 +1,3 @@
-"""Balance-sheet leaves: the line items that add up to each side's total.
-
-A leaf is a non-dimensional, non-abstract balance-sheet row with a numeric
-value in the period and no calc children in that period's calc tree. Its side
-is the root of its calc-parent chain (total assets, or total liabilities and
-equity); rows whose chain reaches neither root are not leaves. A leaf whose
-chain passes an equity parent is equity.
-"""
-
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -35,23 +26,16 @@ class BalanceLeaf:
     label: str
     side: Side
     is_equity: bool
-    weight: float
-    value: float
+    chain_weight: float
+    raw_value: float
     display_value: float
 
     @property
     def contribution(self) -> float:
-        """What this leaf adds to its side's total."""
-        return self.weight * self.value
+        return self.chain_weight * self.raw_value
 
 
 def balance_leaves(balance: Statement, period: str) -> list[BalanceLeaf]:
-    """The leaves of ``period`` in frame order.
-
-    ``weight`` is the product of calc weights along the chain to the root in
-    that period; ``value`` is raw, ``display_value`` has ``preferred_sign``
-    applied.
-    """
     edges = balance.calc_edges
     edges = edges[edges["period"] == period]
     parent = dict(zip(edges["concept"], edges["parent_concept"], strict=True))
@@ -81,8 +65,8 @@ def balance_leaves(balance: Statement, period: str) -> list[BalanceLeaf]:
                 label=str(row["label"]),
                 side=side,
                 is_equity=any(c in EQUITY_PARENTS for c in chain),
-                weight=weight,
-                value=float(value),
+                chain_weight=weight,
+                raw_value=float(value),
                 display_value=sign * float(value),
             )
         )

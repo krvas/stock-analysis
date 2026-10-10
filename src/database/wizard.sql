@@ -5,7 +5,7 @@ CREATE TABLE IF NOT EXISTS adjustment_preferences (
     ticker            VARCHAR NOT NULL,
     exchange          VARCHAR NOT NULL,
     statement         VARCHAR NOT NULL,          -- 'BS' | 'CF' | 'PL'
-    adjustment_type   VARCHAR NOT NULL,          -- 'opex_to_capex' | 'owner_earnings' | 'assets_in_use'
+    adjustment_type   VARCHAR NOT NULL,
     base_concept      VARCHAR NOT NULL,          -- statement line item the adjustment applies to
     base_concept_statement         VARCHAR NOT NULL,          -- 'BS' | 'CF' | 'PL'
     value              DOUBLE NOT NULL,           -- years (opex_to_capex); maintenance % (owner_earnings); assets_in_use: % in use (asset row) or 1.0 = netted (liability row)
