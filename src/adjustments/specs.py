@@ -14,10 +14,6 @@ def _applies_by_default(type_id: str) -> bool:
     return getattr(get_adjustment_type(type_id), "APPLIES_BY_DEFAULT", False)
 
 
-def _has_user_choices(spec: AdjustmentSpec) -> bool:
-    return bool(spec.params) or not _applies_by_default(spec.type_id)
-
-
 def from_prefs(prefs: pd.DataFrame) -> list[AdjustmentSpec]:
     saved = set() if prefs.empty else set(prefs["adjustment_type"])
     specs = []
@@ -31,8 +27,6 @@ def from_prefs(prefs: pd.DataFrame) -> list[AdjustmentSpec]:
 
 
 def describe(specs: list[AdjustmentSpec]) -> list[dict[str, Any]]:
-    return [
-        get_adjustment_type(s.type_id).describe(s)
-        for s in specs
-        if _has_user_choices(s)
-    ]
+    """Note entries for ``specs``; a type's ``describe`` returns None to opt out."""
+    described = (get_adjustment_type(s.type_id).describe(s) for s in specs)
+    return [d for d in described if d is not None]
