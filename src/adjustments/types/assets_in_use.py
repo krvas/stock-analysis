@@ -53,6 +53,8 @@ def _gross_and_net(
 ) -> dict[str, tuple[float, float]]:
     """``period → (gross, net)`` for every period with total assets."""
     out: dict[str, tuple[float, float]] = {}
+    if not params:
+        return {period: (reported, reported) for period, reported in total.items()}
     for period, reported in total.items():
         not_in_use = netted = 0.0
         for leaf in balance_leaves(balance, period):
@@ -69,6 +71,8 @@ def _gross_and_net(
 def apply(ss: StatementSet, spec: AdjustmentSpec) -> AdjustmentResult:
     params = {str(k): float(v) for k, v in spec.params.items()}
     after, total = total_assets(ss.balance)
+    if not total:
+        raise ValueError("balance sheet has no total assets")
     values = _gross_and_net(ss.balance, total, params)
     return AdjustmentResult(
         new_rows=[
