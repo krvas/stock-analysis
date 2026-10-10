@@ -21,7 +21,7 @@ import pandas as pd
 from src.adjustments.base import AdjustmentResult, AdjustmentSpec, NewRow
 from src.api.edgartools.standard_terms import BALANCE_ASSETS_ROOT
 from src.models.balance_leaves import balance_leaves
-from src.models.statement import Statement, StatementSet, bool_flag
+from src.models.statement import Statement, StatementSet
 
 TYPE_ID = "assets_in_use"
 LABEL = "Assets in use"
@@ -38,11 +38,9 @@ def from_prefs(rows: pd.DataFrame) -> AdjustmentSpec:
     )
 
 
-def _total_assets(balance: Statement) -> tuple[str | None, dict[str, float]]:
-    frame = balance.frame
-    rows = frame[
-        frame["concept"].eq(BALANCE_ASSETS_ROOT) & ~bool_flag(frame, "dimension")
-    ]
+def total_assets(balance: Statement) -> tuple[str | None, dict[str, float]]:
+    """The total assets row id and its values by period (raw signs)."""
+    rows = balance.find(concept=BALANCE_ASSETS_ROOT)
     if rows.empty:
         return None, {}
     row = rows.iloc[0]
@@ -55,7 +53,7 @@ def _gross_and_net(
 ) -> dict[str, tuple[float, float]]:
     """``period → (gross, net)`` for every period with total assets."""
     out: dict[str, tuple[float, float]] = {}
-    for period, total_assets in total.items():
+    for period, reported in total.items():
         not_in_use = netted = 0.0
         for leaf in balance_leaves(balance, period):
             saved = params.get(leaf.row_id)
@@ -63,14 +61,14 @@ def _gross_and_net(
                 not_in_use += leaf.contribution * (1 - saved / 100)
             elif leaf.side == "liabilities" and not leaf.is_equity and saved == NETTED:
                 netted += leaf.contribution
-        gross = total_assets - not_in_use
+        gross = reported - not_in_use
         out[period] = (gross, gross - netted)
     return out
 
 
 def apply(ss: StatementSet, spec: AdjustmentSpec) -> AdjustmentResult:
     params = {str(k): float(v) for k, v in spec.params.items()}
-    after, total = _total_assets(ss.balance)
+    after, total = total_assets(ss.balance)
     values = _gross_and_net(ss.balance, total, params)
     return AdjustmentResult(
         new_rows=[

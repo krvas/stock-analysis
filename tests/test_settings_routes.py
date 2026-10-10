@@ -15,6 +15,7 @@ from tests.test_statement_pages import P1, P2, P3, _statement_set
 
 FUND_FLOW = "/wizard/AAPL/business-understanding/fund-flow"
 BALANCE_SHEET_SIZE = "/wizard/AAPL/business-understanding/balance-sheet-size"
+ASSETS_IN_USE = "/wizard/AAPL/adjustments/assets-in-use"
 OFFSET_ERROR = "Previous period must be older than the current period"
 ADJUSTED_NOTE = "Adjusted basis (no adjustments applied)"
 
@@ -161,6 +162,7 @@ def test_statement_drawer_offers_basis_for_this_page(client: TestClient) -> None
     [
         (BALANCE_SHEET_SIZE, ("Annual only", "Single period", "Summary only")),
         (FUND_FLOW, ("Two periods",)),
+        (ASSETS_IN_USE, ("Annual only", "Fixed layout")),
     ],
 )
 def test_greyed_global_settings_show_their_reason(
