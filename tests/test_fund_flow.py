@@ -1,5 +1,3 @@
-"""Business Understanding › Fund Flow: table and context builder (no network)."""
-
 from __future__ import annotations
 
 import json

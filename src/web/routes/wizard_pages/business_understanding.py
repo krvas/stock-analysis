@@ -30,11 +30,6 @@ CHANGE_COLUMN = ColumnSpec(
 
 
 def one_line_answers_context(ticker: str, settings: Settings) -> dict[str, Any]:
-    """Each question (field description) with its AI answer, in field order.
-
-    View: summary and standard show the answer; detailed adds justification
-    and source.
-    """
     result = run_task(ONE_LINE_ANSWERS_TASK, ticker)
     if result.answer is None:
         return {"ai_pending": True}
@@ -96,8 +91,6 @@ def _side_table(items: list[dict[str, Any]], limit: int) -> dict[str, Any]:
 
 
 def balance_sheet_size_context(ticker: str, settings: Settings) -> dict[str, Any]:
-    """The annual balance sheet at the current period as two ranked Tables of
-    at most ``items_per_side`` items each."""
     loaded = load_for_basis(ticker, "annual", settings.basis)
     balance = loaded.statements.balance
     context: dict[str, Any] = {
@@ -119,8 +112,6 @@ def balance_sheet_size_context(ticker: str, settings: Settings) -> dict[str, Any
 def fund_flow_table(
     balance: Statement, view: StatementView, current: str, previous: str
 ) -> Table:
-    """``balance`` in ``view`` over ``current`` and ``previous`` plus a change
-    column (current − previous on display signs; missing if either is)."""
     frame = balance.project(view, [current, previous])
     columns = period_column_specs(frame) + [CHANGE_COLUMN]
     frame[CHANGE_COLUMN.id] = frame[current] - frame[previous]
@@ -135,11 +126,6 @@ def fund_flow_table(
 
 
 def fund_flow_context(ticker: str, settings: Settings) -> dict[str, Any]:
-    """The balance sheet at the current and previous periods and the change.
-
-    A notice replaces the table when the offsets clamp to fewer than two
-    distinct periods.
-    """
     loaded = load_for_basis(ticker, settings.period, settings.basis)
     balance = loaded.statements.balance
     current = settings.period_at("current_period", balance.periods)
