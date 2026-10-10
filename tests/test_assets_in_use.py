@@ -160,20 +160,30 @@ def test_default_spec_joins_saved_specs_of_other_types() -> None:
     ]
 
 
-@pytest.mark.parametrize(
-    ("params", "label"),
-    [
-        ({}, "Assets in use: 0 line(s) changed"),
-        (
-            {"Cash": 100.0, "Construction": 0.0, "Payables": 1.0},
-            "Assets in use: 2 line(s) changed",
+def test_describe_counts_choices_that_differ_from_the_defaults() -> None:
+    params = {"Cash": 100.0, "Construction": 0.0, "Payables": 1.0}
+    [label] = describe([AdjustmentSpec(TYPE_ID, params)])
+    assert label["label"] == "Assets in use: 2 line(s) changed"
+
+
+def test_default_spec_with_no_saved_choices_is_left_out_of_the_note() -> None:
+    assert describe(from_prefs(pd.DataFrame())) == []
+
+
+def test_balance_sheet_without_total_assets_gets_no_memo_rows() -> None:
+    balance = _balance()
+    ss = StatementSet(
+        income=make_statement(_income_frame(), "income"),
+        balance=Statement(
+            balance.frame[balance.frame["concept"] != A],
+            "balance",
+            calc_edges=balance.calc_edges[balance.calc_edges["parent_concept"] != A],
         ),
-    ],
-)
-def test_describe_counts_choices_that_differ_from_the_defaults(
-    params: dict, label: str
-) -> None:
-    assert describe([AdjustmentSpec(TYPE_ID, params)])[0]["label"] == label
+        cashflow=make_statement(_income_frame(), "cashflow"),
+    )
+    adjusted = apply_adjustments(ss, [AdjustmentSpec(TYPE_ID, {})])
+    concepts = set(adjusted.balance.frame["concept"])
+    assert not concepts & {GROSS_CONCEPT, NET_CONCEPT}
 
 
 @pytest.mark.data
