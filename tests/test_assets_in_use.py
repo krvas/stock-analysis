@@ -12,6 +12,7 @@ from src.adjustments.types.assets_in_use import GROSS_CONCEPT, NET_CONCEPT, TYPE
 from src.api.edgartools.source import load_statement_set
 from src.config import load_project_dotenv
 from src.models.statement import Statement, StatementSet
+from src.web.routes.wizard_pages.business_understanding import fund_flow_table
 from tests.statement_fixtures import P1, P2, P3, _income_frame, _row, make_statement
 from tests.test_edgar_data import TICKERS_FILE, _test_tickers
 
@@ -130,6 +131,12 @@ def test_memo_rows_follow_total_assets_and_leave_reported_rows_alone() -> None:
     edges = adjusted.calc_edges
     assert not edges["concept"].isin([GROSS_CONCEPT, NET_CONCEPT]).any()
     assert not edges["parent_concept"].isin([GROSS_CONCEPT, NET_CONCEPT]).any()
+
+
+def test_fund_flow_leaves_out_the_memo_rows() -> None:
+    table = fund_flow_table(_run().balance, "detailed", P1, P2).serialize()
+    ids = {row["id"] for row in table["rows"]}
+    assert A in ids and not ids & {GROSS_CONCEPT, NET_CONCEPT}
 
 
 def test_stage_before_assets_in_use_has_no_memo_rows() -> None:

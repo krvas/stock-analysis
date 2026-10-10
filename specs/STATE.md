@@ -226,7 +226,8 @@ clamp to one period); `adjustments/` `opex-to-capex`, `owner-earnings` and
 view). The `assets_in_use` type declares `APPLIES_BY_DEFAULT`, so
 `specs.from_prefs` emits it with empty params even when nothing is saved:
 every adjusted balance sheet carries the Gross and Net Assets in Use memo
-rows.
+rows. Memo rows (no calc parent) carry `MEMO_TAG` (`adjustments/base.py`):
+the statements page shows them, `fund_flow_table` leaves them out.
 The opex-to-capex builder: staged `income.project("detailed")` over
 `settings.recent_periods(...)`, `standard_concept` in `OPERATING_EXPENSES` (selection only),
 `Table` keyed by `row_id` (from `get_row_id`) with period cols + input
