@@ -73,34 +73,6 @@ body {
   font-size: 0.95rem;
 }
 
-.controls {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 16px;
-}
-
-.control-group {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.controls label,
-.controls .control-label {
-  font-size: 0.875rem;
-  color: var(--muted);
-}
-
-.controls select {
-  padding: 8px 12px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--surface);
-  font-size: 0.875rem;
-  color: var(--text);
-}
-
 .table-wrap {
   overflow: auto;
   border: 1px solid var(--border);
@@ -174,33 +146,6 @@ tbody tr:hover td:first-child {
 .placeholder {
   color: var(--muted);
   margin-top: 24px;
-}
-
-.segmented {
-  display: inline-flex;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  overflow: hidden;
-  background: var(--surface);
-}
-
-.segmented button {
-  font: inherit;
-  font-size: 0.875rem;
-  padding: 7px 12px;
-  border: 0;
-  background: transparent;
-  color: var(--muted);
-  cursor: pointer;
-}
-
-.segmented button + button {
-  border-left: 1px solid var(--border);
-}
-
-.segmented button[aria-pressed="true"] {
-  background: var(--accent);
-  color: #ffffff;
 }
 
 .adjustments-note {
