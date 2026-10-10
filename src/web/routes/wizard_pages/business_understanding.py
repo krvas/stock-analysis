@@ -7,16 +7,17 @@ from typing import Any
 
 import pandas as pd
 
+from src.adjustments.specs import describe
 from src.ai_tools.runner import run_task
 from src.ai_tools.tasks.one_line_answers import ONE_LINE_ANSWERS_TASK
-from src.api.edgartools.source import load_statement_set
 from src.api.edgartools.standard_terms import (
     BALANCE_ASSETS_ROOT,
     BALANCE_LIABILITIES_EQUITY_ROOT,
     EQUITY_PARENTS,
 )
-from src.config import MAX_ITEMS_PER_SIDE
 from src.models.table import ColumnSpec, Table
+from src.web.adjusted_statements import load_for_basis
+from src.web.settings import Settings
 
 EQUITY_ROW_ID = "equity"
 VALUE_COLUMN = ColumnSpec(
@@ -24,17 +25,22 @@ VALUE_COLUMN = ColumnSpec(
 )
 
 
-def one_line_answers_context(ticker: str, period: str) -> dict[str, Any]:
-    """Each question (field description) with its AI answer, in field order."""
+def one_line_answers_context(ticker: str, settings: Settings) -> dict[str, Any]:
+    """Each question (field description) with its AI answer, in field order.
+
+    View: summary and standard show the answer; detailed adds justification
+    and source.
+    """
     result = run_task(ONE_LINE_ANSWERS_TASK, ticker)
     if result.answer is None:
         return {"ai_pending": True}
     fields = type(result.answer).model_fields
     return {
+        "view": settings.view,
         "answers": [
             {"question": fields[name].description} | value.model_dump()
             for name, value in result.answer
-        ]
+        ],
     }
 
 
@@ -77,29 +83,30 @@ def _snapshot_items(balance: Any, period: str) -> dict[str, list[dict[str, Any]]
     return items
 
 
-def _side_table(items: list[dict[str, Any]]) -> dict[str, Any]:
-    ranked = sorted(items, key=lambda item: item["value"], reverse=True)
-    ranked = ranked[:MAX_ITEMS_PER_SIDE]
+def _side_table(items: list[dict[str, Any]], limit: int) -> dict[str, Any]:
+    ranked = sorted(items, key=lambda item: item["value"], reverse=True)[:limit]
     frame = pd.DataFrame(ranked, columns=["row_id", "label", "value"])
     frame["level"] = 0
     frame["is_total"] = False
     return Table(frame, [VALUE_COLUMN], {}, row_id_col="row_id").serialize()
 
 
-def balance_sheet_size_context(ticker: str, period: str) -> dict[str, Any]:
-    """Every annual balance sheet as two ranked Tables of at most 10 items each.
-
-    ``period`` is ignored: the snapshot is annual-only. The template picks the
-    period and the page script picks how many of the ranked items to draw.
-    """
-    balance = load_statement_set(ticker, "annual").balance
-    periods = sorted(balance.periods, reverse=True)
-    snapshots = {}
-    for p in periods:
-        items = _snapshot_items(balance, p)
-        snapshots[p] = {side: _side_table(rows) for side, rows in items.items()}
-    return {
-        "periods": periods,
-        "snapshots": snapshots,
-        "max_items_per_side": MAX_ITEMS_PER_SIDE,
+def balance_sheet_size_context(ticker: str, settings: Settings) -> dict[str, Any]:
+    """The annual balance sheet at the current period as two ranked Tables of
+    at most ``items_per_side`` items each."""
+    loaded = load_for_basis(ticker, "annual", settings.basis)
+    balance = loaded.statements.balance
+    context: dict[str, Any] = {
+        "basis": settings.basis,
+        "adjustments": describe(loaded.specs),
+        "as_of": settings.period_at("current_period", balance.periods),
+    }
+    if context["as_of"] is None:
+        return context
+    items = _snapshot_items(balance, context["as_of"])
+    return context | {
+        "sides": {
+            side: _side_table(rows, settings.items_per_side)
+            for side, rows in items.items()
+        }
     }

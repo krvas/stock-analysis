@@ -4,9 +4,6 @@
 {% if ai_pending %}
 {% include "wizard/_ai_pending.html" %}
 {% else %}
-{% set view = request.query_params.get("view", "standard") %}
-{% set view = view if view in ("summary", "standard", "detailed") else "standard" %}
-{% include "wizard/_view_select.html" %}
 <dl class="wizard-answers">
   {% for item in answers %}
   <dt>{{ item.question }}</dt>

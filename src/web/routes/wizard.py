@@ -10,6 +10,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from jinja2 import TemplateNotFound
 from starlette.responses import Response
 
+from src.web.routes.settings import settings_for
 from src.web.templating import templates
 from src.web.wizard_registry import (
     GROUP_LABELS,
@@ -118,7 +119,6 @@ def wizard_subpage(
     ticker: str,
     page_slug: str,
     subpage_slug: str,
-    period: str = "annual",
 ) -> HTMLResponse:
     page = get_page(page_slug)
     if page is None:
@@ -134,7 +134,7 @@ def wizard_subpage(
         request,
         template_name,
         _wizard_context(ticker=symbol, page=page, subpage=subpage)
-        | subpage.context_builder(symbol, period),
+        | subpage.context_builder(symbol, settings_for(request, subpage.settings)),
     )
 
 
