@@ -1,5 +1,3 @@
-"""Single source of truth for statement page identity (``/statements/{t}/{slug}``)."""
-
 from __future__ import annotations
 
 from typing import Final

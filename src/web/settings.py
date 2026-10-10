@@ -1,13 +1,3 @@
-"""Settings: the pure rules around the registry in ``settings_registry.py``.
-
-Defines the per-page declaration type (``SettingsDecl``), the resolved
-``Settings`` builders read, and the pure entry points the HTTP shell in
-``src/web/routes/settings.py`` calls: ``resolve`` (cookie + declaration ->
-Settings), ``apply_submission`` (form + cookie -> new cookie value or a
-refusal) and ``build_drawer``. Nothing here
-knows the cookie's name, HTTP, or any specific page.
-"""
-
 from __future__ import annotations
 
 import json
@@ -18,7 +8,7 @@ from typing import Final, Literal, cast
 
 from src.config import MAX_PERIODS_BY_PERIOD
 from src.models.statement import PeriodType, StatementView
-from src.web.setting_types import ChoiceSetting, SettingDef, SettingValue
+from src.web.setting_types import ChoiceSetting, Option, SettingDef, SettingValue
 from src.web.settings_registry import RULES, GlobalSetting, SubpageSetting
 
 SETTINGS: Final[tuple[SettingDef, ...]] = tuple(
@@ -35,11 +25,6 @@ Basis = Literal["reported", "adjusted"]
 
 @dataclass(frozen=True)
 class SettingsDecl:
-    """Which Sub-page Settings a page uses and which Global Settings it greys out.
-
-    The default instance uses none and honours every Global Setting.
-    """
-
     uses: tuple[SubpageSetting, ...] = ()
     cannot_honour: Mapping[GlobalSetting, str] = field(default_factory=dict)
 
@@ -56,7 +41,6 @@ class SettingsDecl:
                 raise ValueError(f"greyed {setting!r} needs a reason")
 
     def applies(self, setting_id: str) -> bool:
-        """True when the page honours (Global) or declares (Sub-page) it."""
         if setting_id in GLOBAL_SETTING_IDS:
             return all(s.value.id != setting_id for s in self.cannot_honour)
         return any(s.value.id == setting_id for s in self.uses)
@@ -66,19 +50,11 @@ NO_SETTINGS: Final = SettingsDecl()
 
 
 class SettingNotApplicable(LookupError):
-    """A builder read a Setting its page does not declare or greys out."""
+    pass
 
 
 @dataclass(frozen=True)
 class Settings:
-    """Resolved Settings for one page render; every value is valid.
-
-    ``values`` holds every Global Setting (greyed ones too, for the drawer)
-    and the page's declared Sub-page Settings. Reads of a greyed or
-    undeclared Setting raise, so a builder cannot silently disagree with its
-    page's declaration.
-    """
-
     decl: SettingsDecl
     values: Mapping[str, SettingValue]
 
@@ -111,14 +87,10 @@ class Settings:
         return cast(int, self._read("items_per_side"))
 
     def recent_periods(self, available: Sequence[str]) -> list[str]:
-        """The newest ``num_periods`` of ``available`` (newest first), clamped
-        to the period type's cache cap and to what is available."""
         count = min(self.num_periods, MAX_PERIODS_BY_PERIOD[self.period])
         return list(available[:count])
 
     def period_at(self, which: OffsetSettingId, available: Sequence[str]) -> str | None:
-        """The period ``which`` points at in ``available`` (newest first),
-        clamped to the oldest one; None when nothing is available."""
         offset = cast(int, self._read(which))
         if not available:
             return None
@@ -126,7 +98,6 @@ class Settings:
 
 
 def _stored_values(raw_cookie: str | None) -> dict[str, SettingValue]:
-    """The valid entries of a stored cookie value; anything else is dropped."""
     if not raw_cookie:
         return {}
     try:
@@ -144,12 +115,6 @@ def _stored_values(raw_cookie: str | None) -> dict[str, SettingValue]:
 
 
 def resolve(raw_cookie: str | None, decl: SettingsDecl) -> Settings:
-    """Settings for a page from the raw cookie value and its declaration.
-
-    Per field, a missing, unknown or invalid value falls back to the default.
-    A failing rule whose ids all apply here is repaired for this render.
-    Never raises on any cookie value, and never rewrites the cookie.
-    """
     stored = _stored_values(raw_cookie)
     values: dict[str, SettingValue] = {
         s.value.id: stored.get(s.value.id, s.value.default)
@@ -162,7 +127,6 @@ def resolve(raw_cookie: str | None, decl: SettingsDecl) -> Settings:
 
 
 def safe_next(raw: str | None) -> str:
-    """``raw`` when it is a same-site path, else ``"/"``."""
     if (
         not raw
         or not raw.startswith("/")
@@ -182,8 +146,6 @@ class Saved:
 
 @dataclass(frozen=True)
 class Refused:
-    """The cookie stays unchanged; ``message`` is shown in the drawer."""
-
     redirect_to: str
     message: str
 
@@ -192,14 +154,6 @@ SaveOutcome = Saved | Refused
 
 
 def apply_submission(form: Mapping[str, str], raw_cookie: str | None) -> SaveOutcome:
-    """Validate a drawer submission and merge it into the stored Settings.
-
-    ``form`` is the decoded POST body, including ``next``. Unknown keys are
-    ignored; fields not submitted (greyed inputs are disabled, so never
-    submitted) keep their stored value. A rule is checked only when every one
-    of its ids was submitted, since a page that shows one of them cannot fix
-    the other.
-    """
     redirect_to = safe_next(form.get("next"))
     submitted: dict[str, SettingValue] = {}
     for setting in SETTINGS:
@@ -218,8 +172,6 @@ def apply_submission(form: Mapping[str, str], raw_cookie: str | None) -> SaveOut
 
 @dataclass(frozen=True)
 class DrawerField:
-    """One drawer input: its Setting, the value to show, and why it is greyed."""
-
     setting: SettingDef
     value: str
     disabled_reason: str | None
@@ -231,14 +183,13 @@ class DrawerField:
         return "number"
 
     @property
-    def options(self) -> tuple[tuple[str, str], ...]:
-        """(value, display label) pairs of a select, in order; () for a number."""
+    def options(self) -> tuple[Option, ...]:
         setting = self.setting
         if isinstance(setting, ChoiceSetting):
             return setting.options
         if setting.widget == "offset":
             return tuple(
-                (str(i), "Latest" if i == 0 else f"{i} back")
+                Option(str(i), "Latest" if i == 0 else f"{i} back")
                 for i in range(setting.min, setting.max + 1)
             )
         return ()
@@ -247,16 +198,12 @@ class DrawerField:
 @dataclass(frozen=True)
 class Drawer:
     global_fields: tuple[DrawerField, ...]
-    # Empty -> the "This page" section is absent.
     page_fields: tuple[DrawerField, ...]
     next_path: str
-    # Set -> the drawer opens on load showing it.
     error: str | None
 
 
 def build_drawer(settings: Settings, *, next_path: str, error: str | None) -> Drawer:
-    """The drawer for a page, in registry order: every Global Setting (greyed
-    ones carry their reason) and the page's declared Sub-page Settings."""
     decl = settings.decl
     global_fields = tuple(
         DrawerField(

@@ -1,4 +1,4 @@
-{# Settings drawer: rendered from `drawer` (build_drawer in src/web/settings.py) only. Fields join a form through the `form` attribute, so the two forms never nest. #}
+{# Fields join a form through the `form` attribute, so the two forms never nest. #}
 {% macro settings_field(field) %}
   {% set input_id = "setting-" ~ field.setting.id %}
   <div class="settings-field{% if field.disabled_reason %} is-disabled{% endif %}">

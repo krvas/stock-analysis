@@ -48,6 +48,4 @@ class StatementPage:
     heading: str
     order: int
     settings: SettingsDecl
-    # Statement pages have no sub-pages; the shared nav reads this attribute
-    # on wizard and statement pages alike.
     subpages: tuple[()] = ()
