@@ -43,6 +43,7 @@ logs/
 
 # Rough page
 feature-list.md
+.vibe-wise/
 
 # Node / JS tooling
 node_modules/
