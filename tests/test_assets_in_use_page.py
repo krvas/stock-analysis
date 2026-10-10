@@ -1,5 +1,3 @@
-"""Assets in Use sub-page: the table the builder returns and what POST saves."""
-
 from __future__ import annotations
 
 import json
@@ -85,7 +83,6 @@ def _rows(table: dict) -> dict[str, dict]:
 
 
 def _evaluate(expr: dict, cells: dict[str, dict]) -> float:
-    """What the browser computes: booleans count as 1/0, blanks as 0."""
     if "cell" in expr:
         row, col = expr["cell"]
         value = cells[row].get(col)
