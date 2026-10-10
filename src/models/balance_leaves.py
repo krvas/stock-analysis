@@ -32,7 +32,6 @@ _ROOT_SIDES: Final[dict[str, Side]] = {
 @dataclass(frozen=True)
 class BalanceLeaf:
     row_id: str
-    concept: str
     label: str
     side: Side
     is_equity: bool
@@ -79,7 +78,6 @@ def balance_leaves(balance: Statement, period: str) -> list[BalanceLeaf]:
         leaves.append(
             BalanceLeaf(
                 row_id=str(row["row_id"]),
-                concept=str(concept),
                 label=str(row["label"]),
                 side=side,
                 is_equity=any(c in EQUITY_PARENTS for c in chain),
