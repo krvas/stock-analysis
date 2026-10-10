@@ -11,16 +11,18 @@ from src.adjustments.registry import ADJUSTMENT_ORDER, get_adjustment_type
 
 
 def from_prefs(prefs: pd.DataFrame) -> list[AdjustmentSpec]:
-    """One spec per adjustment type present in ``adjustment_preferences`` rows."""
-    if prefs.empty:
-        return []
-    return [
-        get_adjustment_type(type_id).from_prefs(
-            prefs[prefs["adjustment_type"] == type_id]
-        )
-        for type_id in ADJUSTMENT_ORDER
-        if (prefs["adjustment_type"] == type_id).any()
-    ]
+    """One spec per type with saved rows, plus an empty-params spec for each
+    type that declares ``APPLIES_BY_DEFAULT`` and has none."""
+    saved = set() if prefs.empty else set(prefs["adjustment_type"])
+    specs = []
+    for type_id in ADJUSTMENT_ORDER:
+        adjustment = get_adjustment_type(type_id)
+        if type_id in saved:
+            rows = prefs[prefs["adjustment_type"] == type_id]
+            specs.append(adjustment.from_prefs(rows))
+        elif getattr(adjustment, "APPLIES_BY_DEFAULT", False):
+            specs.append(AdjustmentSpec(type_id, {}))
+    return specs
 
 
 def describe(specs: list[AdjustmentSpec]) -> list[dict[str, Any]]:

@@ -64,7 +64,11 @@ def test_from_prefs_groups_by_type() -> None:
         }
     )
     specs = from_prefs(prefs)
-    assert [s.type_id for s in specs] == ["opex_to_capex", "owner_earnings"]
+    assert [s.type_id for s in specs] == [
+        "opex_to_capex",
+        "owner_earnings",
+        "assets_in_use",
+    ]
     assert specs[0].params == {"rows": {"us-gaap_R": 5.0}}
     assert specs[1].params == {"maintenance_da": 60.0, "maintenance_nwc": 50.0}
 
