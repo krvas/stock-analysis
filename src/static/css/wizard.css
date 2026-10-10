@@ -4,63 +4,6 @@
   gap: 16px;
 }
 
-.wizard-nav {
-  display: flex;
-  flex-direction: column;
-  gap: 0;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--surface);
-  overflow: hidden;
-}
-
-.wizard-page-tabs,
-.wizard-subpage-tabs {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  padding: 8px;
-}
-
-.wizard-page-tabs {
-  background: var(--header-bg);
-  border-bottom: 1px solid var(--border);
-}
-
-.wizard-subpage-tabs {
-  background: var(--surface);
-}
-
-.wizard-page-tab,
-.wizard-subpage-tab {
-  display: inline-block;
-  text-decoration: none;
-  color: var(--muted);
-  font-size: 0.85rem;
-  padding: 6px 10px;
-  border-radius: 6px;
-}
-
-.wizard-page-tab {
-  font-weight: 600;
-  color: var(--text);
-}
-
-.wizard-page-tab.is-active,
-.wizard-subpage-tab.is-active {
-  color: var(--accent);
-  background: var(--surface);
-}
-
-.wizard-subpage-tab.is-active {
-  background: var(--header-bg);
-}
-
-.wizard-page-tab:hover,
-.wizard-subpage-tab:hover {
-  color: var(--accent);
-}
-
 .wizard-header {
   display: flex;
   flex-direction: column;
@@ -303,3 +246,7 @@
 .treemap-assets { background: #2f6f9f; }
 .treemap-liabilities { background: #b0603a; }
 .treemap-equity { background: #3f8a5a; }
+
+.wizard-page > .page-nav {
+  margin-bottom: 0;
+}

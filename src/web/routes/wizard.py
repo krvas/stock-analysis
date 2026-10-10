@@ -11,7 +11,8 @@ from jinja2 import TemplateNotFound
 from starlette.responses import Response
 
 from src.web.page_types import Page, SubPage
-from src.web.routes.settings import settings_for
+from src.web.routes.settings import NavContext, render_with_settings, settings_for
+from src.web.settings import NO_SETTINGS, Settings
 from src.web.templating import templates
 from src.web.wizard_registry import (
     GROUP_LABELS,
@@ -44,7 +45,6 @@ def _wizard_context(
 ) -> dict[str, object]:
     return {
         "ticker": ticker,
-        "wizard_pages": WIZARD_PAGES,
         "wizard_groups": grouped_pages(),
         "page": page,
         "subpage": subpage,
@@ -56,6 +56,25 @@ def _wizard_context(
             else None
         ),
     }
+
+
+def _render(
+    request: Request,
+    template: str,
+    *,
+    symbol: str,
+    settings: Settings,
+    page: Page | None = None,
+    subpage: SubPage | None = None,
+    extra: dict[str, Any] | None = None,
+) -> HTMLResponse:
+    context = _wizard_context(ticker=symbol, page=page, subpage=subpage)
+    nav = NavContext(
+        prefix=f"/wizard/{symbol}", pages=WIZARD_PAGES, page=page, subpage=subpage
+    )
+    return render_with_settings(
+        request, template, context | (extra or {}), settings=settings, nav=nav
+    )
 
 
 def _subpage_template(page_slug: str, subpage_slug: str) -> str:
@@ -78,10 +97,11 @@ def wizard_ticker_redirect(ticker: str) -> RedirectResponse:
 @router.get("/wizard/{ticker}", response_class=HTMLResponse)
 def wizard_landing(request: Request, ticker: str) -> HTMLResponse:
     symbol = _normalize_ticker(ticker)
-    return templates.TemplateResponse(
+    return _render(
         request,
         "wizard/landing.html",
-        _wizard_context(ticker=symbol),
+        symbol=symbol,
+        settings=settings_for(request, NO_SETTINGS),
     )
 
 
@@ -98,10 +118,12 @@ def wizard_page(request: Request, ticker: str, page_slug: str) -> Response:
     symbol = _normalize_ticker(ticker)
     subpage = first_subpage(page)
     if subpage is None:
-        return templates.TemplateResponse(
+        return _render(
             request,
             "wizard/not_implemented.html",
-            _wizard_context(ticker=symbol, page=page),
+            symbol=symbol,
+            settings=settings_for(request, NO_SETTINGS),
+            page=page,
         )
     return RedirectResponse(
         url=f"/wizard/{symbol}/{page.slug}/{subpage.slug}",
@@ -129,11 +151,15 @@ def wizard_subpage(
     symbol = _normalize_ticker(ticker)
     template_name = _subpage_template(page.slug, subpage.slug)
     logger.debug("Rendering wizard template %s", template_name)
-    return templates.TemplateResponse(
+    settings = settings_for(request, subpage.settings)
+    return _render(
         request,
         template_name,
-        _wizard_context(ticker=symbol, page=page, subpage=subpage)
-        | subpage.context_builder(symbol, settings_for(request, subpage.settings)),
+        symbol=symbol,
+        settings=settings,
+        page=page,
+        subpage=subpage,
+        extra=subpage.context_builder(symbol, settings),
     )
 
 
