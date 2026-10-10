@@ -31,13 +31,16 @@ def settings_for(request: Request, decl: SettingsDecl) -> Settings:
     return resolve(request.cookies.get(_SETTINGS_COOKIE), decl)
 
 
-class NavPage(Protocol):
+class NavSubPage(Protocol):
     @property
     def slug(self) -> str: ...
     @property
     def title(self) -> str: ...
+
+
+class NavPage(NavSubPage, Protocol):
     @property
-    def subpages(self) -> Sequence[NavPage]: ...
+    def subpages(self) -> Sequence[NavSubPage]: ...
 
 
 @dataclass(frozen=True)
@@ -45,7 +48,7 @@ class NavContext:
     prefix: str
     pages: Sequence[NavPage]
     page: NavPage | None = None
-    subpage: NavPage | None = None
+    subpage: NavSubPage | None = None
 
 
 def render_with_settings(

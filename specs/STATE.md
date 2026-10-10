@@ -260,7 +260,8 @@ with `parse_qsl`, 303 to a same-site `next`); a refused save sets a one-shot
 `settings_error` cookie that opens the drawer once. Every page with the
 shared nav renders through `render_with_settings` with a `NavContext`
 (prefix, pages, current page/sub-page; pages are typed by the `NavPage`
-protocol, which `Page` and `StatementPage` satisfy); `shared/_page_nav.html`
+protocol, which `Page` and `StatementPage` satisfy; the current sub-page by
+`NavSubPage`, which `SubPage` satisfies); `shared/_page_nav.html`
 names neither half of the app and hosts the gear + `<dialog>` drawer (Global
 section; This page section for declared Sub-page Settings). No in-page
 display controls exist; URLs carry no Settings.
