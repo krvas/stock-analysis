@@ -6,6 +6,7 @@ Related: `specs/vision.md` ("Balance sheet size"), `specs/STATE.md` §4
 (views as projections, `get_row_id`, `calc_edges`, `dimension_key`,
 `is_breakdown`).
 Consumers affected: Balance Sheet Size (wizard business-understanding page),
+Assets in Use (wizard adjustments page, `specs/features-grilled/assets-in-use.md`),
 `/statements` standard and detailed views.
 
 ## 1. Background
@@ -22,6 +23,16 @@ summary = non-dimensional rows, standard = `in_standard`, detailed = all):
 Because of the data problems below, the demo uses the **summary view only**
 (the page takes no view parameter). This file records why, so that the
 breakdown step can be decided later.
+
+**Assets in Use** has the same need and the same v1 workaround. It lists
+summary-view asset leaves (each with a "% in use") and liability leaves (each
+with a "net out" checkbox), using Balance Sheet Size's item definition. The
+user wants it in the detailed view eventually: assets that are not in use yet
+(construction in progress, a ramping plant) usually sit *below* summary level,
+inside PP&E. A per-row "% in use" can only exclude them once those rows are
+listed. So whatever breakdown rule this file settles must also give Assets in
+Use a set of rows that partition each leaf without double counting, or the
+in-use % would apply twice.
 
 ## 2. Verified data facts
 
@@ -74,6 +85,10 @@ None of these is decided.
 - **Q6. Can calc-linkbase dimension info disambiguate?** Can `dimension_key`
   or `is_breakdown` from the aligned raw items (STATE §4) tell the cases in
   §2 apart?
+- **Q8. For Assets in Use, how does a saved "% in use" behave when the view
+  changes?** If a % is saved on a summary leaf and its breakdown rows appear
+  later, does the leaf's % apply to the remainder, get replaced by per-row
+  %s, or get carried down to each child?
 - **Q7. Does this change how `/statements` presents standard and detailed
   today?** Those views already list these rows under their parents, so
   overlapping or non-breakdown rows can read like children there too.
