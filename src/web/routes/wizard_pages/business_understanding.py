@@ -15,13 +15,17 @@ from src.api.edgartools.standard_terms import (
     BALANCE_LIABILITIES_EQUITY_ROOT,
     EQUITY_PARENTS,
 )
-from src.models.table import ColumnSpec, Table
+from src.models.statement import Statement, StatementView
+from src.models.table import ColumnSpec, Table, period_column_specs
 from src.web.adjusted_statements import load_for_basis
 from src.web.settings import Settings
 
 EQUITY_ROW_ID = "equity"
 VALUE_COLUMN = ColumnSpec(
     id="value", label="Value", kind="static", dtype="number", format="financial"
+)
+CHANGE_COLUMN = ColumnSpec(
+    id="change", label="Change", kind="static", dtype="number", format="financial"
 )
 
 
@@ -110,3 +114,41 @@ def balance_sheet_size_context(ticker: str, settings: Settings) -> dict[str, Any
             for side, rows in items.items()
         }
     }
+
+
+def fund_flow_table(
+    balance: Statement, view: StatementView, current: str, previous: str
+) -> Table:
+    """``balance`` in ``view`` over ``current`` and ``previous`` plus a change
+    column (current − previous on display signs; missing if either is)."""
+    frame = balance.project(view, [current, previous])
+    columns = period_column_specs(frame) + [CHANGE_COLUMN]
+    frame[CHANGE_COLUMN.id] = frame[current] - frame[previous]
+    return Table(
+        frame,
+        columns,
+        {},
+        row_id_col="row_id",
+        level_col="level",
+        is_total_col="is_total",
+    )
+
+
+def fund_flow_context(ticker: str, settings: Settings) -> dict[str, Any]:
+    """The balance sheet at the current and previous periods and the change.
+
+    A notice replaces the table when the offsets clamp to fewer than two
+    distinct periods.
+    """
+    loaded = load_for_basis(ticker, settings.period, settings.basis)
+    balance = loaded.statements.balance
+    current = settings.period_at("current_period", balance.periods)
+    previous = settings.period_at("previous_period", balance.periods)
+    context: dict[str, Any] = {
+        "basis": settings.basis,
+        "adjustments": describe(loaded.specs),
+    }
+    if current is None or previous is None or current == previous:
+        return context | {"not_enough_periods": True}
+    table = fund_flow_table(balance, settings.view, current, previous)
+    return context | {"fund_flow_table": table.serialize()}
