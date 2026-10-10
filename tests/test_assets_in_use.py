@@ -160,6 +160,13 @@ def test_describe_counts_choices_that_differ_from_the_defaults() -> None:
     assert label["label"] == "Assets in use: 2 line(s) changed"
 
 
+@pytest.mark.parametrize("params", [{}, {"Cash": 100.0, "Payables": 100.0}])
+def test_spec_with_no_choice_off_the_defaults_is_left_out_of_the_note(
+    params: dict,
+) -> None:
+    assert describe([AdjustmentSpec(TYPE_ID, params)]) == []
+
+
 def test_default_spec_with_no_saved_choices_is_left_out_of_the_note() -> None:
     assert describe(from_prefs(pd.DataFrame())) == []
 
