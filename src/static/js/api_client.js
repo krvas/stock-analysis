@@ -4,8 +4,7 @@
  * Other frontend scripts must import from here (or use `window.apiClient`)
  * rather than calling `fetch` themselves.
  *
- * Statement pages currently embed JSON from `build_statement_payload`
- * (`{ ticker, period, statements: { income|balance|cashflow: { summary|standard|detailed: { columns, rows, linked_groups } } } }`).
+ * Statement pages embed one `Table.serialize()` payload, hydrated by `table_wiring.js`.
  * Wizard sub-page saves POST JSON via `table_wiring.js` and `postJson`.
  */
 
