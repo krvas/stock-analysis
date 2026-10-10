@@ -1,17 +1,3 @@
-"""Assets in use: Gross and Net Assets in Use as balance-sheet memo rows.
-
-Per period, over the balance-sheet leaves (:mod:`src.models.balance_leaves`)
-with contribution ``c = effective weight × raw value``:
-
-- ``Gross = total assets − Σ_assets c_i · (1 − pct_i/100)``
-- ``Net = Gross − Σ_netted liabilities c_j``
-
-Params map row id → value: a % in use (default 100) for an asset leaf, 1.0
-for a netted liability leaf. Keys are classified against each period's
-leaves, so a % applies only where its row is a leaf and keys for rows that no
-longer exist are ignored. Equity is never netted.
-"""
-
 from __future__ import annotations
 
 from typing import Any
@@ -39,7 +25,6 @@ def from_prefs(rows: pd.DataFrame) -> AdjustmentSpec:
 
 
 def total_assets(balance: Statement) -> tuple[str | None, dict[str, float]]:
-    """The total assets row id and its values by period (raw signs)."""
     rows = balance.find(concept=BALANCE_ASSETS_ROOT)
     if rows.empty:
         return None, {}
@@ -51,7 +36,6 @@ def total_assets(balance: Statement) -> tuple[str | None, dict[str, float]]:
 def _gross_and_net(
     balance: Statement, total: dict[str, float], params: dict[str, float]
 ) -> dict[str, tuple[float, float]]:
-    """``period → (gross, net)`` for every period with total assets."""
     out: dict[str, tuple[float, float]] = {}
     if not params:
         return {period: (reported, reported) for period, reported in total.items()}
@@ -95,7 +79,5 @@ def apply(ss: StatementSet, spec: AdjustmentSpec) -> AdjustmentResult:
 
 
 def describe(spec: AdjustmentSpec) -> dict[str, Any]:
-    # Without the balance sheet a saved key can't be told asset from
-    # liability, so describe counts every choice that differs from a default.
     changed = sum(float(v) != 100 for v in spec.params.values())
     return {"type": TYPE_ID, "label": f"{LABEL}: {changed} line(s) changed"}

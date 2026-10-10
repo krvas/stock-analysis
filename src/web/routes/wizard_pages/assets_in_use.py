@@ -1,12 +1,3 @@
-"""Assets in Use wizard sub-page: context builder and POST handler.
-
-One table on the stage before ``assets_in_use`` (after opex → capex): total
-assets, the asset leaves with a "% in use" input, Gross Assets in Use, the
-liability leaves with a "Net out" checkbox, and Net Assets in Use. Period
-cells are leaf contributions; the two result rows are calculated cells that
-repeat the type's formula. Annual only.
-"""
-
 from __future__ import annotations
 
 import logging
@@ -42,11 +33,6 @@ NET_ROW = "net_assets_in_use"
 
 
 def side_rows(balance: Statement, periods: list[str]) -> dict[Side, pd.DataFrame]:
-    """Non-equity leaves of any of ``periods``, by side, in frame order.
-
-    Columns ``row_id, label`` + one per period holding the leaf's
-    contribution to its side's total, blank where the row is not a leaf.
-    """
     found: dict[str, dict[str, Any]] = {}
     for period in periods:
         for leaf in balance_leaves(balance, period):
@@ -66,8 +52,7 @@ def side_rows(balance: Statement, periods: list[str]) -> dict[Side, pd.DataFrame
     }
 
 
-def _staged_balance(ticker: str) -> tuple[Statement, dict[str, float]]:
-    """The annual balance sheet this type receives, and its saved params."""
+def _staged_balance_and_saved(ticker: str) -> tuple[Statement, dict[str, float]]:
     _, staged, specs = load_adjusted(ticker, "annual", until=aiu.TYPE_ID)
     saved = next((dict(s.params) for s in specs if s.type_id == aiu.TYPE_ID), {})
     return staged.balance, saved
@@ -82,7 +67,6 @@ def _mul(*args: dict[str, Any]) -> dict[str, Any]:
 
 
 def _gross_terms(period: str, asset_ids: list[str]) -> list[dict[str, Any]]:
-    """``total + Σ (pct_i% · c_i − c_i)``, the type's Gross formula."""
     terms = [_cell(TOTAL_ROW, period)]
     for row in asset_ids:
         terms.append(
@@ -153,7 +137,7 @@ def _table(
 
 
 def assets_in_use_context(ticker: str, settings: Settings) -> dict[str, object]:
-    balance, saved = _staged_balance(ticker)
+    balance, saved = _staged_balance_and_saved(ticker)
     count = min(settings.num_periods, MAX_PERIODS_BY_PERIOD["annual"])
     periods = balance.periods[:count]
     _, total = aiu.total_assets(balance)
@@ -186,11 +170,6 @@ def _record(ticker: str, row_id: str, value: float) -> dict[str, object]:
 
 
 def assets_in_use_post(ticker: str, body: dict[str, Any]) -> dict[str, Any]:
-    """Save each asset's % in use; save or delete each liability's netting.
-
-    Posted ids are classified against the leaves of every annual period, a
-    superset of the displayed ones.
-    """
     rows = body.get("rows")
     if rows is None:
         raise ValueError("rows is required")
@@ -198,7 +177,7 @@ def assets_in_use_post(ticker: str, body: dict[str, Any]) -> dict[str, Any]:
         posted = Table.from_rows(rows, INPUT_COLUMNS)
     except TableSerializationError as exc:
         raise ValueError(str(exc)) from exc
-    balance, _ = _staged_balance(ticker)
+    balance, _ = _staged_balance_and_saved(ticker)
     sides = side_rows(balance, balance.periods)
     assets = dict(zip(sides["assets"]["row_id"], sides["assets"]["label"], strict=True))
     liabilities = set(sides["liabilities"]["row_id"])
