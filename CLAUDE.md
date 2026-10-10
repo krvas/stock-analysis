@@ -25,7 +25,9 @@ it is committed.
    `findings-1.json`.
 3. **Triage.** `make triage FINDINGS=<scratch>/findings-1.json`. Jev scores
    each finding; `execute` means score ≥ 0.85 and not `needs_user_decision`,
-   otherwise `human`. If the API fails, everything is `human`; tell the user.
+   otherwise `human`. If 0.15 ≥ score, then drop the suggestion. 
+   If the API fails, everything is `human`; tell the user.
+
 4. **Fix.** Fix subagents (disjoint files, no commits) apply `execute`
    findings, then `make fix test`.
 5. **Human review, then commit.** Show the user the `human` findings (quote,
