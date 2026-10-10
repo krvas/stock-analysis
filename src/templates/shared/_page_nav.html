@@ -1,0 +1,27 @@
+{# Shared page nav: expects `nav` (NavContext) and `drawer` (Drawer). Names no section of the app; the route supplies prefix and pages. #}
+<nav class="page-nav" aria-label="Pages">
+  <div class="page-nav-row page-nav-pages">
+    {% for nav_page in nav.pages %}
+      {% set is_current = nav.page and nav.page.slug == nav_page.slug %}
+      <a
+        class="page-nav-tab{% if is_current %} is-active{% endif %}"
+        href="{{ nav.prefix }}/{{ nav_page.slug }}"
+        {% if is_current %}aria-current="page"{% endif %}
+      >{{ nav_page.title }}</a>
+    {% endfor %}
+    <button type="button" class="page-nav-gear" data-settings-open aria-haspopup="dialog" aria-controls="settings-drawer" aria-label="Settings" title="Settings">⚙</button>
+  </div>
+  {% if nav.page and nav.page.subpages %}
+    <div class="page-nav-row page-nav-subpages" aria-label="{{ nav.page.title }} sub-pages">
+      {% for nav_subpage in nav.page.subpages %}
+        {% set is_current = nav.subpage and nav.subpage.slug == nav_subpage.slug %}
+        <a
+          class="page-nav-tab page-nav-subtab{% if is_current %} is-active{% endif %}"
+          href="{{ nav.prefix }}/{{ nav.page.slug }}/{{ nav_subpage.slug }}"
+          {% if is_current %}aria-current="page"{% endif %}
+        >{{ nav_subpage.title }}</a>
+      {% endfor %}
+    </div>
+  {% endif %}
+</nav>
+{% include "shared/_settings_drawer.html" %}
