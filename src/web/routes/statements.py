@@ -1,49 +1,69 @@
-"""Single-company financial statement HTML views."""
+"""Single-company financial statement pages: one statement per URL."""
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Query, Request
-from fastapi.responses import HTMLResponse
+from typing import Any
+
+from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import HTMLResponse, RedirectResponse
 
 from src.adjustments.specs import describe
-from src.config import MAX_CACHE_QUARTERS, MAX_PERIODS_BY_PERIOD
-from src.models.edgartools.html_renderer import build_statement_payload
-from src.models.statement import PeriodType
-from src.web.adjusted_statements import load_adjusted
-from src.web.templating import templates
+from src.models.table import statement_table_from_dataframe
+from src.web.adjusted_statements import load_for_basis
+from src.web.routes.settings import NavContext, render_with_settings, settings_for
+from src.web.settings import Settings
+from src.web.statements_registry import (
+    STATEMENT_PAGES,
+    StatementPage,
+    get_statement_page,
+)
 
 router = APIRouter(tags=["statements"])
 
 
-def clamp_num_periods(num_periods: int, period: PeriodType, available: int) -> int:
-    """Clamp a requested period count to the cache cap and what's available."""
-    return min(num_periods, MAX_PERIODS_BY_PERIOD[period], available)
+def _normalize_ticker(ticker: str) -> str:
+    return ticker.upper().strip()
 
 
-@router.get("/statements/{ticker}", response_class=HTMLResponse)
-def statement_view(
-    request: Request,
-    ticker: str,
-    period: PeriodType = Query(default="annual"),
-    num_periods: int = Query(default=10, ge=1, le=MAX_CACHE_QUARTERS),
-) -> HTMLResponse:
-    """Serve an interactive statement page; toggles stay client-side."""
-    symbol = ticker.upper().strip()
-    statement_set, adjusted, specs = load_adjusted(symbol, period)
-    statement_data = build_statement_payload(
-        statement_set,
-        ticker=symbol,
-        period=period,
-        num_periods=clamp_num_periods(num_periods, period, len(statement_set.periods)),
-        adjusted=adjusted if specs else None,
-        adjustments=describe(specs),
+def statement_context(
+    symbol: str, page: StatementPage, settings: Settings
+) -> dict[str, Any]:
+    """The page's statement in the resolved View and Basis, newest periods first."""
+    loaded = load_for_basis(symbol, settings.period, settings.basis)
+    statement = loaded.statements.get(page.slug)
+    frame = statement.project(settings.view, settings.recent_periods(statement.periods))
+    return {
+        "ticker": symbol,
+        "page": page,
+        "period": settings.period,
+        "basis": settings.basis,
+        "adjustments": describe(loaded.specs),
+        "statement_table": statement_table_from_dataframe(frame).serialize(),
+        "active_nav": "statements",
+    }
+
+
+@router.get("/statements/{ticker}")
+def statements_redirect(ticker: str) -> RedirectResponse:
+    symbol = _normalize_ticker(ticker)
+    return RedirectResponse(
+        url=f"/statements/{symbol}/{STATEMENT_PAGES[0].slug}", status_code=307
     )
-    return templates.TemplateResponse(
+
+
+@router.get("/statements/{ticker}/{statement}", response_class=HTMLResponse)
+def statement_page(request: Request, ticker: str, statement: str) -> HTMLResponse:
+    page = get_statement_page(statement)
+    if page is None:
+        raise HTTPException(status_code=404, detail="Unknown statement")
+    symbol = _normalize_ticker(ticker)
+    settings = settings_for(request, page.settings)
+    return render_with_settings(
         request,
         "statements/statement_view.html",
-        {
-            "statement_data": statement_data,
-            "ticker": symbol,
-            "active_nav": "statements",
-        },
+        statement_context(symbol, page, settings),
+        settings=settings,
+        nav=NavContext(
+            prefix=f"/statements/{symbol}", pages=STATEMENT_PAGES, page=page
+        ),
     )

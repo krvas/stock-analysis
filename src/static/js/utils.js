@@ -56,15 +56,3 @@ export function coerceNumber(value) {
   const parsed = Number(value);
   return Number.isNaN(parsed) ? null : parsed;
 }
-
-export function computeDifference(latest, previous) {
-  if (
-    latest === null ||
-    latest === undefined ||
-    previous === null ||
-    previous === undefined
-  ) {
-    return null;
-  }
-  return latest - previous;
-}
