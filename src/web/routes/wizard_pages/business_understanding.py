@@ -15,10 +15,10 @@ from src.api.edgartools.standard_terms import (
     BALANCE_LIABILITIES_EQUITY_ROOT,
     EQUITY_PARENTS,
 )
+from src.config import MAX_ITEMS_PER_SIDE
 from src.models.table import ColumnSpec, Table
 
 EQUITY_ROW_ID = "equity"
-MAX_ITEMS_PER_SIDE = 10
 VALUE_COLUMN = ColumnSpec(
     id="value", label="Value", kind="static", dtype="number", format="financial"
 )
