@@ -1,0 +1,37 @@
+{% extends "wizard/base_subpage.html" %}
+{% import "macros/line_item_table.html" as table_macro %}
+{% import "macros/wizard_form.html" as form_macro %}
+
+{% block subpage_content %}
+<div class="wizard-intro">
+  <p>
+    Return on capital should count only the assets that earn today. A machine
+    that has been under construction for three years earns nothing yet; a
+    theme park in its ramp-up years earns less than an established one that
+    cost the same. Set <strong>% in use</strong> below 100 for assets like
+    these.
+  </p>
+  <p>
+    Some liabilities are free funding from operations. Payables are money
+    suppliers lend the business at no cost, so netting them off shows the
+    capital the owners actually put in. Advances from customers or debt may
+    not deserve the same treatment. Tick <strong>Net out</strong> for each
+    liability to subtract.
+  </p>
+  <p class="wizard-formula">
+    Gross assets in use = Total assets − Σ asset × (1 − % in use)
+  </p>
+  <p class="wizard-formula">
+    Net assets in use = Gross assets in use − Σ netted liabilities
+  </p>
+</div>
+
+<h2 class="wizard-table-title">Assets in use</h2>
+<p class="wizard-table-note">Annual balance sheet after earlier adjustments. Each % applies to every year; Gross and Net update as you type.</p>
+{% call form_macro.form(post_url, form_id='assets-in-use-form', wizard_save='assets-in-use', data_table_id='aiu-table') %}
+{{ table_macro.table('aiu-table', aiu_table) }}
+{% endcall %}
+<p class="wizard-next-link">
+  <a href="/statements/{{ ticker }}/balance">View balance sheet (set Basis to Adjusted) →</a>
+</p>
+{% endblock %}
