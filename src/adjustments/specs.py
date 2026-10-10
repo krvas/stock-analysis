@@ -26,4 +26,11 @@ def from_prefs(prefs: pd.DataFrame) -> list[AdjustmentSpec]:
 
 
 def describe(specs: list[AdjustmentSpec]) -> list[dict[str, Any]]:
-    return [get_adjustment_type(s.type_id).describe(s) for s in specs]
+    """Labels for the adjustments note; a by-default type with no saved
+    choices changes nothing the user picked, so it is left out."""
+    return [
+        get_adjustment_type(s.type_id).describe(s)
+        for s in specs
+        if s.params
+        or not getattr(get_adjustment_type(s.type_id), "APPLIES_BY_DEFAULT", False)
+    ]
