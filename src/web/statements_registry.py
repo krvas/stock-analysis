@@ -1,5 +1,3 @@
-"""Single source of truth for statement page identity (``/statements/{t}/{slug}``)."""
-
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -16,8 +14,6 @@ class StatementPage:
     heading: str
     order: int
     settings: SettingsDecl
-    # Statement pages have no sub-pages; the shared nav reads this attribute
-    # on wizard and statement pages alike.
     subpages: tuple[()] = ()
 
 

@@ -70,10 +70,7 @@ MAX_PERIODS_BY_PERIOD: dict[PeriodType, int] = {
     "quarterly": MAX_CACHE_QUARTERS,
 }
 
-# Largest "items per side" Setting: Balance Sheet Size draws at most this many
-# ranked items per treemap.
 MAX_ITEMS_PER_SIDE = 10
-# Settings cookie lifetime (seconds).
 SETTINGS_COOKIE_MAX_AGE = 365 * 24 * 60 * 60
 
 # AI tools (src/ai_tools): 10-K section workspaces, validated-answer cache and

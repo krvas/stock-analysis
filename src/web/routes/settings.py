@@ -1,14 +1,8 @@
-"""Settings over HTTP: the only module that knows the Settings cookies.
-
-``POST /settings`` saves a drawer submission; ``render_with_settings``
-renders any page that carries the shared nav and Settings drawer.
-"""
-
 from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, Final
+from typing import Any, Final, Protocol
 from urllib.parse import parse_qsl
 
 from fastapi import APIRouter, Request
@@ -37,15 +31,21 @@ def settings_for(request: Request, decl: SettingsDecl) -> Settings:
     return resolve(request.cookies.get(_SETTINGS_COOKIE), decl)
 
 
+class NavPage(Protocol):
+    @property
+    def slug(self) -> str: ...
+    @property
+    def title(self) -> str: ...
+    @property
+    def subpages(self) -> Sequence[NavPage]: ...
+
+
 @dataclass(frozen=True)
 class NavContext:
-    """Inputs of the shared nav: tabs link to ``{prefix}/{page.slug}``."""
-
     prefix: str
-    # Objects with ``slug``, ``title`` and ``subpages``.
-    pages: Sequence[Any]
-    page: Any | None = None
-    subpage: Any | None = None
+    pages: Sequence[NavPage]
+    page: NavPage | None = None
+    subpage: NavPage | None = None
 
 
 def render_with_settings(
@@ -56,11 +56,6 @@ def render_with_settings(
     settings: Settings,
     nav: NavContext,
 ) -> HTMLResponse:
-    """Render a page with the shared nav and the Settings drawer.
-
-    A refused save's message is shown once: it opens the drawer on this
-    render and the one-shot cookie carrying it is cleared.
-    """
     error = request.cookies.get(_ERROR_COOKIE)
     drawer = build_drawer(settings, next_path=request.url.path, error=error)
     response = templates.TemplateResponse(

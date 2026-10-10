@@ -1,5 +1,3 @@
-"""Single-company financial statement pages: one statement per URL."""
-
 from __future__ import annotations
 
 from typing import Any
@@ -28,7 +26,6 @@ def _normalize_ticker(ticker: str) -> str:
 def statement_context(
     symbol: str, page: StatementPage, settings: Settings
 ) -> dict[str, Any]:
-    """The page's statement in the resolved View and Basis, newest periods first."""
     loaded = load_for_basis(symbol, settings.period, settings.basis)
     statement = loaded.statements.get(page.slug)
     frame = statement.project(settings.view, settings.recent_periods(statement.periods))
