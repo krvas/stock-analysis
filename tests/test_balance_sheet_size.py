@@ -1,5 +1,3 @@
-"""Business Understanding › Balance Sheet Size: context builder (no network)."""
-
 from __future__ import annotations
 
 import json

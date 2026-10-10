@@ -40,12 +40,10 @@ def load_adjusted(
 @dataclass(frozen=True)
 class Loaded:
     statements: StatementSet
-    # Applied adjustments; empty on the reported basis.
     specs: list[AdjustmentSpec]
 
 
 def load_for_basis(ticker: str, period: PeriodType, basis: Basis) -> Loaded:
-    """The statements on ``basis``: reported, or with every saved adjustment."""
     reported = load_statement_set(ticker, period)
     if basis == "reported":
         return Loaded(reported, [])

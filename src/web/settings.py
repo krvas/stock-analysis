@@ -1,20 +1,10 @@
-"""Settings: the registry of display choices and the pure rules around it.
-
-Defines every Setting once (``SETTINGS``), the per-page declaration type
-(``SettingsDecl``), the resolved ``Settings`` builders read, and the pure
-entry points the HTTP shell in ``src/web/routes/settings.py`` calls:
-``resolve`` (cookie + declaration -> Settings), ``apply_submission`` (form +
-cookie -> new cookie value or a refusal) and ``build_drawer``. Nothing here
-knows the cookie's name, HTTP, or any specific page.
-"""
-
 from __future__ import annotations
 
 import json
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from types import MappingProxyType
-from typing import Final, Literal, cast, get_args
+from typing import Final, Literal, NamedTuple, cast, get_args
 
 from src.config import MAX_CACHE_QUARTERS, MAX_ITEMS_PER_SIDE, MAX_PERIODS_BY_PERIOD
 from src.models.statement import (
@@ -37,17 +27,20 @@ GLOBAL_SETTING_IDS: Final[frozenset[str]] = frozenset(get_args(GlobalSettingId))
 SUBPAGE_SETTING_IDS: Final[frozenset[str]] = frozenset(get_args(SubpageSettingId))
 
 
+class Option(NamedTuple):
+    value: str
+    label: str
+
+
 @dataclass(frozen=True)
 class ChoiceSetting:
     id: SettingId
     label: str
-    options: tuple[tuple[str, str], ...]  # (value, display label), drawer order
+    options: tuple[Option, ...]
     default: str
-    # Applies as soon as it changes (own form, submits on change).
     instant: bool = False
 
     def parse(self, raw: object) -> str | None:
-        """``raw`` if it is one of the option values, else None."""
         if isinstance(raw, str) and any(raw == value for value, _ in self.options):
             return raw
         return None
@@ -60,12 +53,10 @@ class IntSetting:
     min: int
     max: int
     default: int
-    # "offset" renders as a select of "Latest", "1 back", ...
     widget: Literal["number", "offset"] = "number"
     instant: bool = False
 
     def parse(self, raw: object) -> int | None:
-        """``raw`` as an int in ``[min, max]`` (an int or ASCII-digit str), else None."""
         if isinstance(raw, bool):
             return None
         if isinstance(raw, str):
@@ -83,23 +74,21 @@ SETTINGS: Final[tuple[SettingDef, ...]] = (
     ChoiceSetting(
         "period",
         "Period type",
-        tuple((p, p.capitalize()) for p in PERIOD_TYPES),
+        tuple(Option(p, p.capitalize()) for p in PERIOD_TYPES),
         "annual",
     ),
-    # The per-period-type cache cap is a clamp at load time, not a validation
-    # bound, so switching period type never invalidates the stored count.
     IntSetting("num_periods", "Number of periods", 1, MAX_CACHE_QUARTERS, 10),
     ChoiceSetting(
         "view",
         "View",
-        tuple((v, v.capitalize()) for v in STATEMENT_VIEWS),
+        tuple(Option(v, v.capitalize()) for v in STATEMENT_VIEWS),
         "standard",
         instant=True,
     ),
     ChoiceSetting(
         "basis",
         "Basis",
-        (("reported", "Reported"), ("adjusted", "Adjusted")),
+        (Option("reported", "Reported"), Option("adjusted", "Adjusted")),
         "reported",
     ),
     IntSetting(
@@ -132,14 +121,14 @@ if set(SETTINGS_BY_ID) != GLOBAL_SETTING_IDS | SUBPAGE_SETTING_IDS or len(
     )
 
 
+def _keep_current_move_previous_back(
+    values: Mapping[str, SettingValue],
+) -> Mapping[str, SettingValue]:
+    return {"previous_period": cast(int, values["current_period"]) + 1}
+
+
 @dataclass(frozen=True)
 class CrossRule:
-    """A rule over several Settings. It binds only where all its ids are in play.
-
-    ``repair`` gives the values that make a failing rule hold for one render
-    (``resolve``); a submission that breaks the rule is refused instead.
-    """
-
     ids: tuple[SettingId, ...]
     holds: Callable[[Mapping[str, SettingValue]], bool]
     repair: Callable[[Mapping[str, SettingValue]], Mapping[str, SettingValue]]
@@ -152,8 +141,7 @@ RULES: Final[tuple[CrossRule, ...]] = (
         holds=lambda v: (
             cast(int, v["previous_period"]) > cast(int, v["current_period"])
         ),
-        # Keep the current period: pages share it, so it must not move.
-        repair=lambda v: {"previous_period": cast(int, v["current_period"]) + 1},
+        repair=_keep_current_move_previous_back,
         message="Previous period must be older than the current period",
     ),
 )
@@ -161,11 +149,6 @@ RULES: Final[tuple[CrossRule, ...]] = (
 
 @dataclass(frozen=True)
 class SettingsDecl:
-    """Which Sub-page Settings a page uses and which Global Settings it greys out.
-
-    The default instance uses none and honours every Global Setting.
-    """
-
     uses: tuple[SubpageSettingId, ...] = ()
     cannot_honour: Mapping[GlobalSettingId, str] = field(default_factory=dict)
 
@@ -184,7 +167,6 @@ class SettingsDecl:
                 raise ValueError(f"greyed {setting_id!r} needs a reason")
 
     def applies(self, setting_id: str) -> bool:
-        """True when the page honours (Global) or declares (Sub-page) it."""
         if setting_id in GLOBAL_SETTING_IDS:
             return setting_id not in self.cannot_honour
         return setting_id in self.uses
@@ -194,19 +176,11 @@ NO_SETTINGS: Final = SettingsDecl()
 
 
 class SettingNotApplicable(LookupError):
-    """A builder read a Setting its page does not declare or greys out."""
+    pass
 
 
 @dataclass(frozen=True)
 class Settings:
-    """Resolved Settings for one page render; every value is valid.
-
-    ``values`` holds every Global Setting (greyed ones too, for the drawer)
-    and the page's declared Sub-page Settings. Reads of a greyed or
-    undeclared Setting raise, so a builder cannot silently disagree with its
-    page's declaration.
-    """
-
     decl: SettingsDecl
     values: Mapping[str, SettingValue]
 
@@ -239,14 +213,10 @@ class Settings:
         return cast(int, self._read("items_per_side"))
 
     def recent_periods(self, available: Sequence[str]) -> list[str]:
-        """The newest ``num_periods`` of ``available`` (newest first), clamped
-        to the period type's cache cap and to what is available."""
         count = min(self.num_periods, MAX_PERIODS_BY_PERIOD[self.period])
         return list(available[:count])
 
     def period_at(self, which: OffsetSettingId, available: Sequence[str]) -> str | None:
-        """The period ``which`` points at in ``available`` (newest first),
-        clamped to the oldest one; None when nothing is available."""
         offset = cast(int, self._read(which))
         if not available:
             return None
@@ -254,7 +224,6 @@ class Settings:
 
 
 def _stored_values(raw_cookie: str | None) -> dict[str, SettingValue]:
-    """The valid entries of a stored cookie value; anything else is dropped."""
     if not raw_cookie:
         return {}
     try:
@@ -272,12 +241,6 @@ def _stored_values(raw_cookie: str | None) -> dict[str, SettingValue]:
 
 
 def resolve(raw_cookie: str | None, decl: SettingsDecl) -> Settings:
-    """Settings for a page from the raw cookie value and its declaration.
-
-    Per field, a missing, unknown or invalid value falls back to the default.
-    A failing rule whose ids all apply here is repaired for this render.
-    Never raises on any cookie value, and never rewrites the cookie.
-    """
     stored = _stored_values(raw_cookie)
     values: dict[str, SettingValue] = {
         s.id: stored.get(s.id, s.default)
@@ -291,7 +254,6 @@ def resolve(raw_cookie: str | None, decl: SettingsDecl) -> Settings:
 
 
 def safe_next(raw: str | None) -> str:
-    """``raw`` when it is a same-site path, else ``"/"``."""
     if (
         not raw
         or not raw.startswith("/")
@@ -311,8 +273,6 @@ class Saved:
 
 @dataclass(frozen=True)
 class Refused:
-    """The cookie stays unchanged; ``message`` is shown in the drawer."""
-
     redirect_to: str
     message: str
 
@@ -321,14 +281,6 @@ SaveOutcome = Saved | Refused
 
 
 def apply_submission(form: Mapping[str, str], raw_cookie: str | None) -> SaveOutcome:
-    """Validate a drawer submission and merge it into the stored Settings.
-
-    ``form`` is the decoded POST body, including ``next``. Unknown keys are
-    ignored; fields not submitted (greyed inputs are disabled, so never
-    submitted) keep their stored value. A rule is checked only when every one
-    of its ids was submitted, since a page that shows one of them cannot fix
-    the other.
-    """
     redirect_to = safe_next(form.get("next"))
     submitted: dict[str, SettingValue] = {}
     for setting in SETTINGS:
@@ -350,7 +302,7 @@ class DrawerField:
     id: str
     label: str
     widget: Literal["select", "number"]
-    options: tuple[tuple[str, str], ...]
+    options: tuple[Option, ...]
     min: int | None
     max: int | None
     value: str
@@ -361,10 +313,8 @@ class DrawerField:
 @dataclass(frozen=True)
 class Drawer:
     global_fields: tuple[DrawerField, ...]
-    # Empty -> the "This page" section is absent.
     page_fields: tuple[DrawerField, ...]
     next_path: str
-    # Set -> the drawer opens on load showing it.
     error: str | None
 
 
@@ -380,7 +330,8 @@ def _drawer_field(
     elif setting.widget == "offset":
         widget, low, high = "select", None, None
         options = tuple(
-            (str(i), _offset_label(i)) for i in range(setting.min, setting.max + 1)
+            Option(str(i), _offset_label(i))
+            for i in range(setting.min, setting.max + 1)
         )
     else:
         widget, options, low, high = "number", (), setting.min, setting.max
@@ -398,8 +349,6 @@ def _drawer_field(
 
 
 def build_drawer(settings: Settings, *, next_path: str, error: str | None) -> Drawer:
-    """The drawer for a page, in registry order: every Global Setting (greyed
-    ones carry their reason) and the page's declared Sub-page Settings."""
     decl = settings.decl
     global_fields = tuple(
         _drawer_field(s, settings.values[s.id], decl.cannot_honour.get(s.id))

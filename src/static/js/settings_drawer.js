@@ -1,6 +1,3 @@
-// Settings drawer: open from the gear, open on load after a refused save,
-// and submit the instant form as soon as one of its fields changes.
-
 function main() {
   const dialog = document.getElementById("settings-drawer");
   if (!dialog) {
