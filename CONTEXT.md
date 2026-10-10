@@ -4,6 +4,22 @@ A step-by-step wizard that walks one human through a single public equity, from 
 
 ## Language
 
+### Navigation and settings
+
+**Setting**:
+A display choice the human makes (e.g. period type, view, basis) that changes what a page shows but never changes saved analysis. A capitalize checkbox or a maintenance % is an input, not a Setting.
+_Avoid_: Toggle, control, preference (prefs are saved analysis)
+
+**Global Setting**:
+A Setting that applies to every sub-page unless a sub-page declares it cannot honour it.
+
+**Sub-page Setting**:
+A Setting that applies only to the sub-pages that declare it; one Setting may be declared by several sub-pages (e.g. basis).
+
+**View**:
+How much detail a sub-page shows: summary, standard or detailed. Each sub-page interprets it in its own terms: rows on a statement, verbosity of an AI answer.
+_Avoid_: Level, granularity, answer detail
+
 ### Adjustments
 
 **Owner Earnings**:
