@@ -1,0 +1,7 @@
+{# Expects `basis` and `adjustments` (describe(specs)); shown on the adjusted basis only. #}
+{% if basis == "adjusted" %}
+<p class="adjustments-note">
+  {%- if adjustments %}Adjusted for: {{ adjustments | map(attribute="label") | join(" · ") }}
+  {%- else %}Adjusted basis (no adjustments applied){% endif -%}
+</p>
+{% endif %}

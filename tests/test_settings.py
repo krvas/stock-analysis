@@ -8,8 +8,10 @@ import pytest
 
 from src.config import MAX_CACHE_QUARTERS, MAX_CACHE_YEARS
 from src.web.settings import (
+    GLOBAL_SETTING_IDS,
     NO_SETTINGS,
     SETTINGS,
+    SUBPAGE_SETTING_IDS,
     Refused,
     Saved,
     SettingNotApplicable,
@@ -19,6 +21,8 @@ from src.web.settings import (
     resolve,
     safe_next,
 )
+from src.web.statements_registry import STATEMENT_PAGES
+from src.web.wizard_registry import WIZARD_PAGES
 
 FUND_FLOW_LIKE = SettingsDecl(
     uses=("basis", "current_period", "previous_period"),
@@ -211,3 +215,28 @@ def test_drawer_greys_globals_and_lists_declared_subpage_fields() -> None:
 def test_every_default_is_valid() -> None:
     for setting in SETTINGS:
         assert setting.parse(setting.default) == setting.default
+
+
+def _declarations() -> list[tuple[str, SettingsDecl]]:
+    wizard = [
+        (f"{page.slug}/{sub.slug}", sub.settings)
+        for page in WIZARD_PAGES
+        for sub in page.subpages
+    ]
+    return wizard + [(p.slug, p.settings) for p in STATEMENT_PAGES]
+
+
+def test_every_page_declaration_names_registry_settings_with_reasons() -> None:
+    declarations = _declarations()
+    assert {name for name, _ in declarations} >= {
+        "income",
+        "balance",
+        "cashflow",
+        "business-understanding/balance-sheet-size",
+    }
+    for name, decl in declarations:
+        assert isinstance(decl, SettingsDecl), name
+        for setting_id in decl.uses:
+            assert setting_id in SUBPAGE_SETTING_IDS, (name, setting_id)
+        for setting_id, reason in decl.cannot_honour.items():
+            assert setting_id in GLOBAL_SETTING_IDS and reason.strip(), name

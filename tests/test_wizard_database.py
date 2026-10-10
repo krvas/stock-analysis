@@ -13,6 +13,8 @@ from src.models.statement import Statement, StatementSet
 from src.web import adjusted_statements
 from src.web.routes.wizard_pages import adjustments_context
 from src.web.routes.wizard_pages.adjustments_post import opex_to_capex_post
+from src.web.settings import resolve
+from src.web.wizard_registry import get_subpage
 from tests.statement_fixtures import derived_calc_edges
 
 
@@ -238,9 +240,9 @@ def test_opex_to_capex_round_trip_keys_by_row_id(
         adjusted_statements, "load_statement_set", lambda *_args: statements
     )
 
-    rows = adjustments_context.opex_to_capex_context("AAPL", "annual")["opex_table"][
-        "rows"
-    ]
+    rows = adjustments_context.opex_to_capex_context(
+        "AAPL", resolve(None, get_subpage("adjustments", "opex-to-capex").settings)
+    )["opex_table"]["rows"]
     assert [row["id"] for row in rows] == income.frame["row_id"].tolist()
     assert all(row["cells"]["capitalize"] is None for row in rows)
 
@@ -260,9 +262,9 @@ def test_opex_to_capex_round_trip_keys_by_row_id(
         stored = db.read_adjustment_preferences("AAPL", "NASDAQ")
     assert stored["base_concept"].tolist() == [rnd_id]
 
-    rows = adjustments_context.opex_to_capex_context("AAPL", "annual")["opex_table"][
-        "rows"
-    ]
+    rows = adjustments_context.opex_to_capex_context(
+        "AAPL", resolve(None, get_subpage("adjustments", "opex-to-capex").settings)
+    )["opex_table"]["rows"]
     by_id = {row["id"]: row["cells"] for row in rows}
     assert by_id[rnd_id]["capitalize"] is True
     assert by_id[rnd_id]["years"] == 5.0

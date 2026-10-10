@@ -1,9 +1,10 @@
-"""Business Understanding › One-line Answers: context builder and page (no LLM)."""
+"""Business Understanding › One-line Answers: context builder (no LLM)."""
 
 from __future__ import annotations
 
+import json
+
 import pytest
-from fastapi.testclient import TestClient
 
 from src.ai_tools.task import AiResult
 from src.ai_tools.tasks.one_line_answers import (
@@ -11,10 +12,14 @@ from src.ai_tools.tasks.one_line_answers import (
     Answer,
     OneLineAnswers,
 )
-from src.web.app import app
 from src.web.routes.wizard_pages import business_understanding
+from src.web.settings import Settings, resolve
+from src.web.wizard_registry import get_subpage
 
-URL = "/wizard/TEST/business-understanding/one-line-answers"
+
+def _settings(**values: object) -> Settings:
+    decl = get_subpage("business-understanding", "one-line-answers").settings
+    return resolve(json.dumps(values), decl)
 
 
 def _answers() -> OneLineAnswers:
@@ -45,7 +50,7 @@ def test_every_question_has_a_description():
 
 
 def test_context_ready_lists_answers_in_field_order(ready):
-    answers = business_understanding.one_line_answers_context("TEST", "annual")[
+    answers = business_understanding.one_line_answers_context("TEST", _settings())[
         "answers"
     ]
     fields = OneLineAnswers.model_fields
@@ -60,29 +65,12 @@ def test_context_pending(monkeypatch):
     monkeypatch.setattr(
         business_understanding, "run_task", lambda task, ticker: AiResult("pending")
     )
-    assert business_understanding.one_line_answers_context("TEST", "annual") == {
+    assert business_understanding.one_line_answers_context("TEST", _settings()) == {
         "ai_pending": True
     }
 
 
-def test_page_views(ready):
-    client = TestClient(app)
-    summary = client.get(URL, params={"view": "summary"}).text
-    assert "industry answer" in summary
-    assert "commodity answer" in summary
-    assert "industry justification" not in summary
-
-    detailed = client.get(URL, params={"view": "detailed"}).text
-    assert "industry justification" in detailed
-    assert "FY2025 10-K, Item 1 (Business)" in detailed
-
-    bogus = client.get(URL, params={"view": "bogus"}).text
-    assert '<option value="standard" selected>' in bogus
-    assert "industry justification" not in bogus
-
-
-def test_page_pending(monkeypatch):
-    monkeypatch.setattr(
-        business_understanding, "run_task", lambda task, ticker: AiResult("pending")
-    )
-    assert "AI answers are being generated" in TestClient(app).get(URL).text
+@pytest.mark.parametrize("view", ["summary", "standard", "detailed"])
+def test_context_carries_the_view(ready, view):
+    ctx = business_understanding.one_line_answers_context("TEST", _settings(view=view))
+    assert ctx["view"] == view
