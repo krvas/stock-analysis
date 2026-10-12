@@ -6,23 +6,27 @@ import { evaluate } from "../../src/static/js/components/calculated_cell.js";
 import { TableModel } from "../../src/static/js/components/table_model.js";
 import { loadFixture } from "./load_fixture.js";
 
-test("Assets in Use gross and net evaluate to the adjustment engine's values", () => {
-  const { table, expected } = loadFixture("assets_in_use_table.json");
-  const model = TableModel.fromSerialized(table);
-  const getCell = (rowId, colId) => model.getCell(rowId, colId);
-  const specs = new Map(
-    table.calculated_cells.map((spec) => [
-      `${spec.row_id}/${spec.col_id}`,
-      spec,
-    ]),
-  );
-  assert.equal(expected.length, 4);
-  for (const { row_id, col_id, value } of expected) {
-    const spec = specs.get(`${row_id}/${col_id}`);
-    assert.ok(spec, `no calculated cell for ${row_id}/${col_id}`);
-    assert.equal(evaluate(spec.expr, getCell), value, `${row_id}/${col_id}`);
-  }
-});
+const PAGE_FIXTURES = [["Assets in Use", "assets_in_use_table.json"]];
+
+for (const [page, name] of PAGE_FIXTURES) {
+  test(`${page} calculated cells evaluate to the adjustment engine's values`, () => {
+    const { table, expected } = loadFixture(name);
+    const model = TableModel.fromSerialized(table);
+    const getCell = (rowId, colId) => model.getCell(rowId, colId);
+    const specs = new Map(
+      table.calculated_cells.map((spec) => [
+        `${spec.row_id}/${spec.col_id}`,
+        spec,
+      ]),
+    );
+    assert.ok(expected.length > 0, `${name} has no expected values`);
+    for (const { row_id, col_id, value } of expected) {
+      const spec = specs.get(`${row_id}/${col_id}`);
+      assert.ok(spec, `no calculated cell for ${row_id}/${col_id}`);
+      assert.equal(evaluate(spec.expr, getCell), value, `${row_id}/${col_id}`);
+    }
+  });
+}
 
 const cells = { a: { x: 2, blank: null, empty: "", text: "3.5", bad: "n/a" } };
 const getCell = (rowId, colId) => cells[rowId]?.[colId];
