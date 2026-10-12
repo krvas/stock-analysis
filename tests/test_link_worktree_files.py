@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -18,6 +19,15 @@ LOCAL_FILES = {
 }
 LINKS = [".env", ".venv", "node_modules", "tests/data_test_tickers.txt"]
 LINKS += ["data/edgartools_cache", "data/raw/finnhub/financials_reported_AMD.json"]
+
+
+@pytest.fixture(autouse=True)
+def _isolate_from_outer_git(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Under `git rebase -x` or a git hook, GIT_DIR / GIT_INDEX_FILE point at
+    # the real repo; inherited, they turn the temp repo's init and worktree
+    # add into writes to the user's .git.
+    for name in [n for n in os.environ if n.startswith("GIT_")]:
+        monkeypatch.delenv(name)
 
 
 def _git(cwd: Path, *args: str) -> str:
