@@ -6,7 +6,10 @@ import { evaluate } from "../../src/static/js/components/calculated_cell.js";
 import { TableModel } from "../../src/static/js/components/table_model.js";
 import { loadFixture } from "./load_fixture.js";
 
-const PAGE_FIXTURES = [["Assets in Use", "assets_in_use_table.json"]];
+const PAGE_FIXTURES = [
+  ["Assets in Use", "assets_in_use_table.json"],
+  ["Owner Earnings", "owner_earnings_table.json"],
+];
 
 for (const [page, name] of PAGE_FIXTURES) {
   test(`${page} calculated cells evaluate to the adjustment engine's values`, () => {
@@ -23,7 +26,11 @@ for (const [page, name] of PAGE_FIXTURES) {
     for (const { row_id, col_id, value } of expected) {
       const spec = specs.get(`${row_id}/${col_id}`);
       assert.ok(spec, `no calculated cell for ${row_id}/${col_id}`);
-      assert.equal(evaluate(spec.expr, getCell), value, `${row_id}/${col_id}`);
+      const actual = evaluate(spec.expr, getCell);
+      assert.ok(
+        Math.abs(actual - value) <= 1e-9 * Math.max(1, Math.abs(value)),
+        `${row_id}/${col_id}: ${actual} != ${value}`,
+      );
     }
   });
 }

@@ -1,0 +1,414 @@
+{
+  "expected": [
+    {
+      "col_id": "2024-12-31",
+      "row_id": "owner_earnings",
+      "value": 115.5
+    },
+    {
+      "col_id": "2023-12-31",
+      "row_id": "owner_earnings",
+      "value": 91.5
+    },
+    {
+      "col_id": "2022-12-31",
+      "row_id": "owner_earnings",
+      "value": 64.3
+    }
+  ],
+  "table": {
+    "calculated_cells": [
+      {
+        "col_id": "2024-12-31",
+        "expr": {
+          "args": [
+            {
+              "cell": [
+                "pretax",
+                "2024-12-31"
+              ]
+            },
+            {
+              "cell": [
+                "us-gaap_DepreciationDepletionAndAmortization|DepreciationAmortizationComponentAxis=Depreciation",
+                "2024-12-31"
+              ]
+            },
+            {
+              "cell": [
+                "us-gaap_DepreciationDepletionAndAmortization|DepreciationAmortizationComponentAxis=Amortization",
+                "2024-12-31"
+              ]
+            },
+            {
+              "cell": [
+                "nwc",
+                "2024-12-31"
+              ]
+            },
+            {
+              "args": [
+                {
+                  "const": -0.01
+                },
+                {
+                  "cell": [
+                    "us-gaap_DepreciationDepletionAndAmortization|DepreciationAmortizationComponentAxis=Depreciation",
+                    "maintenance_pct"
+                  ]
+                },
+                {
+                  "cell": [
+                    "us-gaap_DepreciationDepletionAndAmortization|DepreciationAmortizationComponentAxis=Depreciation",
+                    "2024-12-31"
+                  ]
+                }
+              ],
+              "op": "mul"
+            },
+            {
+              "args": [
+                {
+                  "const": -0.01
+                },
+                {
+                  "cell": [
+                    "us-gaap_DepreciationDepletionAndAmortization|DepreciationAmortizationComponentAxis=Amortization",
+                    "maintenance_pct"
+                  ]
+                },
+                {
+                  "cell": [
+                    "us-gaap_DepreciationDepletionAndAmortization|DepreciationAmortizationComponentAxis=Amortization",
+                    "2024-12-31"
+                  ]
+                }
+              ],
+              "op": "mul"
+            },
+            {
+              "args": [
+                {
+                  "const": -0.01
+                },
+                {
+                  "cell": [
+                    "nwc",
+                    "maintenance_pct"
+                  ]
+                },
+                {
+                  "cell": [
+                    "nwc",
+                    "2024-12-31"
+                  ]
+                }
+              ],
+              "op": "mul"
+            }
+          ],
+          "op": "add"
+        },
+        "row_id": "owner_earnings"
+      },
+      {
+        "col_id": "2023-12-31",
+        "expr": {
+          "args": [
+            {
+              "cell": [
+                "pretax",
+                "2023-12-31"
+              ]
+            },
+            {
+              "cell": [
+                "us-gaap_DepreciationDepletionAndAmortization|DepreciationAmortizationComponentAxis=Depreciation",
+                "2023-12-31"
+              ]
+            },
+            {
+              "cell": [
+                "us-gaap_DepreciationDepletionAndAmortization|DepreciationAmortizationComponentAxis=Amortization",
+                "2023-12-31"
+              ]
+            },
+            {
+              "cell": [
+                "nwc",
+                "2023-12-31"
+              ]
+            },
+            {
+              "args": [
+                {
+                  "const": -0.01
+                },
+                {
+                  "cell": [
+                    "us-gaap_DepreciationDepletionAndAmortization|DepreciationAmortizationComponentAxis=Depreciation",
+                    "maintenance_pct"
+                  ]
+                },
+                {
+                  "cell": [
+                    "us-gaap_DepreciationDepletionAndAmortization|DepreciationAmortizationComponentAxis=Depreciation",
+                    "2023-12-31"
+                  ]
+                }
+              ],
+              "op": "mul"
+            },
+            {
+              "args": [
+                {
+                  "const": -0.01
+                },
+                {
+                  "cell": [
+                    "us-gaap_DepreciationDepletionAndAmortization|DepreciationAmortizationComponentAxis=Amortization",
+                    "maintenance_pct"
+                  ]
+                },
+                {
+                  "cell": [
+                    "us-gaap_DepreciationDepletionAndAmortization|DepreciationAmortizationComponentAxis=Amortization",
+                    "2023-12-31"
+                  ]
+                }
+              ],
+              "op": "mul"
+            },
+            {
+              "args": [
+                {
+                  "const": -0.01
+                },
+                {
+                  "cell": [
+                    "nwc",
+                    "maintenance_pct"
+                  ]
+                },
+                {
+                  "cell": [
+                    "nwc",
+                    "2023-12-31"
+                  ]
+                }
+              ],
+              "op": "mul"
+            }
+          ],
+          "op": "add"
+        },
+        "row_id": "owner_earnings"
+      },
+      {
+        "col_id": "2022-12-31",
+        "expr": {
+          "args": [
+            {
+              "cell": [
+                "pretax",
+                "2022-12-31"
+              ]
+            },
+            {
+              "cell": [
+                "us-gaap_DepreciationDepletionAndAmortization|DepreciationAmortizationComponentAxis=Depreciation",
+                "2022-12-31"
+              ]
+            },
+            {
+              "cell": [
+                "us-gaap_DepreciationDepletionAndAmortization|DepreciationAmortizationComponentAxis=Amortization",
+                "2022-12-31"
+              ]
+            },
+            {
+              "cell": [
+                "nwc",
+                "2022-12-31"
+              ]
+            },
+            {
+              "args": [
+                {
+                  "const": -0.01
+                },
+                {
+                  "cell": [
+                    "us-gaap_DepreciationDepletionAndAmortization|DepreciationAmortizationComponentAxis=Depreciation",
+                    "maintenance_pct"
+                  ]
+                },
+                {
+                  "cell": [
+                    "us-gaap_DepreciationDepletionAndAmortization|DepreciationAmortizationComponentAxis=Depreciation",
+                    "2022-12-31"
+                  ]
+                }
+              ],
+              "op": "mul"
+            },
+            {
+              "args": [
+                {
+                  "const": -0.01
+                },
+                {
+                  "cell": [
+                    "us-gaap_DepreciationDepletionAndAmortization|DepreciationAmortizationComponentAxis=Amortization",
+                    "maintenance_pct"
+                  ]
+                },
+                {
+                  "cell": [
+                    "us-gaap_DepreciationDepletionAndAmortization|DepreciationAmortizationComponentAxis=Amortization",
+                    "2022-12-31"
+                  ]
+                }
+              ],
+              "op": "mul"
+            },
+            {
+              "args": [
+                {
+                  "const": -0.01
+                },
+                {
+                  "cell": [
+                    "nwc",
+                    "maintenance_pct"
+                  ]
+                },
+                {
+                  "cell": [
+                    "nwc",
+                    "2022-12-31"
+                  ]
+                }
+              ],
+              "op": "mul"
+            }
+          ],
+          "op": "add"
+        },
+        "row_id": "owner_earnings"
+      }
+    ],
+    "columns": [
+      {
+        "dtype": "number",
+        "format": "financial",
+        "id": "2024-12-31",
+        "kind": "static",
+        "label": "2024-12-31",
+        "linked_group": null
+      },
+      {
+        "dtype": "number",
+        "format": "financial",
+        "id": "2023-12-31",
+        "kind": "static",
+        "label": "2023-12-31",
+        "linked_group": null
+      },
+      {
+        "dtype": "number",
+        "format": "financial",
+        "id": "2022-12-31",
+        "kind": "static",
+        "label": "2022-12-31",
+        "linked_group": null
+      },
+      {
+        "dtype": "number",
+        "format": null,
+        "id": "maintenance_pct",
+        "kind": "input",
+        "label": "Maintenance %",
+        "linked_group": null
+      }
+    ],
+    "linked_groups": {},
+    "no_input_cells": [
+      [
+        "pretax",
+        "maintenance_pct"
+      ],
+      [
+        "owner_earnings",
+        "maintenance_pct"
+      ]
+    ],
+    "rows": [
+      {
+        "cells": {
+          "2022-12-31": 60.0,
+          "2023-12-31": 80.0,
+          "2024-12-31": 100.0,
+          "maintenance_pct": null
+        },
+        "id": "pretax",
+        "is_total": false,
+        "label": "Pretax income (after adjustments)",
+        "level": 0,
+        "parent_id": null
+      },
+      {
+        "cells": {
+          "2022-12-31": 8.0,
+          "2023-12-31": 15.0,
+          "2024-12-31": 20.0,
+          "maintenance_pct": 60.0
+        },
+        "id": "us-gaap_DepreciationDepletionAndAmortization|DepreciationAmortizationComponentAxis=Depreciation",
+        "is_total": false,
+        "label": "Depreciation",
+        "level": 1,
+        "parent_id": null
+      },
+      {
+        "cells": {
+          "2022-12-31": 2.0,
+          "2023-12-31": 5.0,
+          "2024-12-31": 10.0,
+          "maintenance_pct": 20.0
+        },
+        "id": "us-gaap_DepreciationDepletionAndAmortization|DepreciationAmortizationComponentAxis=Amortization",
+        "is_total": false,
+        "label": "Amortization",
+        "level": 1,
+        "parent_id": null
+      },
+      {
+        "cells": {
+          "2022-12-31": -1.0,
+          "2023-12-31": 3.0,
+          "2024-12-31": -1.0,
+          "maintenance_pct": 50.0
+        },
+        "id": "nwc",
+        "is_total": false,
+        "label": "Change in NWC (CFO sign)",
+        "level": 0,
+        "parent_id": null
+      },
+      {
+        "cells": {
+          "2022-12-31": null,
+          "2023-12-31": null,
+          "2024-12-31": null,
+          "maintenance_pct": null
+        },
+        "id": "owner_earnings",
+        "is_total": true,
+        "label": "Owner earnings",
+        "level": 0,
+        "parent_id": null
+      }
+    ]
+  }
+}
