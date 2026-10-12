@@ -78,8 +78,8 @@ src/static/js/             api_client.js (only fetch() home; wizard save posts)
                            components/table_model.js, linked_groups.js,
                            table_view.js, generic_input.js, table_wiring.js
                            settings_drawer.js, utils.js
-tests/                     pytest; pure seams (Settings, builders), no
-                           HTTP/route tests
+tests/                     pytest; pure seams (Settings, builders);
+                           test_settings_routes.py over HTTP (TestClient)
 ```
 
 `finfetch_client.py` is a broken stub; ignore as a template.
@@ -242,7 +242,8 @@ prefs; pages read it through `src/web/adjusted_statements.py`.
 
 **Settings** (`src/web/settings.py`, `src/web/routes/settings.py`). A Setting
 is a display choice (CONTEXT.md). `SETTINGS` defines each once (id, label,
-options or int range, default; `instant` = View only, submits on change).
+`Option(value, label)` choices or int range, default; `instant` = View only,
+submits on change).
 Global: `period`, `num_periods`, `view`. Sub-page: `basis`,
 `current_period`, `previous_period` (offsets from the latest period),
 `items_per_side`. Every `SubPage` and `StatementPage` carries a
@@ -258,8 +259,9 @@ path /, one year), written only by `POST /settings` (urlencoded form, parsed
 with `parse_qsl`, 303 to a same-site `next`); a refused save sets a one-shot
 `settings_error` cookie that opens the drawer once. Every page with the
 shared nav renders through `render_with_settings` with a `NavContext`
-(prefix, pages, current page/sub-page); `shared/_page_nav.html` names
-neither half of the app and hosts the gear + `<dialog>` drawer (Global
+(prefix, pages, current page/sub-page; pages are typed by the `NavPage`
+protocol, which `Page` and `StatementPage` satisfy); `shared/_page_nav.html`
+names neither half of the app and hosts the gear + `<dialog>` drawer (Global
 section; This page section for declared Sub-page Settings). No in-page
 display controls exist; URLs carry no Settings.
 
@@ -360,8 +362,11 @@ NYI: wizard sub-pages other than One-line Answers, Balance Sheet Size, Fund
 Flow, Capitalizing Opex and Owner Earnings; screener; analytics; finfetch.
 
 Tests cover clients, DBs, edgartools, Table, wizard DB, Settings
-(`test_settings.py`) and the page builders. No HTTP/route tests. Cache
-miss hits live SEC. `pytest -m data` (deselected by default)
+(`test_settings.py`) and the page builders.
+`test_settings_routes.py` is the only HTTP suite: TestClient over fixture
+statements for the statements redirect and 404, `POST /settings` (redirect
+guard, cookie attributes, refused saves), cookie round-trips and the drawer
+per page. Cache miss hits live SEC. `pytest -m data` (deselected by default)
 runs the calc-residual check on real filings for the tickers in the gitignored
 `tests/data_test_tickers.txt` (pinned in the company LRU, loaded through the
 app cache).
