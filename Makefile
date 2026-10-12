@@ -2,6 +2,7 @@
 
 # Lint, format check, unit tests. Run before every commit.
 test:
+	python3 scripts/link_worktree_files.py
 	.venv/bin/ruff check .
 	.venv/bin/ruff format --check .
 	.venv/bin/python -m pytest -q
