@@ -11,12 +11,16 @@ import pytest
 
 from src.adjustments.base import AdjustmentSpec
 from src.adjustments.engine import apply_adjustments
-from src.models.statement import StatementSet
+from src.adjustments.registry import ADJUSTMENT_ORDER
+from src.adjustments.types import assets_in_use, owner_earnings
+from src.models.balance_leaves import balance_leaves
+from src.models.statement import STATEMENT_TYPES, StatementSet
 from tests.statement_fixtures import P1, P2, P3, _row, make_statement
 
 RND = "us-gaap_ResearchAndDevelopmentExpense"
 REV = "us-gaap_Revenues"
 OI = "us-gaap_OperatingIncomeLoss"
+PRETAX = "us-gaap_IncomeLossFromContinuingOperationsBeforeIncomeTaxes"
 NI = "us-gaap_NetIncomeLoss"
 ASSETS = "us-gaap_Assets"
 NONCURRENT = "us-gaap_AssetsNoncurrent"
@@ -35,6 +39,10 @@ SPEND = {P3: 30.0, P2: 60.0, P1: 90.0}
 AMORT = {P3: 10.0, P2: 30.0, P1: 60.0}
 NET = {P3: 20.0, P2: 50.0, P1: 80.0}
 OPEX_SPEC = AdjustmentSpec("opex_to_capex", {"rows": {RND: 3}})
+OE_SPEC = AdjustmentSpec(owner_earnings.TYPE_ID, {AMORTIZATION: 50.0})
+AIU_SPEC = AdjustmentSpec(assets_in_use.TYPE_ID, {CAPITALIZED: 100.0})
+# Out of pipeline order on purpose: the engine sorts them.
+ALL_SPECS = [AIU_SPEC, OE_SPEC, OPEX_SPEC]
 
 
 def _values(p1: float, p2: float, p3: float) -> dict[str, float]:
@@ -51,7 +59,15 @@ INCOME = [
         -1.0,
         _values(90, 60, 30),
     ),
-    (OI, "Operating income", "OperatingIncomeLoss", NI, 1.0, _values(160, 160, 170)),
+    (
+        OI,
+        "Operating income",
+        "OperatingIncomeLoss",
+        PRETAX,
+        1.0,
+        _values(160, 160, 170),
+    ),
+    (PRETAX, "Pretax income", "PretaxIncomeLoss", NI, 1.0, _values(160, 160, 170)),
     (NI, "Net income", "NetIncomeLoss", None, 1.0, _values(160, 160, 170)),
 ]
 BALANCE = [
@@ -189,3 +205,45 @@ def test_opex_spec_with_one_missing_row_applies_the_rest_and_names_the_gap() -> 
         "saved row us-gaap_Gone is not in this filing"
     ]
     assert value(run.statements, "income", AMORTIZATION) == AMORT
+
+
+def _assert_same_statements(a: StatementSet, b: StatementSet) -> None:
+    for st in STATEMENT_TYPES:
+        pd.testing.assert_frame_equal(a.get(st).frame, b.get(st).frame)
+        pd.testing.assert_frame_equal(a.get(st).calc_edges, b.get(st).calc_edges)
+
+
+@pytest.mark.parametrize("stage", ADJUSTMENT_ORDER)
+def test_until_a_type_applies_only_the_types_before_it(stage: str) -> None:
+    before = ADJUSTMENT_ORDER[: ADJUSTMENT_ORDER.index(stage)]
+    staged = apply_adjustments(filing(), ALL_SPECS, until=stage)
+    assert [s.type_id for s in staged.applied] == list(before)
+    assert staged.skipped == ()
+    only_before = [s for s in ALL_SPECS if s.type_id in before]
+    _assert_same_statements(
+        staged.statements, apply_adjustments(filing(), only_before).statements
+    )
+
+
+def test_stacked_pipeline_feeds_capitalized_opex_into_later_types() -> None:
+    run = apply_adjustments(filing(), ALL_SPECS)
+    assert run.applied == (OPEX_SPEC, OE_SPEC, AIU_SPEC) and run.skipped == ()
+    adjusted = run.statements
+
+    items = owner_earnings.da_items(adjusted.cashflow).set_index("row_id")
+    assert {p: items.at[AMORTIZATION, p] for p in (P1, P2, P3)} == AMORT
+    # Pretax 190 each year after capitalizing; D&A is 15 + amortization;
+    # maintenance is 50% of the amortization.
+    assert value(adjusted, "cashflow", "adj_MaintenanceCapex") == _values(30, 15, 5)
+    assert value(adjusted, "cashflow", "adj_OwnerEarnings") == _values(235, 220, 210)
+
+    total_assets = _values(680, 600, 520)
+    assert value(adjusted, "balance", ASSETS) == total_assets
+    for period, net in NET.items():
+        leaves = {
+            leaf.row_id: leaf for leaf in balance_leaves(adjusted.balance, period)
+        }
+        assert leaves[CAPITALIZED].side == "assets"
+        assert leaves[CAPITALIZED].contribution == pytest.approx(net)
+    assert value(adjusted, "balance", assets_in_use.GROSS_CONCEPT) == total_assets
+    assert value(adjusted, "balance", assets_in_use.NET_CONCEPT) == total_assets
