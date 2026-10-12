@@ -31,8 +31,10 @@ Preconditions: baseline. `X` below is
   has no mismatches.
 - **No memo rows.** With saved Assets in Use choices (run that recipe's Save
   first), set Basis `Adjusted`, Apply. `.adjustments-note` reads
-  `Adjusted for: …`, and `X --js` has no mismatches and `unchecked` 0, so no
-  `adj_` memo row is painted.
+  `Adjusted for: …`, and `X --js` has no mismatches and `unchecked` 0. The
+  snippet reports any painted row whose id starts with `adj_` (such as
+  `adj_GrossAssetsInUse`) as a mismatch whatever `expect` says, so the check
+  holds even if the Fund Flow builder starts passing memo rows through.
 - **Proof.** Save each `X` JSON and snippet result to `$RUN/evidence/ff-*.json`.
 
 ## Gotchas

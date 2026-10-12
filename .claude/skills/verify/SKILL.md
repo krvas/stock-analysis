@@ -80,7 +80,9 @@ Object.fromEntries([...document.querySelectorAll('#settings-drawer [name]:not([t
 
 Without `--js` it prints JSON (save it as evidence). With `--js` it prints a
 `javascript_tool` snippet that compares the open page with those values and
-returns `{checked, mismatches, ...}`; a pass is an empty `mismatches`. Use
+returns `{checked, mismatches, ...}`; a pass is an empty `mismatches`. A
+table snippet that checked no cells reports a `no cells checked` mismatch, so
+an empty expectation never reads as a pass. Use
 `--rows` to keep the snippet small when only a few rows matter. Recipes name
 which rows and options to pass.
 

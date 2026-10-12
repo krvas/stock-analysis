@@ -23,6 +23,8 @@ from src.web.wizard_registry import get_subpage
 
 Expectation = dict[str, Any]
 
+MEMO_ROW_PREFIX = "adj_"
+
 
 def _cells(table: dict[str, Any]) -> dict[str, dict[str, Any]]:
     return {row["id"]: {"label": row["label"], **row["cells"]} for row in table["rows"]}
@@ -69,7 +71,11 @@ def fund_flow(ticker: str, settings: Settings, _: argparse.Namespace) -> Expecta
     context = bu.fund_flow_context(ticker, settings)
     if "fund_flow_table" not in context:
         return {"table": None, "not_enough_periods": True}
-    return {"table": "fund-flow-table", "expect": _cells(context["fund_flow_table"])}
+    return {
+        "table": "fund-flow-table",
+        "expect": _cells(context["fund_flow_table"]),
+        "forbid_row_prefixes": [MEMO_ROW_PREFIX],
+    }
 
 
 def balance_sheet_size(
@@ -113,7 +119,7 @@ PAGES: dict[str, tuple[Callable[..., Expectation], SettingsDecl]] = {
 }
 
 CHECK_TABLE_JS = """\
-((tableId, expect) => {
+((tableId, expect, forbidPrefixes) => {
   const fmt = (v) => v == null ? "—"
     : (v / 1e6).toLocaleString(undefined, { maximumFractionDigits: 0 });
   const data = JSON.parse(document.getElementById(`${tableId}-data`).textContent);
@@ -135,9 +141,14 @@ CHECK_TABLE_JS = """\
       if (got !== wanted) mismatches.push({ rowId, col, wanted, got });
     }
   }
+  if (checked === 0) mismatches.push({ error: "no cells checked" });
+  for (const rowId of Object.keys(page)) {
+    if (forbidPrefixes.some((p) => rowId.startsWith(p)))
+      mismatches.push({ rowId, error: "row must not be on this page" });
+  }
   const unchecked = Object.keys(page).filter((id) => !(id in expect)).length;
   return { checked, mismatches, rows_on_page: data.rows.length, unchecked };
-})(%s, %s)"""
+})(%s, %s, %s)"""
 
 CHECK_TREEMAP_JS = """\
 ((asOf, expect) => {
@@ -179,6 +190,7 @@ def _js(expectation: Expectation) -> str:
     return CHECK_TABLE_JS % (
         json.dumps(expectation["table"]),
         json.dumps(expectation["expect"]),
+        json.dumps(expectation.get("forbid_row_prefixes", [])),
     )
 
 
