@@ -162,6 +162,14 @@ def set_pinned_tickers(tickers: Iterable[str], cache_dir: Path | None = None) ->
     _save_index(cache_dir, index)
 
 
+def add_pinned_tickers(tickers: Iterable[str], cache_dir: Path | None = None) -> None:
+    """Pin ``tickers`` alongside the existing pins (see :func:`set_pinned_tickers`)."""
+    cache_dir = Path(cache_dir) if cache_dir is not None else EDGARTOOLS_CACHE_DIR
+    index = _load_index(cache_dir)
+    index["pinned_tickers"] = _normalize_tickers([*index["pinned_tickers"], *tickers])
+    _save_index(cache_dir, index)
+
+
 def _cik_key(cik: int | str) -> str:
     return str(int(cik))
 

@@ -14,6 +14,7 @@ from src.api.edgartools import cache as cache_mod
 from src.api.edgartools.cache import (
     CACHE_SCHEMA_VERSION,
     _load_index,
+    add_pinned_tickers,
     find_cached_cik,
     get_cached_company_list,
     get_pinned_tickers,
@@ -475,6 +476,13 @@ def test_set_pinned_tickers_replaces_list(tmp_path: Path) -> None:
 
     set_pinned_tickers(["MU"], cache_dir)
     assert get_pinned_tickers(cache_dir) == frozenset({"MU"})
+
+
+def test_add_pinned_tickers_keeps_existing_pins(tmp_path: Path) -> None:
+    cache_dir = tmp_path / "edgartools_cache"
+    set_pinned_tickers(["GOOGL", "MU"], cache_dir)
+    add_pinned_tickers(["mu", "AAPL"], cache_dir)
+    assert _load_index(cache_dir)["pinned_tickers"] == ["AAPL", "GOOGL", "MU"]
 
 
 def test_pin_set_before_entry_exists_applies_on_touch(
