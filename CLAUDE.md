@@ -46,9 +46,9 @@ directly into `src/static/js/line_item_tables.js` — a file `specs/STATE.md`
 already documented as required to "stay generic across all wizard subpages
 and statement views." The rule existed in writing. It got violated anyway,
 because nothing forced a pause at the moment of writing that dict. The
-checklist below is the pause. Wizard hydration now lives in
-`src/static/js/components/table_wiring.js`; the same "no subpage-specific
-logic" rule applies there.
+checklist below is the pause. Table hydration for wizard sub-pages and
+statement pages now lives in `src/static/js/components/table_wiring.js`; the
+same "no subpage-specific logic" rule applies there.
 
 ## Before adding code to a shared/generic file
 
@@ -57,7 +57,12 @@ Shared files: `src/static/js/components/table_model.js`,
 `src/static/js/components/table_view.js`,
 `src/static/js/components/generic_input.js`,
 `src/static/js/components/table_wiring.js`, `src/models/table.py`,
-`src/web/wizard_registry.py`, `src/web/routes/wizard.py`.
+`src/web/wizard_registry.py`, `src/web/routes/wizard.py`,
+`src/web/settings.py`, `src/web/routes/settings.py`,
+`src/web/statements_registry.py`, `src/templates/shared/_page_nav.html`,
+`src/templates/shared/_settings_drawer.html`,
+`src/templates/shared/_adjustments_note.html`,
+`src/static/js/settings_drawer.js`.
 
 Before adding a line to one of these, ask: **would this exact line make sense
 unchanged for a different subpage, a different statement view, or a table
