@@ -38,17 +38,24 @@ same "no subpage-specific logic" rule applies there.
 
 ## Before adding code to a shared/generic file
 
-Shared files: `src/static/js/components/table_model.js`,
-`src/static/js/components/linked_groups.js`,
-`src/static/js/components/table_view.js`,
-`src/static/js/components/generic_input.js`,
-`src/static/js/components/table_wiring.js`, `src/models/table.py`,
-`src/web/wizard_registry.py`, `src/web/routes/wizard.py`,
-`src/web/settings.py`, `src/web/routes/settings.py`,
-`src/web/statements_registry.py`, `src/templates/shared/_page_nav.html`,
-`src/templates/shared/_settings_drawer.html`,
-`src/templates/shared/_adjustments_note.html`,
-`src/static/js/settings_drawer.js`.
+Shared files (one path per bullet; `tests/test_shared_files_stay_generic.py`
+reads this list, so add a new shared file here):
+
+- `src/static/js/components/table_model.js`
+- `src/static/js/components/linked_groups.js`
+- `src/static/js/components/table_view.js`
+- `src/static/js/components/generic_input.js`
+- `src/static/js/components/table_wiring.js`
+- `src/models/table.py`
+- `src/web/wizard_registry.py`
+- `src/web/routes/wizard.py`
+- `src/web/settings.py`
+- `src/web/routes/settings.py`
+- `src/web/statements_registry.py`
+- `src/templates/shared/_page_nav.html`
+- `src/templates/shared/_settings_drawer.html`
+- `src/templates/shared/_adjustments_note.html`
+- `src/static/js/settings_drawer.js`
 
 Before adding a line to one of these, ask: **would this exact line make sense
 unchanged for a different subpage, a different statement view, or a table
