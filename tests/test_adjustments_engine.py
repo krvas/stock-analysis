@@ -78,7 +78,7 @@ def _value(ss, statement: str, concept: str, period: str) -> float:
 @pytest.mark.data
 def test_engine_invariants_on_test_tickers(data_ticker: str) -> None:
     base = load_statement_set(data_ticker, "annual")
-    unchanged = apply_adjustments(base, [])
+    unchanged = apply_adjustments(base, []).statements
     for st in ("income", "balance", "cashflow"):
         periods = base.get(st).periods
         a = base.get(st).frame[periods].apply(pd.to_numeric, errors="coerce")
@@ -89,7 +89,7 @@ def test_engine_invariants_on_test_tickers(data_ticker: str) -> None:
     if opex.empty:
         return
     spec = AdjustmentSpec("opex_to_capex", {"rows": {opex["row_id"].iloc[0]: 5}})
-    adjusted = apply_adjustments(base, [spec])
+    adjusted = apply_adjustments(base, [spec]).statements
     period = base.income.periods[0]
     assert _value(adjusted, "balance", "us-gaap_Assets", period) == pytest.approx(
         _value(adjusted, "balance", "us-gaap_LiabilitiesAndStockholdersEquity", period)

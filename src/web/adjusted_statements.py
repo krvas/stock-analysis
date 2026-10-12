@@ -6,9 +6,7 @@ The web-layer I/O half of the adjustments pipeline: reads prefs from
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-
-from src.adjustments.base import AdjustmentSpec
+from src.adjustments.base import AdjustmentRun, AdjustmentSpec
 from src.adjustments.engine import apply_adjustments
 from src.adjustments.specs import from_prefs
 from src.api.edgartools.source import load_statement_set
@@ -34,18 +32,11 @@ def load_adjusted(
     """``(reported, adjusted, specs)``; ``until`` stops before that type."""
     base = load_statement_set(ticker, period)
     specs = load_specs(ticker)
-    return base, apply_adjustments(base, specs, until=until), specs
+    return base, apply_adjustments(base, specs, until=until).statements, specs
 
 
-@dataclass(frozen=True)
-class Loaded:
-    statements: StatementSet
-    specs: list[AdjustmentSpec]
-
-
-def load_for_basis(ticker: str, period: PeriodType, basis: Basis) -> Loaded:
+def load_for_basis(ticker: str, period: PeriodType, basis: Basis) -> AdjustmentRun:
     reported = load_statement_set(ticker, period)
     if basis == "reported":
-        return Loaded(reported, [])
-    specs = load_specs(ticker)
-    return Loaded(apply_adjustments(reported, specs), specs)
+        return AdjustmentRun(reported)
+    return apply_adjustments(reported, load_specs(ticker))

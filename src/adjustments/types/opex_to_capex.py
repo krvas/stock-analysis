@@ -88,6 +88,7 @@ def apply(ss: StatementSet, spec: AdjustmentSpec) -> AdjustmentResult:
         life = max(round(years), 1)
         match = frame[frame["row_id"] == row_id]
         if match.empty:
+            result.skipped.append(f"saved row {row_id} is not in this filing")
             continue
         row = match.iloc[0]
         concept = str(row["concept"])
@@ -97,6 +98,7 @@ def apply(ss: StatementSet, spec: AdjustmentSpec) -> AdjustmentResult:
             p: float(row[p]) for p in income.periods if pd.notna(pd.to_numeric(row[p]))
         }
         if not spend:
+            result.skipped.append(f"{name} has no reported values")
             continue
         amort, net = schedule(spend, life)
         tree = income.calc_edges[income.calc_edges["concept"] == concept]

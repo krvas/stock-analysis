@@ -70,7 +70,6 @@ def _statement(slug: str, specs: list | None = None, **values: object) -> dict:
             adjusted_statements, "load_statement_set", return_value=_statement_set()
         ),
         patch.object(adjusted_statements, "load_specs", return_value=specs or []),
-        patch.object(adjusted_statements, "apply_adjustments", lambda ss, _: ss),
     ):
         return statement_context(
             "AAPL", page, resolve(json.dumps(values), page.settings)
@@ -119,15 +118,36 @@ def test_statement_uses_display_signs() -> None:
     assert rows[RND]["level"] == 1
 
 
+NO_NOTE = {"applied": [], "skipped": []}
+
+
 def test_basis_decides_whether_saved_adjustments_load() -> None:
-    spec = AdjustmentSpec("opex_to_capex", {})
+    spec = AdjustmentSpec("opex_to_capex", {"rows": {RND: 5.0}})
     reported = _statement("income", specs=[spec])
-    assert (reported["basis"], reported["adjustments"]) == ("reported", [])
+    assert (reported["basis"], reported["adjustments"]) == ("reported", NO_NOTE)
     adjusted = _statement("income", specs=[spec], basis="adjusted")
     assert adjusted["basis"] == "adjusted"
-    assert [a["label"] for a in adjusted["adjustments"]] == ["Opex capitalized (0)"]
+    assert adjusted["adjustments"] == {
+        "applied": [{"type": "opex_to_capex", "label": "Opex capitalized (1)"}],
+        "skipped": [],
+    }
     no_saved = _statement("income", basis="adjusted")
-    assert (no_saved["basis"], no_saved["adjustments"]) == ("adjusted", [])
+    assert (no_saved["basis"], no_saved["adjustments"]) == ("adjusted", NO_NOTE)
+
+
+def test_note_names_a_saved_adjustment_that_did_not_apply() -> None:
+    spec = AdjustmentSpec("opex_to_capex", {"rows": {"us-gaap_Gone": 5.0}})
+    note = _statement("income", specs=[spec], basis="adjusted")["adjustments"]
+    assert note == {
+        "applied": [],
+        "skipped": [
+            {
+                "type": "opex_to_capex",
+                "label": "Opex capitalized (1)",
+                "reason": "saved row us-gaap_Gone is not in this filing",
+            }
+        ],
+    }
 
 
 @pytest.mark.parametrize(

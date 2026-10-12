@@ -6,8 +6,8 @@ from types import SimpleNamespace
 import pandas as pd
 import pytest
 
+from src.adjustments.base import AdjustmentRun
 from src.models.statement import Statement
-from src.web.adjusted_statements import Loaded
 from src.web.routes.wizard_pages import business_understanding
 from src.web.settings import Settings, resolve
 from src.web.wizard_registry import get_subpage
@@ -70,7 +70,7 @@ def _use(monkeypatch: pytest.MonkeyPatch, stmt: Statement) -> list[tuple]:
 
     def fake_load(ticker, period, basis):
         calls.append((period, basis))
-        return Loaded(SimpleNamespace(balance=stmt), [])
+        return AdjustmentRun(SimpleNamespace(balance=stmt))
 
     monkeypatch.setattr(business_understanding, "load_for_basis", fake_load)
     return calls

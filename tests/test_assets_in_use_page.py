@@ -148,7 +148,7 @@ def test_inputs_only_where_they_apply_and_prefilled_from_saved(loads) -> None:
 def test_js_calculated_cells_fixture_matches_builder_and_engine(loads) -> None:
     frame = apply_adjustments(
         _statements(), [AdjustmentSpec(TYPE_ID, SAVED)]
-    ).balance.frame.set_index("concept")
+    ).statements.balance.frame.set_index("concept")
     concepts = {page.GROSS_ROW: GROSS_CONCEPT, page.NET_ROW: NET_CONCEPT}
     expected = {
         (row, period): float(frame.at[concept, period])

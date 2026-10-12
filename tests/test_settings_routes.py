@@ -9,9 +9,10 @@ import pytest
 from fastapi.testclient import TestClient
 from httpx import Response
 
+from src.adjustments.base import AdjustmentSpec
 from src.web import adjusted_statements
 from src.web.app import app
-from tests.test_statement_pages import P1, P2, P3, _statement_set
+from tests.test_statement_pages import P1, P2, P3, RND, _statement_set
 
 FUND_FLOW = "/wizard/AAPL/business-understanding/fund-flow"
 BALANCE_SHEET_SIZE = "/wizard/AAPL/business-understanding/balance-sheet-size"
@@ -93,6 +94,22 @@ def test_saved_settings_shape_the_next_statement_page(client: TestClient) -> Non
     after = client.get("/statements/AAPL/income").text
     assert _columns(after) == [P1, P2]
     assert ADJUSTED_NOTE in after
+
+
+def test_statement_page_names_saved_adjustments_that_did_not_apply(
+    client: TestClient,
+) -> None:
+    specs = [AdjustmentSpec("opex_to_capex", {"rows": {RND: 5.0, "us-gaap_Gone": 3.0}})]
+    _save(client, basis="adjusted", next="/statements/AAPL/income")
+    with patch.object(adjusted_statements, "load_specs", return_value=specs):
+        html = client.get("/statements/AAPL/income").text
+    note = " ".join(
+        re.findall(r'class="adjustments-note[^"]*">(.*?)</p>', html, re.DOTALL)
+    )
+    assert " ".join(note.split()) == (
+        "Adjusted for: Opex capitalized (2) Not applied: Opex capitalized (2)"
+        " (saved row us-gaap_Gone is not in this filing)"
+    )
 
 
 def test_saved_offsets_shape_the_next_fund_flow(client: TestClient) -> None:

@@ -1,6 +1,11 @@
 {% if basis == "adjusted" %}
 <p class="adjustments-note">
-  {%- if adjustments %}Adjusted for: {{ adjustments | map(attribute="label") | join(" · ") }}
+  {%- if adjustments.applied %}Adjusted for: {{ adjustments.applied | map(attribute="label") | join(" · ") }}
   {%- else %}Adjusted basis (no adjustments applied){% endif -%}
 </p>
+{% if adjustments.skipped %}
+<p class="adjustments-note adjustments-note-skipped">Not applied:
+  {%- for skip in adjustments.skipped %} {{ skip.label }} ({{ skip.reason }}){% if not loop.last %} ·{% endif %}{% endfor -%}
+</p>
+{% endif %}
 {% endif %}

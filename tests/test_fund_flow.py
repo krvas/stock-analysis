@@ -5,7 +5,7 @@ import json
 import pandas as pd
 import pytest
 
-from src.adjustments.base import AdjustmentSpec
+from src.adjustments.base import AdjustmentRun, AdjustmentSpec
 from src.models.statement import Statement, StatementSet
 from src.web import adjusted_statements
 from src.web.routes.wizard_pages import business_understanding
@@ -84,7 +84,11 @@ def loaded(monkeypatch: pytest.MonkeyPatch) -> list[tuple]:
 
     monkeypatch.setattr(adjusted_statements, "load_statement_set", fake_load)
     monkeypatch.setattr(adjusted_statements, "load_specs", fake_specs)
-    monkeypatch.setattr(adjusted_statements, "apply_adjustments", lambda ss, _: ss)
+    monkeypatch.setattr(
+        adjusted_statements,
+        "apply_adjustments",
+        lambda ss, specs: AdjustmentRun(ss, tuple(specs)),
+    )
     return calls
 
 
@@ -99,7 +103,8 @@ def _columns(ctx: dict) -> list[str]:
 def test_defaults_compare_latest_with_one_back(loaded) -> None:
     ctx = _context()
     assert _columns(ctx) == [P1, P2, "change"]
-    assert ctx["basis"] == "reported" and ctx["adjustments"] == []
+    assert ctx["basis"] == "reported"
+    assert ctx["adjustments"] == {"applied": [], "skipped": []}
     assert loaded == [("load", "annual")]
 
 
@@ -135,7 +140,9 @@ def test_view_and_period_type_follow_settings(loaded) -> None:
 def test_adjusted_basis_loads_saved_adjustments(loaded) -> None:
     ctx = _context(basis="adjusted")
     assert ctx["basis"] == "adjusted"
-    assert [a["label"] for a in ctx["adjustments"]] == ["Opex capitalized (0)"]
+    assert [a["label"] for a in ctx["adjustments"]["applied"]] == [
+        "Opex capitalized (0)"
+    ]
     assert ("specs",) in loaded
 
 

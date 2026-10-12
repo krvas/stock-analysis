@@ -34,7 +34,7 @@ def statement_context(
         "page": page,
         "period": settings.period,
         "basis": settings.basis,
-        "adjustments": describe(loaded.specs),
+        "adjustments": describe(loaded),
         "statement_table": statement_table_from_dataframe(frame).serialize(),
         "active_nav": "statements",
     }
