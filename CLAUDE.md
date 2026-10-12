@@ -11,6 +11,26 @@ Before creating any git commit, run `.venv/bin/ruff check .` and
 `.venv/bin/ruff format --check .` from the repo root, and fix whatever they
 report. Don't commit code that fails either check.
 
+## Use edgartools, don't reinvent it
+
+Before writing code that fetches filings, parses XBRL, or builds statements,
+check whether edgartools already does it. Re-implement only for a concrete
+reason (a bug or gap in edgartools), and state it in the commit message.
+
+Docs: the installed package's `.venv/lib/python*/site-packages/edgar/ai/skills/`
+(version-matched; `sharp-edges.yaml` lists known gotchas), then
+https://edgartools.readthedocs.io (tracks the latest release — the installed
+package wins if they disagree).
+
+## Task workflow (main session only)
+
+For non-trivial tasks: plan first, split the work into well-scoped commits,
+then run one subagent per commit to save tokens. Give each subagent a
+self-contained prompt, review its result, and commit it yourself.
+
+Subagents don't follow this: execute the assigned commit directly, without
+re-planning or spawning further subagents.
+
 ## The failure mode this file exists to prevent
 
 A prior change hardcoded subpage-specific logic (a dict keyed by the literal
