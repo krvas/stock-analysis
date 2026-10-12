@@ -33,7 +33,8 @@ Launch from Bash instead, in the background:
 
 Run it with `run_in_background: true`. It copies `data/duckdb/wizard.duckdb`
 into `$RUN/wizard.duckdb` and points the app at the copy, so saves never
-touch the user's real choices. Ready when this returns `200`:
+touch the user's real choices. It refuses a `$RUN` that still holds a DB
+copy; use a new `$RUN` or run cleanup first. Ready when this returns `200`:
 
 ```bash
 until curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$PORT/wizard/AAPL" | grep -q 200; do sleep 1; done
@@ -54,8 +55,10 @@ Run first, and again whenever anything looks off:
 ```
 
 It checks that the pid this run started is alive and owns the port, that `/`
-answers as this app, that the run is NOT on the real wizard DB, and prints
-the git revision (with `+uncommitted` if the tree is dirty). Any `FAIL` means
+answers as this app, that the run is NOT on the real wizard DB, and that the
+git revision and uncommitted `src/` diff match what `serve.py` recorded at
+launch. The server keeps the Python it imported, so after any edit under
+`src/` it FAILs until you restart (cleanup, then launch). Any `FAIL` means
 stop and fix before driving. Never drive a server this run did not start.
 
 ## Drive
