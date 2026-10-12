@@ -33,15 +33,21 @@ def _describe(spec: AdjustmentSpec) -> dict[str, Any] | None:
 def describe(run: AdjustmentRun) -> dict[str, list[dict[str, Any]]]:
     """The adjustments note: what applied and what was skipped, with reasons.
 
-    A type's ``describe`` returns None to leave a spec out of both lists.
+    Applied entries describe only the part of each spec that applied. A skipped
+    entry names the type without a count, since its spec's count would include
+    the parts that applied. A type's ``describe`` returns None to leave a spec
+    out of both lists.
     """
     applied = [_describe(spec) for spec in run.applied]
-    skipped = [
-        (entry, skip.reason)
-        for skip in run.skipped
-        if (entry := _describe(skip.spec)) is not None
-    ]
     return {
         "applied": [entry for entry in applied if entry is not None],
-        "skipped": [entry | {"reason": reason} for entry, reason in skipped],
+        "skipped": [
+            {
+                "type": skip.spec.type_id,
+                "label": get_adjustment_type(skip.spec.type_id).LABEL,
+                "reason": skip.reason,
+            }
+            for skip in run.skipped
+            if _describe(skip.spec) is not None
+        ],
     }

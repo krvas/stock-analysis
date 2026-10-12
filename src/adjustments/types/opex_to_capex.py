@@ -81,7 +81,8 @@ def _before(statement: Statement, concept: str) -> str | None:
 
 
 def apply(ss: StatementSet, spec: AdjustmentSpec) -> AdjustmentResult:
-    result = AdjustmentResult()
+    applied: dict[str, Any] = {}
+    result = AdjustmentResult(applied_params={**spec.params, "rows": applied})
     income = ss.income
     frame = income.frame
     for row_id, years in dict(spec.params.get("rows", {})).items():
@@ -100,6 +101,7 @@ def apply(ss: StatementSet, spec: AdjustmentSpec) -> AdjustmentResult:
         if not spend:
             result.skipped.append(f"{name} has no reported values")
             continue
+        applied[row_id] = years
         amort, net = schedule(spend, life)
         tree = income.calc_edges[income.calc_edges["concept"] == concept]
         is_parent = dict(zip(tree["period"], tree["parent_concept"], strict=True))

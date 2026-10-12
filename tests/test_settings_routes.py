@@ -96,20 +96,31 @@ def test_saved_settings_shape_the_next_statement_page(client: TestClient) -> Non
     assert ADJUSTED_NOTE in after
 
 
-def test_statement_page_names_saved_adjustments_that_did_not_apply(
-    client: TestClient,
+GONE = "us-gaap_Gone"
+GONE_NOTE = f"Opex capitalized: saved row {GONE} is not in this filing"
+
+
+@pytest.mark.parametrize(
+    ("rows", "expected"),
+    [
+        ({RND: 5.0}, ["Adjusted for: Opex capitalized (1)"]),
+        (
+            {RND: 5.0, GONE: 3.0},
+            ["Adjusted for: Opex capitalized (1)", f"Not applied: {GONE_NOTE}"],
+        ),
+        ({GONE: 3.0}, [ADJUSTED_NOTE, f"Not applied: {GONE_NOTE}"]),
+    ],
+    ids=["all-applied", "partly-applied", "none-applied"],
+)
+def test_statement_page_note_counts_only_what_applied(
+    client: TestClient, rows: dict[str, float], expected: list[str]
 ) -> None:
-    specs = [AdjustmentSpec("opex_to_capex", {"rows": {RND: 5.0, "us-gaap_Gone": 3.0}})]
+    specs = [AdjustmentSpec("opex_to_capex", {"rows": rows})]
     _save(client, basis="adjusted", next="/statements/AAPL/income")
     with patch.object(adjusted_statements, "load_specs", return_value=specs):
         html = client.get("/statements/AAPL/income").text
-    note = " ".join(
-        re.findall(r'class="adjustments-note[^"]*">(.*?)</p>', html, re.DOTALL)
-    )
-    assert " ".join(note.split()) == (
-        "Adjusted for: Opex capitalized (2) Not applied: Opex capitalized (2)"
-        " (saved row us-gaap_Gone is not in this filing)"
-    )
+    notes = re.findall(r'class="adjustments-note[^"]*">(.*?)</p>', html, re.DOTALL)
+    assert [" ".join(note.split()) for note in notes] == expected
 
 
 def test_saved_offsets_shape_the_next_fund_flow(client: TestClient) -> None:

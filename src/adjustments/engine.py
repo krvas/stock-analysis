@@ -79,6 +79,8 @@ def apply_adjustments(
         current = _apply_result(
             current, result, residuals, f"adjustment:{spec.type_id}"
         )
+        if result.applied_params is not None:
+            spec = AdjustmentSpec(spec.type_id, result.applied_params)
         applied.append(spec)
     return AdjustmentRun(current, tuple(applied), tuple(skipped))
 

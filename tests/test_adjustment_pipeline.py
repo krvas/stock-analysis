@@ -200,7 +200,7 @@ def test_opex_spec_that_changes_nothing_is_skipped_with_its_reason(
 def test_opex_spec_with_one_missing_row_applies_the_rest_and_names_the_gap() -> None:
     spec = AdjustmentSpec("opex_to_capex", {"rows": {RND: 3, "us-gaap_Gone": 5}})
     run = apply_adjustments(filing(), [spec])
-    assert run.applied == (spec,)
+    assert run.applied == (AdjustmentSpec("opex_to_capex", {"rows": {RND: 3}}),)
     assert [s.reason for s in run.skipped] == [
         "saved row us-gaap_Gone is not in this filing"
     ]

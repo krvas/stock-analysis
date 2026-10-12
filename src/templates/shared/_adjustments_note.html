@@ -5,7 +5,7 @@
 </p>
 {% if adjustments.skipped %}
 <p class="adjustments-note adjustments-note-skipped">Not applied:
-  {%- for skip in adjustments.skipped %} {{ skip.label }} ({{ skip.reason }}){% if not loop.last %} ·{% endif %}{% endfor -%}
+  {%- for skip in adjustments.skipped %} {{ skip.label }}: {{ skip.reason }}{% if not loop.last %} ·{% endif %}{% endfor -%}
 </p>
 {% endif %}
 {% endif %}

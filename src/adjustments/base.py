@@ -57,12 +57,14 @@ class Override:
 @dataclass
 class AdjustmentResult:
     """What one spec changes. ``skipped`` holds a reason for each part of the
-    spec the type could not apply (e.g. a saved row missing from the filing).
+    spec the type could not apply (e.g. a saved row missing from the filing),
+    and ``applied_params`` the part that did; None means all of it.
     """
 
     new_rows: list[NewRow] = field(default_factory=list)
     overrides: list[Override] = field(default_factory=list)
     skipped: list[str] = field(default_factory=list)
+    applied_params: Mapping[str, Any] | None = None
 
     def has_effect(self) -> bool:
         return any(o.values for o in self.overrides) or any(
@@ -80,7 +82,8 @@ class SkippedSpec:
 class AdjustmentRun:
     """The adjusted statements and, per spec, whether it applied.
 
-    A spec that applied only in part is in both ``applied`` and ``skipped``.
+    A spec that applied only in part is in ``applied`` narrowed to the part
+    that applied, and in ``skipped`` once per part that did not.
     """
 
     statements: StatementSet

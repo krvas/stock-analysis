@@ -143,7 +143,7 @@ def test_note_names_a_saved_adjustment_that_did_not_apply() -> None:
         "skipped": [
             {
                 "type": "opex_to_capex",
-                "label": "Opex capitalized (1)",
+                "label": "Opex capitalized",
                 "reason": "saved row us-gaap_Gone is not in this filing",
             }
         ],
