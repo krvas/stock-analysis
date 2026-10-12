@@ -120,7 +120,7 @@ Test external behaviour only. Given a StatementSet and a spec, what Owner Earnin
 - `tests/statement_fixtures.py`: `_row`, `make_statement`, `derived_calc_edges`, period constants. Build income and cash-flow statements separately with `make_statement` rather than `make_statement_set`, which reuses one frame for all three statements.
 - `tests/test_balance_sheet_size.py`: a context builder tested by monkeypatching the staged StatementSet.
 - `tests/test_adjustments_post.py`: POST handler body validation.
-- Optional data test (`@pytest.mark.data`, like `test_engine_invariants_on_test_tickers`): for every data-test ticker, Owner Earnings minus the old formula equals −E per period.
+- Optional data test (`@pytest.mark.data`, like `test_capitalized_opex_moves_every_period_by_its_schedule`): for every data-test ticker, Owner Earnings minus the old formula equals −E per period.
 
 ## Out of Scope
 
