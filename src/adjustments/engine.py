@@ -67,7 +67,7 @@ def apply_adjustments(
         try:
             result = adjustment.apply(current, spec)
         except (KeyError, ValueError) as exc:
-            reason = str(exc.args[0]) if exc.args else type(exc).__name__
+            reason = _skip_reason(exc)
             logger.warning("Skipping %s adjustment: %s", spec.type_id, reason)
             skipped.append(SkippedSpec(spec, reason))
             continue
@@ -83,6 +83,13 @@ def apply_adjustments(
             spec = AdjustmentSpec(spec.type_id, result.applied_params)
         applied.append(spec)
     return AdjustmentRun(current, tuple(applied), tuple(skipped))
+
+
+def _skip_reason(exc: KeyError | ValueError) -> str:
+    detail = str(exc.args[0]) if exc.args else type(exc).__name__
+    if isinstance(exc, KeyError):
+        return f"could not find {detail} in these statements"
+    return detail
 
 
 def _residual_lookup(statement: Statement) -> dict[tuple[str, str], float]:

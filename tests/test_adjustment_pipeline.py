@@ -6,15 +6,21 @@ amortization 10, 30, 60 and net capitalized asset 20, 50, 80.
 
 from __future__ import annotations
 
+import re
+from types import SimpleNamespace
+
 import pandas as pd
 import pytest
 
+from src.adjustments import engine
 from src.adjustments.base import AdjustmentSpec
 from src.adjustments.engine import apply_adjustments
 from src.adjustments.registry import ADJUSTMENT_ORDER
+from src.adjustments.specs import describe
 from src.adjustments.types import assets_in_use, owner_earnings
 from src.models.balance_leaves import balance_leaves
 from src.models.statement import STATEMENT_TYPES, StatementSet
+from src.web.templating import templates
 from tests.statement_fixtures import P1, P2, P3, _row, make_statement
 
 RND = "us-gaap_ResearchAndDevelopmentExpense"
@@ -135,12 +141,22 @@ def _statement(rows: list, statement_type: str):
     return make_statement(frame, statement_type)
 
 
-def filing() -> StatementSet:
+def filing(income: list = INCOME, balance: list = BALANCE) -> StatementSet:
     return StatementSet(
-        income=_statement(INCOME, "income"),
-        balance=_statement(BALANCE, "balance"),
+        income=_statement(income, "income"),
+        balance=_statement(balance, "balance"),
         cashflow=_statement(CASHFLOW, "cashflow"),
     )
+
+
+def _without(rows: list, concept: str) -> list:
+    """``rows`` minus ``concept``, its children moved up to its parent."""
+    parent = next(r[3] for r in rows if r[0] == concept)
+    return [
+        (c, label, std, parent if p == concept else p, weight, values)
+        for c, label, std, p, weight, values in rows
+        if c != concept
+    ]
 
 
 def value(ss: StatementSet, statement: str, row_id: str) -> dict[str, float]:
@@ -247,3 +263,54 @@ def test_stacked_pipeline_feeds_capitalized_opex_into_later_types() -> None:
         assert leaves[CAPITALIZED].contribution == pytest.approx(net)
     assert value(adjusted, "balance", assets_in_use.GROSS_CONCEPT) == total_assets
     assert value(adjusted, "balance", assets_in_use.NET_CONCEPT) == total_assets
+
+
+def test_opex_row_with_no_reported_values_is_skipped_and_left_out() -> None:
+    sga = "us-gaap_SellingGeneralAndAdministrativeExpense"
+    income = [*INCOME, (sga, "SG&A", None, OI, -1.0, {})]
+    spec = AdjustmentSpec("opex_to_capex", {"rows": {RND: 3, sga: 5}})
+    run = apply_adjustments(filing(income), [spec])
+    assert [s.reason for s in run.skipped] == ["SG&A has no reported values"]
+    assert [s.params["rows"] for s in run.applied] == [{RND: 3}]
+
+
+@pytest.mark.parametrize("error", [AttributeError, TypeError])
+def test_programmer_errors_in_a_type_propagate(
+    monkeypatch: pytest.MonkeyPatch, error: type[Exception]
+) -> None:
+    def apply(ss, spec):
+        raise error("bug")
+
+    monkeypatch.setattr(
+        engine, "get_adjustment_type", lambda _: SimpleNamespace(apply=apply)
+    )
+    with pytest.raises(error):
+        apply_adjustments(filing(), [OPEX_SPEC])
+
+
+@pytest.mark.parametrize(
+    ("percent", "shown"), [(100.0, []), (40.0, ["balance sheet has no total assets"])]
+)
+def test_note_hides_a_skip_whose_spec_changes_nothing(
+    percent: float, shown: list[str]
+) -> None:
+    spec = AdjustmentSpec(assets_in_use.TYPE_ID, {"us-gaap_Cash": percent})
+    run = apply_adjustments(filing(balance=_without(BALANCE, ASSETS)), [spec])
+    assert [s.reason for s in run.skipped] == ["balance sheet has no total assets"]
+    assert [s["reason"] for s in describe(run)["skipped"]] == shown
+
+
+def _notes(run) -> list[str]:
+    html = templates.get_template("shared/_adjustments_note.html").render(
+        basis="adjusted", adjustments=describe(run)
+    )
+    notes = re.findall(r'class="adjustments-note[^"]*">(.*?)</p>', html, re.DOTALL)
+    return [" ".join(note.split()) for note in notes]
+
+
+def test_note_names_a_missing_lookup_in_a_sentence() -> None:
+    run = apply_adjustments(filing(_without(INCOME, PRETAX)), [OE_SPEC])
+    assert _notes(run) == [
+        "Adjusted basis (no adjustments applied)",
+        "Not applied: Owner earnings: could not find nwc in these statements",
+    ]
