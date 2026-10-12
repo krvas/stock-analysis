@@ -47,3 +47,5 @@ feature-list.md
 
 # Node / JS tooling
 node_modules/
+# Agent worktrees stay inside the repo (scripts/stay_in_repo.py)
+.claude/worktrees/

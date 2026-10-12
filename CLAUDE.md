@@ -121,3 +121,12 @@ implementation of the same job sitting next to the real one.
 check whether it's still true — a doc note can describe a real deferral or it
 can be quietly documenting a shortcut nobody corrected. If you're not sure
 which, ask rather than assuming the doc's framing is still accurate.
+
+## Rules from operator corrections
+
+Each rule a correction produced, and what enforces it. A rule with nothing
+enforcing it is a repeat waiting to happen: encode it before adding another.
+
+| Rule | Enforced by |
+| --- | --- |
+| The app, its browser-pane server and agent worktrees run from this repo folder, never from a sibling folder (e.g. `../<name>` under `~/Documents`). Worktrees go in `.claude/worktrees/<name>` (gitignored); the app starts through `.claude/skills/verify/scripts/serve.py` or the `web` entry in `.claude/launch.json`. | `scripts/stay_in_repo.py`: a Bash `PreToolUse` hook in `.claude/settings.json` blocks out-of-repo `git worktree add` and app launches; `tests/test_stay_in_repo.py` fails on a `.claude/launch.json` entry that leaves the repo. |
