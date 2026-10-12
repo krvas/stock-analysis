@@ -25,6 +25,26 @@ function collectRefs(expr, refs) {
   return refs;
 }
 
+/**
+ * @param {object} expr - A `spec.expr` node.
+ * @param {(rowId: string, colId: string) => *} getCell
+ * @returns {number} Referenced cells that are blank or non-numeric count as 0.
+ */
+export function evaluate(expr, getCell) {
+  if ("cell" in expr) {
+    const [rowId, colId] = expr.cell;
+    return coerceNumber(getCell(rowId, colId)) ?? 0;
+  }
+  if ("const" in expr) {
+    return expr.const;
+  }
+  const op = OPS[expr.op];
+  if (!op) {
+    throw new Error(`Unknown calculated-cell op: ${expr.op}`);
+  }
+  return op(expr.args.map((arg) => evaluate(arg, getCell)));
+}
+
 export class CalculatedCell {
   /**
    * @param {HTMLTableCellElement} slot - The empty `[data-calc-slot]` td.
@@ -45,24 +65,11 @@ export class CalculatedCell {
     });
   }
 
-  _evaluate(expr) {
-    if ("cell" in expr) {
-      const [rowId, colId] = expr.cell;
-      return coerceNumber(this._model.getCell(rowId, colId)) ?? 0;
-    }
-    if ("const" in expr) {
-      return expr.const;
-    }
-    const op = OPS[expr.op];
-    if (!op) {
-      throw new Error(`Unknown calculated-cell op: ${expr.op}`);
-    }
-    return op(expr.args.map((arg) => this._evaluate(arg)));
-  }
-
   _paint() {
     this._slot.innerHTML = formatNumber(
-      this._evaluate(this._spec.expr),
+      evaluate(this._spec.expr, (rowId, colId) =>
+        this._model.getCell(rowId, colId),
+      ),
       getStatementUnit(),
     );
   }
