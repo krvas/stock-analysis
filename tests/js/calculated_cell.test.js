@@ -7,11 +7,11 @@ import { TableModel } from "../../src/static/js/components/table_model.js";
 import { loadFixture } from "./load_fixture.js";
 
 const PAGE_FIXTURES = [
-  ["Assets in Use", "assets_in_use_table.json"],
-  ["Owner Earnings", "owner_earnings_table.json"],
+  ["Assets in Use", "assets_in_use_table.json", 4],
+  ["Owner Earnings", "owner_earnings_table.json", 3],
 ];
 
-for (const [page, name] of PAGE_FIXTURES) {
+for (const [page, name, count] of PAGE_FIXTURES) {
   test(`${page} calculated cells evaluate to the adjustment engine's values`, () => {
     const { table, expected } = loadFixture(name);
     const model = TableModel.fromSerialized(table);
@@ -22,7 +22,7 @@ for (const [page, name] of PAGE_FIXTURES) {
         spec,
       ]),
     );
-    assert.ok(expected.length > 0, `${name} has no expected values`);
+    assert.equal(expected.length, count, `${name} expected values`);
     for (const { row_id, col_id, value } of expected) {
       const spec = specs.get(`${row_id}/${col_id}`);
       assert.ok(spec, `no calculated cell for ${row_id}/${col_id}`);
