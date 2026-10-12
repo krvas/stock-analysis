@@ -377,9 +377,13 @@ Tests cover clients, DBs, edgartools, Table, wizard DB, Settings
 statements for the statements redirect and 404, `POST /settings` (redirect
 guard, cookie attributes, refused saves), cookie round-trips and the drawer
 per page. Cache miss hits live SEC. `pytest -m data` (deselected by default)
-runs the calc-residual check on real filings for the tickers in the gitignored
-`tests/data_test_tickers.txt` (pinned in the company LRU, loaded through the
-app cache).
+runs the data tests on real filings, once per ticker (the `data_ticker`
+harness in `tests/conftest.py`) in the gitignored `tests/data_test_tickers.txt`
+or, with `DATA_TICKERS=long`, `tests/data_test_tickers_long.txt`; tickers are
+added to the company LRU pins and loaded through the app cache. `make test`
+sets `REQUIRE_DATA_TESTS=1` (a missing prerequisite fails instead of skipping)
+and first runs `scripts/link_worktree_files.py`, which symlinks the main
+checkout's gitignored local files into a worktree.
 
 ## 7. Debt agents should not paper over
 

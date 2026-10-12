@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import os
-
 import pandas as pd
 import pytest
 
@@ -10,11 +8,9 @@ from src.adjustments.engine import apply_adjustments
 from src.adjustments.specs import describe, from_prefs
 from src.adjustments.types.assets_in_use import GROSS_CONCEPT, NET_CONCEPT, TYPE_ID
 from src.api.edgartools.source import load_statement_set
-from src.config import load_project_dotenv
 from src.models.statement import Statement, StatementSet
 from src.web.routes.wizard_pages.business_understanding import fund_flow_table
 from tests.statement_fixtures import P1, P2, P3, _income_frame, _row, make_statement
-from tests.test_edgar_data import TICKERS_FILE, _test_tickers
 
 A = "us-gaap_Assets"
 AC = "us-gaap_AssetsCurrent"
@@ -195,19 +191,15 @@ def test_balance_sheet_without_total_assets_gets_no_memo_rows() -> None:
 
 
 @pytest.mark.data
-def test_defaults_reproduce_total_assets_on_test_tickers() -> None:
-    load_project_dotenv()
-    if not os.environ.get("EDGAR_IDENTITY") or not TICKERS_FILE.exists():
-        pytest.skip("data test prerequisites missing")
-    for ticker in _test_tickers():
-        base = load_statement_set(ticker, "annual")
-        balance = apply_adjustments(base, from_prefs(pd.DataFrame())).balance
-        frame = balance.frame.set_index("row_id")
-        for period in base.balance.periods:
-            total = frame.at[A, period] if A in frame.index else None
-            if total is None or pd.isna(total):
-                continue
-            assert frame.at[GROSS_CONCEPT, period] == pytest.approx(total), ticker
-            assert frame.at[NET_CONCEPT, period] == pytest.approx(total), ticker
-            if LE in frame.index and pd.notna(frame.at[LE, period]):
-                assert frame.at[LE, period] == pytest.approx(total), ticker
+def test_defaults_reproduce_total_assets_on_test_tickers(data_ticker: str) -> None:
+    base = load_statement_set(data_ticker, "annual")
+    balance = apply_adjustments(base, from_prefs(pd.DataFrame())).balance
+    frame = balance.frame.set_index("row_id")
+    for period in base.balance.periods:
+        total = frame.at[A, period] if A in frame.index else None
+        if total is None or pd.isna(total):
+            continue
+        assert frame.at[GROSS_CONCEPT, period] == pytest.approx(total), data_ticker
+        assert frame.at[NET_CONCEPT, period] == pytest.approx(total), data_ticker
+        if LE in frame.index and pd.notna(frame.at[LE, period]):
+            assert frame.at[LE, period] == pytest.approx(total), data_ticker
