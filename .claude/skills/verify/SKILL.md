@@ -32,8 +32,9 @@ Launch from Bash instead, in the background:
 ```
 
 Run it with `run_in_background: true`. It copies `data/duckdb/wizard.duckdb`
-into `$RUN/wizard.duckdb` and points the app at the copy, so saves never
-touch the user's real choices. It refuses a `$RUN` that still holds a DB
+(the main checkout's when run from a git worktree, which has none) into
+`$RUN/wizard.duckdb` and points the app at the copy, so saves never touch the
+user's real choices. It refuses a `$RUN` that still holds a DB
 copy; use a new `$RUN` or run cleanup first. Ready when this returns `200`:
 
 ```bash

@@ -4,6 +4,8 @@ Usage: .venv/bin/python .claude/skills/verify/scripts/serve.py RUN_DIR PORT
 
 Saves from wizard sub-pages land in RUN_DIR/wizard.duckdb, never in
 data/duckdb/wizard.duckdb, so a run can't change the user's saved choices.
+A git worktree has no wizard DB of its own, so the copy then comes from the
+main checkout's.
 """
 
 from __future__ import annotations
@@ -11,6 +13,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -23,14 +26,29 @@ os.chdir(REPO)
 from src.config import DEFAULT_WIZARD_DB_PATH
 from src.database import wizard_manager
 
+
+def _source_db() -> Path:
+    if DEFAULT_WIZARD_DB_PATH.exists():
+        return DEFAULT_WIZARD_DB_PATH
+    common_dir = subprocess.run(
+        ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    return Path(common_dir).parent / DEFAULT_WIZARD_DB_PATH.relative_to(REPO)
+
+
 run_dir = Path(sys.argv[1]).resolve()
 port = int(sys.argv[2])
 run_dir.mkdir(parents=True, exist_ok=True)
 db = run_dir / "wizard.duckdb"
 if db.exists():
     sys.exit(f"verify: {db} is left from an earlier server; run stop.sh {run_dir}")
-if DEFAULT_WIZARD_DB_PATH.exists():
-    shutil.copy2(DEFAULT_WIZARD_DB_PATH, db)
+source = _source_db()
+if source.exists():
+    shutil.copy2(source, db)
+    print(f"verify: copied {source}", flush=True)
 wizard_manager.DEFAULT_WIZARD_DB_PATH = db
 (run_dir / "server.pid").write_text(str(os.getpid()))
 state = {"port": port, "wizard_db": str(db), "pid": os.getpid(), **tree_state()}
