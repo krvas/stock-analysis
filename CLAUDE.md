@@ -12,31 +12,33 @@ Don't commit code that fails it. `make fix` applies ruff's fixes and formatting.
 
 ## Workflow
 
-Non-trivial changes go through these phases (skip 2–4 for docs-only or
-<20-line single-file edits). `<scratch>` is the session scratchpad; nothing in
-it is committed.
+pstack (`/pstack:poteto-mode`) owns the process for non-trivial work:
+playbooks, delegation, review and commits. Where this file and pstack differ
+on process, follow pstack. The rules below about where code belongs still
+apply inside every pstack step.
 
-1. **Implement.** Worker subagents on disjoint files (sequential if they
-   overlap). Workers never commit. Each ends with `make fix test` and writes
-   `<scratch>/intent-<worker>.md`: what changed, why, and an "Intentionally
-   unused / forward-looking" list (reason + spec section).
-2. **Review.** One `bloat-reviewer` agent (read-only; bloat, redundancy and
-   function placement only). It writes `<scratch>/review-1.md` and
-   `findings-1.json`.
-3. **Triage.** `make triage FINDINGS=<scratch>/findings-1.json`. Jev scores
-   each finding; `execute` means score ≥ 0.85 and not `needs_user_decision`,
-   otherwise `human`. If 0.15 ≥ score, then drop the suggestion. 
-   If the API fails, everything is `human`; tell the user.
+## Jev for cheap decisions
 
-4. **Fix.** Fix subagents (disjoint files, no commits) apply `execute`
-   findings, then `make fix test`.
-5. **Human review, then commit.** Show the user the `human` findings (quote,
-   score, intent note) and a summary of what was applied; apply what they
-   approve. Only the orchestrator commits: atomic commits (one logical change
-   plus its tests, in dependency order), `make test` before each, explicit
-   paths (never `git add -A`), unrelated untracked files left alone, no push.
+Jev (TypeSafe) is available to make typed judgments and choices. The key is
+`TYPESAFE_API_KEY` in `.env`. Jev is not a routing step to run before every
+choice. Use it for the pstack decisions below, where one Jev call costs far
+fewer tokens than reasoning through the choice yourself:
 
-One review round only.
+- **Review findings.** `make triage FINDINGS=<path>` scores each finding in
+  the bloat-reviewer findings JSON format. It returns `execute` (score of at
+  least 0.85, and not `needs_user_decision`) or `human`. Apply `execute`
+  findings; show `human` ones to the user.
+- **Model tier for a delegate** when `~/.claude/pstack-models.md` does not pin
+  the role, or when a step leaves the tier open (for example "trivial
+  mechanical edits go to your fast code model"). Run the `jevrouter` skill
+  with haiku, sonnet and opus as candidates and pass the returned model to
+  the `Agent` call.
+- **One pick from a configured pool**, such as the arena cross-judge. Send
+  only the pool's models as candidates.
+
+Skip Jev when the config already fixes the choice, when the user named the
+tool or model, or when the choice is trivial. If the API fails, decide
+yourself and tell the user that Jev was unavailable.
 
 ## The failure mode this file exists to prevent
 
