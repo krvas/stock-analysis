@@ -61,6 +61,29 @@ launch. The server keeps the Python it imported, so after any edit under
 `src/` it FAILs until you restart (cleanup, then launch). Any `FAIL` means
 stop and fix before driving. Never drive a server this run did not start.
 
+## Expected values
+
+Never hardcode a number or a row position from a filing; filings refresh.
+Compute what the page should show from the same data, saved choices and
+engine the server uses:
+
+```bash
+.venv/bin/python .claude/skills/verify/scripts/expected.py "$RUN" AAPL <page> --settings '<drawer JSON>' [--rows id,...] [--js]
+```
+
+`<page>` is `assets-in-use`, `fund-flow`, `balance-sheet-size`, `income`,
+`balance` or `cashflow`. Read `<drawer JSON>` from the open page:
+
+```js
+Object.fromEntries([...document.querySelectorAll('#settings-drawer [name]:not([type=hidden])')].map(e => [e.name, e.value]))
+```
+
+Without `--js` it prints JSON (save it as evidence). With `--js` it prints a
+`javascript_tool` snippet that compares the open page with those values and
+returns `{checked, mismatches, ...}`; a pass is an empty `mismatches`. Use
+`--rows` to keep the snippet small when only a few rows matter. Recipes name
+which rows and options to pass.
+
 ## Drive
 
 Stable handles (from `table_view.js`, `table_wiring.js`, the templates):
@@ -68,10 +91,14 @@ Stable handles (from `table_view.js`, `table_wiring.js`, the templates):
 - Input cell: `td[data-input-slot][data-row-id="<row id>"][data-col-id="<col>"] input`
   (`type=number` or `type=checkbox`).
 - Calculated cell: `td[data-calc-slot][data-row-id="<row id>"][data-col-id="<period>"]`.
+- Static cells carry no row id. Rows paint in the order of the `rows` array
+  in the table's `<script id="<table id>-data">` JSON; the `expected.py`
+  snippet maps rows that way.
 - Row ids are statement row ids such as `us-gaap_PropertyPlantAndEquipmentNet`;
   structural rows use lowercase ids (`total_assets`, `owner_earnings`).
 - Save: the `Save` button inside `form[data-wizard-save]`; result text in
-  `.wizard-save-status` with `data-state="saved"` or `"error"`.
+  `.wizard-save-status` with `data-state="saving"`, then `"saved"` or
+  `"error"`. A save takes a few seconds; poll until it leaves `saving`.
 - Settings drawer: button with accessible name `Settings`; fields
   `#setting-<id>` (`period`, `num_periods`, `view`, `basis`, ...); the
   `Apply` button submits. Greyed fields are `disabled` with a reason in
@@ -80,11 +107,21 @@ Stable handles (from `table_view.js`, `table_wiring.js`, the templates):
 
 Use real user actions for anything you are proving: `find` / `read_page` to
 get a `ref`, then `computer` `left_click` / `triple_click` + `type` + `Tab`.
+The one exception is a native `<select>` (settings drawer): the pane does not
+drive its popup by click or keys, so set it with `form_input`, then click
+`Apply` for real.
+
 Table inputs have no accessible name and `find` does not match `data-*`
-attributes, so get refs with `find 'type="number"'` or `find checkbox`
-(document order; the first number match may be the drawer's `Number of
-periods`), act on the ref, then confirm through the `data-row-id` selector
-that the intended row changed.
+attributes. Refs number elements in document order, so to reach a row's
+input: `find "<row label>"` gives the label's ref, and the row's input is the
+first ref after it in `find textbox` (number inputs) or `find checkbox`. Pick
+rows whose label is unique on the page (`expected.py` names such targets).
+After acting, read every input by row and column and confirm the intended
+row changed and no other did:
+
+```js
+Object.fromEntries([...document.querySelectorAll('td[data-input-slot] input')].map(i => [i.closest('td').dataset.rowId + '/' + i.closest('td').dataset.colId, i.type === 'checkbox' ? i.checked : i.value]))
+```
 
 Settings cookies are per host, not per port: a previous run on
 `127.0.0.1` leaves its settings in the pane. Open the drawer and check the
@@ -99,8 +136,8 @@ Feature recipes: [features/README.md](features/README.md).
 
 Write proof into `$RUN/evidence/` (create it):
 
-- Before/after values read from the page with `javascript_tool`, saved as
-  JSON with the action that produced them (e.g. `ppe-50.json`).
+- `expected.py` output for each check, and the snippet's result, with the
+  action that produced the page state (e.g. `aiu-live-gross.expected.json`).
 - Server side effects: `.venv/bin/python .claude/skills/verify/scripts/prefs.py "$RUN" AAPL > "$RUN/evidence/prefs.json"`.
 - A screenshot of the final state, viewed by you (the browser tool returns
   it inline; describe what it shows in your report).
