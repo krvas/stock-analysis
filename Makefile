@@ -1,4 +1,4 @@
-.PHONY: test fix triage
+.PHONY: test fix jev
 
 # Lint, format check, unit tests. Run before every commit.
 test:
@@ -12,6 +12,7 @@ fix:
 	.venv/bin/ruff check --fix .
 	.venv/bin/ruff format .
 
-# Score review findings with Jev: make triage FINDINGS=<scratch>/findings-1.json
-triage:
-	PYTHONPATH=. .venv/bin/python scripts/triage_findings.py $(FINDINGS)
+# Ask Jev for one pstack decision: make jev KIND=<kind> INPUT=<path.json>
+# Kinds and their input formats: scripts/jev_decide.py --help
+jev:
+	PYTHONPATH=. .venv/bin/python scripts/jev_decide.py $(KIND) $(INPUT)

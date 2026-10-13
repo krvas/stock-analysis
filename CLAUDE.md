@@ -12,31 +12,17 @@ Don't commit code that fails it. `make fix` applies ruff's fixes and formatting.
 
 ## Workflow
 
-Non-trivial changes go through these phases (skip 2–4 for docs-only or
-<20-line single-file edits). `<scratch>` is the session scratchpad; nothing in
-it is committed.
+pstack (`/pstack:poteto-mode`) owns the process for non-trivial work:
+playbooks, delegation, review and commits. Where this file and pstack differ
+on process, follow pstack. The rules below about where code belongs still
+apply inside every pstack step.
 
-1. **Implement.** Worker subagents on disjoint files (sequential if they
-   overlap). Workers never commit. Each ends with `make fix test` and writes
-   `<scratch>/intent-<worker>.md`: what changed, why, and an "Intentionally
-   unused / forward-looking" list (reason + spec section).
-2. **Review.** One `bloat-reviewer` agent (read-only; bloat, redundancy and
-   function placement only). It writes `<scratch>/review-1.md` and
-   `findings-1.json`.
-3. **Triage.** `make triage FINDINGS=<scratch>/findings-1.json`. Jev scores
-   each finding; `execute` means score ≥ 0.85 and not `needs_user_decision`,
-   otherwise `human`. If 0.15 ≥ score, then drop the suggestion. 
-   If the API fails, everything is `human`; tell the user.
+## Jev for cheap decisions
 
-4. **Fix.** Fix subagents (disjoint files, no commits) apply `execute`
-   findings, then `make fix test`.
-5. **Human review, then commit.** Show the user the `human` findings (quote,
-   score, intent note) and a summary of what was applied; apply what they
-   approve. Only the orchestrator commits: atomic commits (one logical change
-   plus its tests, in dependency order), `make test` before each, explicit
-   paths (never `git add -A`), unrelated untracked files left alone, no push.
-
-One review round only.
+A few pstack decisions (review findings, PR review comments, delegate effort
+and model tier, arena pre-filter) can go to Jev instead of your own
+reasoning. When one comes up, follow the `jev` skill
+(`.claude/skills/jev/SKILL.md`).
 
 ## The failure mode this file exists to prevent
 
@@ -46,9 +32,9 @@ directly into `src/static/js/line_item_tables.js` — a file `specs/STATE.md`
 already documented as required to "stay generic across all wizard subpages
 and statement views." The rule existed in writing. It got violated anyway,
 because nothing forced a pause at the moment of writing that dict. The
-checklist below is the pause. Wizard hydration now lives in
-`src/static/js/components/table_wiring.js`; the same "no subpage-specific
-logic" rule applies there.
+checklist below is the pause. Table hydration for wizard sub-pages and
+statement pages now lives in `src/static/js/components/table_wiring.js`; the
+same "no subpage-specific logic" rule applies there.
 
 ## Before adding code to a shared/generic file
 
@@ -57,7 +43,12 @@ Shared files: `src/static/js/components/table_model.js`,
 `src/static/js/components/table_view.js`,
 `src/static/js/components/generic_input.js`,
 `src/static/js/components/table_wiring.js`, `src/models/table.py`,
-`src/web/wizard_registry.py`, `src/web/routes/wizard.py`.
+`src/web/wizard_registry.py`, `src/web/routes/wizard.py`,
+`src/web/settings.py`, `src/web/routes/settings.py`,
+`src/web/statements_registry.py`, `src/templates/shared/_page_nav.html`,
+`src/templates/shared/_settings_drawer.html`,
+`src/templates/shared/_adjustments_note.html`,
+`src/static/js/settings_drawer.js`.
 
 Before adding a line to one of these, ask: **would this exact line make sense
 unchanged for a different subpage, a different statement view, or a table
