@@ -373,13 +373,25 @@ def test_opex_hangs_the_equity_offset_under_partners_capital() -> None:
     _restates_every_period(run, base, CFO, PARTNERS)
 
 
-def _without_edges(ss: StatementSet, statement: str, keep) -> StatementSet:
-    """``ss`` with P2's calc edges on ``statement`` cut down to ``keep(edges)``."""
+def _with_p2_edges(ss: StatementSet, statement: str, edit) -> StatementSet:
+    """``ss`` with P2's calc edges on ``statement`` replaced by ``edit(edges)``."""
     st = ss.get(statement)
     edges = st.calc_edges
-    cut = edges[(edges["period"] != P2) | keep(edges)]
+    p2 = edges["period"] == P2
+    edited = pd.concat([edges[~p2], edit(edges[p2])], ignore_index=True)
     return dataclasses.replace(
-        ss, **{statement: Statement(st.frame, st.statement_type, cut)}
+        ss, **{statement: Statement(st.frame, st.statement_type, edited)}
+    )
+
+
+def _edge(concept: str, parent: str) -> pd.DataFrame:
+    return pd.DataFrame(
+        {
+            "period": [P2],
+            "concept": [concept],
+            "parent_concept": [parent],
+            "weight": [1.0],
+        }
     )
 
 
@@ -412,7 +424,7 @@ def _without_edges(ss: StatementSet, statement: str, keep) -> StatementSet:
 def test_opex_leaves_a_period_with_no_parent_as_reported(
     statement: str, keep, reason: str
 ) -> None:
-    base = _without_edges(filing(), statement, keep)
+    base = _with_p2_edges(filing(), statement, lambda e: e[keep(e)])
     run = apply_adjustments(base, [OPEX_SPEC])
     assert run.applied == (OPEX_SPEC,)
     assert [s.reason for s in run.skipped] == [
@@ -432,28 +444,6 @@ def test_opex_leaves_a_period_with_no_parent_as_reported(
     spend = {P1: 90.0, P2: 0.0, P3: 30.0}
     assert delta(adjusted, base, "cashflow", CFO) == spend
     assert delta(adjusted, base, "cashflow", CASH_CHANGE) == _values(0, 0, 0)
-
-
-def _with_p2_edges(ss: StatementSet, statement: str, edit) -> StatementSet:
-    """``ss`` with P2's calc edges on ``statement`` replaced by ``edit(edges)``."""
-    st = ss.get(statement)
-    edges = st.calc_edges
-    p2 = edges["period"] == P2
-    edited = pd.concat([edges[~p2], edit(edges[p2])], ignore_index=True)
-    return dataclasses.replace(
-        ss, **{statement: Statement(st.frame, st.statement_type, edited)}
-    )
-
-
-def _edge(concept: str, parent: str, weight: float = 1.0) -> pd.DataFrame:
-    return pd.DataFrame(
-        {
-            "period": [P2],
-            "concept": [concept],
-            "parent_concept": [parent],
-            "weight": [weight],
-        }
-    )
 
 
 def test_opex_leaves_a_period_that_adds_net_income_twice_as_reported() -> None:

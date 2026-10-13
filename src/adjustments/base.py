@@ -29,9 +29,9 @@ class NewRow:
 
     ``parent_concept`` / ``weight`` (each one value, or one per period) wire
     the row into the calc tree of every period whose tree contains
-    ``parent_concept``; with no parent the row is a
-    memo row (shown, never summed); tag it :data:`MEMO_TAG` so views that
-    compare reported lines (Fund Flow) can leave it out. ``values`` are
+    ``parent_concept``; with no parent the row is a memo row (shown, never
+    summed); tag it :data:`MEMO_TAG` so views that compare reported lines
+    (Fund Flow) can leave it out. ``values`` are
     raw-sign period values.
     """
 
