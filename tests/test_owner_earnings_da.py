@@ -22,6 +22,7 @@ from tests.statement_fixtures import P1, P2, P3, _row, make_statement
 PRETAX = "us-gaap_IncomeLossFromContinuingOperationsBeforeIncomeTaxes"
 DA = "us-gaap_DepreciationDepletionAndAmortization"
 OLD_DA = "us-gaap_DepreciationAmortizationAndAccretionNet"
+FULL_BREAKDOWN, NO_BREAKDOWN, OLD_LINE_PARTIAL = P1, P2, P3
 
 
 def _component(member: str, **values: float) -> dict:
@@ -39,28 +40,41 @@ def _component(member: str, **values: float) -> dict:
 
 
 def aapl_shape() -> StatementSet:
-    """P1 complete breakdown; P2 no breakdown (AAPL FY2018); P3 the older line
-    concept with a partial breakdown (AAPL FY2013-17)."""
     income = pd.DataFrame(
         [
             _row(
                 PRETAX,
                 "Pretax income",
                 standard_concept="PretaxIncomeLoss",
-                **{P1: 100.0, P2: 80.0, P3: 60.0},
+                **{FULL_BREAKDOWN: 100.0, NO_BREAKDOWN: 80.0, OLD_LINE_PARTIAL: 60.0},
             )
         ]
     )
     da = {"standard_concept": "DepreciationExpense", "parent_concept": CFO}
     cashflow = pd.DataFrame(
         [
-            _row(DA, "Depreciation and amortization", **da, **{P1: 30.0, P2: 25.0}),
-            _component("us-gaap_Depreciation", **{P1: 20.0}),
-            _component("us-gaap_AmortizationOfIntangibleAssets", **{P1: 10.0, P3: 4.0}),
             _row(
-                OLD_DA, "Depreciation, amortization and accretion", **da, **{P3: 18.0}
+                DA,
+                "Depreciation and amortization",
+                **da,
+                **{FULL_BREAKDOWN: 30.0, NO_BREAKDOWN: 25.0},
             ),
-            _row(CFO, "Cash from operations", **{P1: 130.0, P2: 105.0, P3: 78.0}),
+            _component("us-gaap_Depreciation", **{FULL_BREAKDOWN: 20.0}),
+            _component(
+                "us-gaap_AmortizationOfIntangibleAssets",
+                **{FULL_BREAKDOWN: 10.0, OLD_LINE_PARTIAL: 4.0},
+            ),
+            _row(
+                OLD_DA,
+                "Depreciation, amortization and accretion",
+                **da,
+                **{OLD_LINE_PARTIAL: 18.0},
+            ),
+            _row(
+                CFO,
+                "Cash from operations",
+                **{FULL_BREAKDOWN: 130.0, NO_BREAKDOWN: 105.0, OLD_LINE_PARTIAL: 78.0},
+            ),
         ]
     )
     return StatementSet(
@@ -173,10 +187,10 @@ def test_components_pass_through_when_there_is_no_line() -> None:
         (("line", 10.0), {}, {"line": 10.0}),
     ],
 )
-def test_resolve_period(
+def test_parts_or_line(
     line: tuple[str, float] | None, parts: dict[str, float], expected: dict
 ) -> None:
-    assert oe._resolve_period(line, parts) == expected
+    assert oe._parts_or_line(line, parts) == expected
 
 
 @pytest.fixture

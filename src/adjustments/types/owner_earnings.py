@@ -102,10 +102,9 @@ def _da_lines(cashflow: Statement) -> pd.DataFrame:
     )
 
 
-def _resolve_period(
+def _parts_or_line(
     line: tuple[str, float] | None, parts: dict[str, float]
 ) -> dict[str, float]:
-    """One period's D&A by slot id; sums to the line whenever there is one."""
     if line is None:
         return parts
     line_id, total = line
@@ -126,15 +125,15 @@ def da_items(cashflow: Statement) -> pd.DataFrame:
     axis = frame.get("dimension_axis", pd.Series(None, index=frame.index))
     parts = frame[axis.eq(DA_COMPONENT_AXIS)]
     lines = _da_lines(cashflow)
-    slots = parts[["row_id", "label"]]
-    if not lines.empty:
-        slots = pd.concat([slots, lines[["row_id", "label"]].head(1)])
-    slots = slots.reset_index(drop=True)
-    line_id = lines["row_id"].iloc[0] if not lines.empty else None
+    slots = pd.concat(
+        [parts[["row_id", "label"]], lines[["row_id", "label"]].head(1)],
+        ignore_index=True,
+    )
+    line_id = lines["row_id"].iloc[0] if len(lines) else None
     for period in cashflow.periods:
         line = pd.to_numeric(lines[period], errors="coerce").dropna()
         reported = pd.to_numeric(parts[period], errors="coerce")
-        values = _resolve_period(
+        values = _parts_or_line(
             (line_id, float(line.iloc[0])) if len(line) else None,
             {
                 str(r): float(v)

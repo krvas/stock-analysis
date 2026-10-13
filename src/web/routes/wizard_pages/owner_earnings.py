@@ -3,10 +3,9 @@
 Two tables, both on the stage *before* owner earnings (after opex → capex):
 
 - ΔNWC build-up: the cash-flow working-capital change rows (CFO sign).
-- Owner earnings: pretax income, one row per D&A item (note-reported
-  components and capitalized-opex amortization), ΔNWC — each D&A item and
-  ΔNWC with its own maintenance-% input — and an Owner Earnings row of
-  calculated cells.
+- Owner earnings: pretax income, one row per D&A item, ΔNWC — each D&A
+  item and ΔNWC with its own maintenance-% input — and an Owner Earnings row
+  of calculated cells.
 """
 
 from __future__ import annotations
