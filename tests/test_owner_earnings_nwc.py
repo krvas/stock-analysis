@@ -10,6 +10,8 @@ from tests.statement_fixtures import P1, P2, P3, _row, make_statement
 
 CASH_CHANGE = "us-gaap_CashAndCashEquivalentsPeriodIncreaseDecrease"
 RESTRICTED_CASH = "us-gaap_IncreaseDecreaseInRestrictedCash"
+OTHER_ASSETS = "ext_IncreaseDecreaseInOtherAssets"
+PREPAID = "us-gaap_IncreaseDecreaseInPrepaidExpensesOther"
 EXPECTED = {
     INVENTORIES: {P1: -4.0, P2: 2.0, P3: -1.0},
     PAYABLES: {P1: 3.0, P2: 1.0, P3: 0.0},
@@ -53,3 +55,16 @@ def test_period_without_a_calc_tree_takes_the_nearest_periods_weights() -> None:
     frame = _cashflow()
     edges = make_statement(frame, "cashflow").calc_edges
     assert _nwc(frame, edges[edges["period"] != P2]) == EXPECTED
+
+
+def test_row_with_no_calc_edge_takes_its_sign_from_its_balance_type() -> None:
+    frame = _cashflow()
+    unplaced = {"parent_abstract_concept": NWC_ABSTRACT, "parent_concept": None}
+    signed = _row(OTHER_ASSETS, "Other assets", balance="credit", **unplaced)
+    unsigned = _row(PREPAID, "Prepaid expenses", balance=None, **unplaced)
+    extra = [
+        signed | {"row_id": OTHER_ASSETS, P1: 5.0, P2: 6.0, P3: 7.0},
+        unsigned | {"row_id": PREPAID, P1: 1.0, P2: 1.0, P3: 1.0},
+    ]
+    frame = pd.concat([frame, pd.DataFrame(extra)], ignore_index=True)
+    assert _nwc(frame) == EXPECTED | {OTHER_ASSETS: {P1: -5.0, P2: -6.0, P3: -7.0}}

@@ -63,7 +63,23 @@ def _cfo_weights(cashflow: Statement) -> dict[str, dict[str, float]]:
             for i, p in enumerate(periods)
         }
         out[concept] = {p: w for p, w in nearest.items() if w is not None}
-    return out
+    return out | _balance_weights(cashflow, exclude=placed.keys())
+
+
+def _balance_weights(cashflow: Statement, exclude) -> dict[str, dict[str, float]]:
+    """XBRL requires a calc weight of +1 between concepts of the same balance
+    type and -1 between opposite ones, which signs a row the calc tree never
+    places. us-gaap rows carry no balance type in the cache and stay unsigned."""
+    frame = cashflow.frame
+    typed = frame[frame["balance"].notna()]
+    cfo = typed.loc[typed["concept"].map(_is_cfo), "balance"]
+    if cfo.empty:
+        return {}
+    typed = typed[~typed["concept"].isin(exclude)]
+    return {
+        concept: dict.fromkeys(cashflow.periods, 1.0 if bal == cfo.iloc[0] else -1.0)
+        for concept, bal in zip(typed["concept"], typed["balance"], strict=True)
+    }
 
 
 def nwc_rows(cashflow: Statement) -> pd.DataFrame:
