@@ -39,9 +39,6 @@ _MAX_UNIT = 1e6
 
 
 def _reporting_unit(values: np.ndarray) -> float:
-    """Largest power of ten, from 1 to :data:`_MAX_UNIT`, dividing every
-    non-zero value: the unit the filing rounded these values to (1e6 for a
-    filing "in millions")."""
     values = values[np.isfinite(values) & (values != 0)]
     unit = 1.0
     while unit < _MAX_UNIT and np.all(np.mod(values, unit * 10) == 0):
@@ -78,7 +75,7 @@ def calc_residuals(statement: Statement) -> pd.DataFrame:
       reported value (the parent and each child with a value) is off by at
       most half of ``p``'s reporting unit, so ``rounding = unit / 2 ·
       (1 + Σ|w|)``. The unit is inferred from the values of ``p``'s calc
-      tree (see :func:`_reporting_unit`); XBRL Calculations 1.1 checks
+      tree; XBRL Calculations 1.1 checks
       totals against the same rounding interval.
 
     Rows are ordered by parent (frame order), then period (frame order).

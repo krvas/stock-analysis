@@ -151,8 +151,6 @@ def test_calc_residuals_empty_without_calc_tree() -> None:
 
 
 def _in_millions_and_thousands() -> pd.DataFrame:
-    # P1 is reported in millions, P2 in thousands; Total is 2 units above
-    # the sum of its four children in both.
     return pd.DataFrame(
         [
             _row("Total", "Total", **{P1: 1_002e6, P2: 1_002e3}),
@@ -170,7 +168,6 @@ def test_calc_residuals_rounding_is_half_a_reporting_unit_per_summed_value() -> 
     ).set_index("period")
 
     assert residuals["residual"].to_dict() == {P1: 2e6, P2: 2e3}
-    # Total and four children, each off by at most half a unit.
     assert residuals["rounding"].to_dict() == {P1: 2.5e6, P2: 2.5e3}
 
 
@@ -184,7 +181,6 @@ def test_calc_residuals_rounding_skips_unreported_children_and_caps_unit() -> No
     )
     residuals = calc_residuals(make_statement(frame, "income"))
 
-    # Total and A, each off by at most half a million; B has no value.
     assert residuals["rounding"].tolist() == [1e6]
 
 

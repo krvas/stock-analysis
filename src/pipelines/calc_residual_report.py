@@ -50,8 +50,7 @@ logger = logging.getLogger(__name__)
 
 
 # Absolute tolerance in reported units: XBRL monetary facts are integers, so
-# anything below one unit is float noise, not a real gap. A residual within
-# its row's ``rounding`` (the filing's reporting precision) is zero as well.
+# anything below one unit is float noise, not a real gap.
 DEFAULT_TOLERANCE = 0.5
 
 _GROUP_KEYS = ["ticker", "period_type", "statement"]
@@ -302,14 +301,13 @@ def summarize_comparison(
 
 
 def _non_zero(residuals: pd.DataFrame, tolerance: float) -> pd.Series:
-    """``|residual|`` above both ``tolerance`` and the row's ``rounding``."""
     limit = residuals["rounding"].clip(lower=tolerance)
     return residuals["residual"].abs() > limit
 
 
 def summarize(residuals: pd.DataFrame, tolerance: float) -> pd.DataFrame:
     """Per ticker × period type × statement: parents checked, parent-periods,
-    share of zero residuals (see :func:`_non_zero`), and the non-zero count."""
+    share with ``|residual| <= max(tolerance, rounding)``, and the non-zero count."""
     if residuals.empty:
         return pd.DataFrame(columns=list(SUMMARY_COLUMNS))
     flagged = residuals.assign(zero=~_non_zero(residuals, tolerance))
@@ -335,7 +333,7 @@ def _flagged(
 
 
 def non_zero_residuals(residuals: pd.DataFrame, tolerance: float) -> pd.DataFrame:
-    """Rows with a non-zero residual (see :func:`_non_zero`), largest
+    """Rows with ``|residual| > max(tolerance, rounding)``, largest
     ``|relative|`` first."""
     mask = None if residuals.empty else _non_zero(residuals, tolerance)
     return _flagged(residuals, mask, list(DETAIL_COLUMNS))

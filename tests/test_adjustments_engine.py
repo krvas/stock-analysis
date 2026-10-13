@@ -23,8 +23,6 @@ from src.api.edgartools.standard_terms import (
 )
 from src.models.statement import bool_flag
 
-# Operating cash totals a filing may report: some filers (GEHC, recent BDX)
-# report only the continuing-operations total.
 OPERATING_CASH_TOTALS = (CFO, f"{CFO}ContinuingOperations")
 CASH_CHANGE = (
     "us-gaap_CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents"

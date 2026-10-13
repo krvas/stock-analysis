@@ -190,7 +190,10 @@ verbatim.
 `reported(parent) − Σ weight·child` on that period's own `calc_edges` (raw
 signs; edge weights; first non-dimensional row per concept). NaN child values
 count 0 (`n_nan_children`); calc children with no non-dimensional row are
-counted in `n_missing_children`.
+counted in `n_missing_children`. `rounding` bounds what rounding each value to
+the period's reporting unit (largest power of ten up to 1e6 dividing the calc
+tree's values) can add: `unit / 2 · (1 + Σ|w|)`. The residual report and data
+test count a residual within it as zero.
 Expected 0 on real filings (data test: AAPL/MU/SNDK all 0); the old diluted
 shares residual is gone (edges come from the statement role only, not the
 EPS-note role).

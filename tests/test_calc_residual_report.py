@@ -121,8 +121,6 @@ def test_non_zero_sorted_by_abs_relative(tmp_path: Path) -> None:
 
 
 def test_non_zero_ignores_residuals_within_reporting_rounding() -> None:
-    # Reported in millions: a 2M gap over four children is rounding, a
-    # 900M gap is not.
     frame = pd.DataFrame(
         {
             "concept": ["Total", "A", "B", "C", "D"],
