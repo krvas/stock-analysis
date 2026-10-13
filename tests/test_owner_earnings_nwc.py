@@ -1,10 +1,3 @@
-"""``owner_earnings.nwc_rows`` on filing shapes seen in real cash flows.
-
-The base fixture's ΔNWC is inventories (raw 4, -2, 1 at weight -1) plus
-payables (raw 3, 1, 0 at weight +1); each test bends one thing a real filer
-does and checks the working-capital rows still come out on the CFO sign.
-"""
-
 from __future__ import annotations
 
 import pandas as pd
@@ -39,8 +32,6 @@ def _cashflow() -> pd.DataFrame:
 
 
 def test_cfo_total_presented_under_the_working_capital_header_is_not_a_row() -> None:
-    """MCD presents CFO itself under "changes in operating assets and
-    liabilities"; it sums into the cash change, not into CFO."""
     frame = _cashflow()
     cfo = frame["concept"].eq(CFO)
     frame.loc[cfo, "parent_abstract_concept"] = NWC_ABSTRACT
@@ -49,8 +40,6 @@ def test_cfo_total_presented_under_the_working_capital_header_is_not_a_row() -> 
 
 
 def test_prefix_fallback_skips_change_rows_outside_operating_activities() -> None:
-    """ET has no working-capital header, and its restricted-cash change sums
-    into investing activities."""
     frame = _cashflow()
     frame["parent_abstract_concept"] = None
     restricted = _row(
@@ -61,8 +50,6 @@ def test_prefix_fallback_skips_change_rows_outside_operating_activities() -> Non
 
 
 def test_period_without_a_calc_tree_takes_the_nearest_periods_weights() -> None:
-    """SBUX FY2018-2021 and O 2012 come from filings whose calc tree has no
-    operating section, so the period has no edge for any change row."""
     frame = _cashflow()
     edges = make_statement(frame, "cashflow").calc_edges
     assert _nwc(frame, edges[edges["period"] != P2]) == EXPECTED

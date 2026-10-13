@@ -40,17 +40,12 @@ def from_prefs(rows: pd.DataFrame) -> AdjustmentSpec:
 
 
 def _is_cfo(concept: str) -> bool:
-    """CFO or a variant of it, e.g. ``...OperatingActivitiesContinuingOperations``."""
     return concept.split("_")[-1].startswith(CFO.split("_")[-1])
 
 
-def _cfo_weights(cashflow: Statement) -> dict[str, dict[str, float | None]]:
-    """Per concept summed into CFO in some period: ``{period: weight}``.
-
-    None where that period's calc tree sums the concept into something else.
-    A period whose tree lacks the concept takes the nearest period's CFO
-    weight: some filings carry no operating calc tree at all.
-    """
+def _cfo_weights(cashflow: Statement) -> dict[str, dict[str, float]]:
+    """Some filings carry no operating calc tree at all, so a period whose
+    tree lacks the concept takes the nearest period's CFO weight."""
     periods = cashflow.periods
     placed: dict[str, dict[str, float | None]] = {}
     for edge in cashflow.calc_edges.itertuples(index=False):
@@ -61,12 +56,13 @@ def _cfo_weights(cashflow: Statement) -> dict[str, dict[str, float | None]]:
         known = [i for i, p in enumerate(periods) if by_period.get(p) is not None]
         if not known:
             continue
-        out[concept] = {
-            p: by_period[p]
-            if p in by_period
-            else by_period[periods[min(known, key=lambda k: abs(k - i))]]
+        nearest = {
+            p: by_period.get(
+                p, by_period[periods[min(known, key=lambda k: abs(k - i))]]
+            )
             for i, p in enumerate(periods)
         }
+        out[concept] = {p: w for p, w in nearest.items() if w is not None}
     return out
 
 
@@ -88,8 +84,8 @@ def nwc_rows(cashflow: Statement) -> pd.DataFrame:
     out = rows[["row_id", "label"]].copy()
     for period in cashflow.periods:
         raw = pd.to_numeric(rows[period], errors="coerce")
-        weight = rows["concept"].map(lambda c: weights[c][period]).astype(float)
-        out[period] = raw * weight
+        weight = rows["concept"].map({c: w.get(period) for c, w in weights.items()})
+        out[period] = raw * weight.astype(float)
     return out[out[cashflow.periods].notna().any(axis=1)].reset_index(drop=True)
 
 

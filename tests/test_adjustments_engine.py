@@ -215,18 +215,10 @@ def test_da_breakdown_rows_sum_to_da_line(data_ticker: str) -> None:
 
 
 def _working_capital_cash_impact(cashflow) -> pd.Series:
-    """Per period: Σ weight × value over that period's calc children of CFO
-    that the filer presents as working capital, i.e. under the "changes in
-    operating assets and liabilities" header, or named ``IncreaseDecreaseIn*``
-    when the filing has no such header. NaN for a period whose calc tree sums
-    nothing into CFO: there is nothing to check that period against.
-
-    Reads weights from the calc tree directly, as a check on ``oe.nwc_rows``,
-    which starts from the presented rows. A name test alone is wrong both
-    ways: COST, WMT and BDX present deferred-tax, pension and "other, net"
-    changes among the non-cash adjustments, and MU and SBUX put rows not
-    named ``IncreaseDecrease*`` under the header.
-    """
+    """NaN for a period with no operating calc tree. Picks rows by the filer's
+    working-capital header, not by the ``IncreaseDecrease*`` name: filers
+    present deferred-tax and pension changes outside the header, and rows
+    with other names under it."""
     frame = cashflow.frame
     rows = frame[~bool_flag(frame, "dimension")]
     under_header = rows["parent_abstract_concept"].eq(NWC_ABSTRACT)
@@ -291,9 +283,8 @@ def test_owner_earnings_memo_rows_hold_every_period(data_ticker: str) -> None:
     assert list(earnings[periods].dropna().index) == with_pretax
     for p in with_pretax:
         assert capex[p] == pytest.approx(0.5 * da[p]), (data_ticker, p)
-        if pd.isna(nwc[p]):
-            nwc[p] = 2 * working[p]
-        assert working[p] == pytest.approx(0.5 * nwc[p]), (data_ticker, p)
+        if pd.notna(nwc[p]):
+            assert working[p] == pytest.approx(0.5 * nwc[p]), (data_ticker, p)
         assert earnings[p] == pytest.approx(
-            pretax[p] + da[p] + nwc[p] - capex[p] - working[p]
+            pretax[p] + da[p] + 2 * working[p] - capex[p] - working[p]
         ), (data_ticker, p)
