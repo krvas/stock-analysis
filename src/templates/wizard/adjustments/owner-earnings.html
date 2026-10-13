@@ -20,7 +20,7 @@
 {{ table_macro.table('nwc-table', nwc_table) }}
 
 <h2 class="wizard-table-title">Owner earnings</h2>
-<p class="wizard-table-note">Enter the share of D&amp;A and ΔNWC that only maintains the business. Owner earnings update as you type.</p>
+<p class="wizard-table-note">Enter the share of D&amp;A and ΔNWC that only maintains the business. Each % applies only to the years its row has a value; years without a note breakdown show D&amp;A as one line. Owner earnings update as you type.</p>
 {% call form_macro.form(post_url, form_id='owner-earnings-form', wizard_save='owner-earnings', data_table_id='oe-table') %}
 {{ table_macro.table('oe-table', oe_table) }}
 {% endcall %}

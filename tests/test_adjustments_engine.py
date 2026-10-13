@@ -210,21 +210,18 @@ def test_da_breakdown_rows_sum_to_da_line(data_ticker: str) -> None:
         values = pd.to_numeric(parts[period], errors="coerce")
         if values.notna().any() and pd.notna(line[period]):
             assert values.sum() == pytest.approx(line[period]), (data_ticker, period)
+    da = _cfo_depreciation(cashflow)
+    items = oe.da_items(cashflow)
+    for period in da.dropna().index:
+        assert items[period].sum() == pytest.approx(da[period]), (data_ticker, period)
 
 
-def _working_capital_cash_impact(cashflow) -> pd.Series:
-    """Per period: Σ weight × value over that period's calc children of CFO
-    whose concept is a working-capital change (``IncreaseDecrease*``).
-
-    Reads the calc tree directly, as a check on ``oe.nwc_rows``, which picks
-    rows by presentation header and looks weights up by concept.
-    """
+def _cfo_children(cashflow, prefix: str) -> pd.Series:
     edges = cashflow.calc_edges
     local = edges["concept"].str.split("_").str[-1]
     parent = edges["parent_concept"].fillna("").str.split("_").str[-1]
     edges = edges[
-        local.str.startswith("IncreaseDecrease")
-        & parent.str.startswith(CFO.split("_")[-1])
+        local.str.startswith(prefix) & parent.str.startswith(CFO.split("_")[-1])
     ]
     frame = cashflow.frame
     values = frame[~bool_flag(frame, "dimension")].drop_duplicates("concept")
@@ -235,21 +232,24 @@ def _working_capital_cash_impact(cashflow) -> pd.Series:
         raw = pd.to_numeric(
             values[period].reindex(children["concept"]), errors="coerce"
         )
-        out[period] = (raw.to_numpy() * children["weight"].astype(float)).sum()
+        out[period] = (
+            (raw.to_numpy() * children["weight"].astype(float)).sum()
+            if len(children)
+            else np.nan
+        )
     return pd.Series(out)
+
+
+def _working_capital_cash_impact(cashflow) -> pd.Series:
+    return _cfo_children(cashflow, "IncreaseDecrease").fillna(0)
+
+
+def _cfo_depreciation(cashflow) -> pd.Series:
+    return _cfo_children(cashflow, "Depreciation")
 
 
 @pytest.mark.data
 def test_owner_earnings_memo_rows_hold_every_period(data_ticker: str) -> None:
-    """Every period's memo rows match the formula on independently read inputs.
-
-    Pretax income comes from the income statement and ΔNWC from the calc
-    tree (:func:`_working_capital_cash_impact`), not from owner-earnings
-    code. D&A comes from ``oe.da_items``, the same selection ``apply`` uses,
-    so this test checks only the D&A arithmetic; D&A row selection is covered
-    by ``tests/test_owner_earnings_adjustment.py`` and the tracked bug that
-    D&A components are used in every period with no per-period fallback.
-    """
     base = load_statement_set(data_ticker, "annual")
     income = base.income.frame
     pretax_rows = income[
@@ -266,7 +266,7 @@ def test_owner_earnings_memo_rows_hold_every_period(data_ticker: str) -> None:
 
     periods = base.cashflow.periods
     pretax = pd.to_numeric(pretax_rows.iloc[0].reindex(periods), errors="coerce")
-    da = items[periods].fillna(0).sum()
+    da = _cfo_depreciation(base.cashflow).fillna(items[periods].fillna(0).sum())
     nwc = _working_capital_cash_impact(base.cashflow)
     with_pretax = [p for p in periods if pd.notna(pretax[p])]
     assert with_pretax, (data_ticker, "no period with pretax income")
