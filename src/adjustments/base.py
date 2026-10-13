@@ -27,10 +27,11 @@ MEMO_TAG = "memo"
 class NewRow:
     """A row an adjustment inserts into one statement.
 
-    ``parent_concept`` / ``weight`` wire the row into the calc tree of every
-    period whose tree contains ``parent_concept``; with no parent the row is a
-    memo row (shown, never summed); tag it :data:`MEMO_TAG` so views that
-    compare reported lines (Fund Flow) can leave it out. ``values`` are
+    ``parent_concept`` / ``weight`` (each one value, or one per period) wire
+    the row into the calc tree of every period whose tree contains
+    ``parent_concept``; with no parent the row is a memo row (shown, never
+    summed); tag it :data:`MEMO_TAG` so views that compare reported lines
+    (Fund Flow) can leave it out. ``values`` are
     raw-sign period values.
     """
 
@@ -39,7 +40,7 @@ class NewRow:
     label: str
     values: Mapping[str, float]
     parent_concept: Mapping[str, str] | str | None = None
-    weight: float = 1.0
+    weight: Mapping[str, float] | float = 1.0
     tags: tuple[str, ...] = ()
     after: str | None = None
     is_total: bool = False

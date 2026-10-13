@@ -15,7 +15,9 @@ from src.api.edgartools.source import load_statement_set
 from src.api.edgartools.standard_terms import (
     ASSET_PARENTS,
     CFI,
+    CFI_PARENTS,
     CFO,
+    CFO_PARENTS,
     DA_COMPONENT_AXIS,
     EQUITY_PARENTS,
     PRETAX_INCOME,
@@ -117,13 +119,18 @@ def test_capitalized_opex_moves_every_period_by_its_schedule(data_ticker: str) -
     life = 5
     spec = AdjustmentSpec("opex_to_capex", {"rows": {row["row_id"]: life}})
     run = apply_adjustments(base, [spec])
-    assert run.applied == (spec,) and run.skipped == (), data_ticker
+    assert run.applied == (spec,), data_ticker
     adjusted = run.statements
 
-    spend = {
+    reported = {
         p: float(row[p]) for p in base.income.periods if pd.notna(pd.to_numeric(row[p]))
     }
+    after_row = _row_values(adjusted, "income", row["concept"])
+    restated = {p for p in reported if after_row[p] == 0}
+    assert bool(run.skipped) == (restated != set(reported)), (data_ticker, run.skipped)
+    spend = {p: v if p in restated else 0.0 for p, v in reported.items()}
     _, net = schedule(spend, life)
+    net = {p: v if p in restated else 0.0 for p, v in net.items()}
     balance_concepts = set(base.balance.frame["concept"])
     equity = next(c for c in EQUITY_PARENTS if c in balance_concepts)
     expected = {
@@ -155,8 +162,8 @@ def test_capitalized_opex_moves_every_period_by_its_schedule(data_ticker: str) -
         ("income", f"adj_Amortization{local}"): expense_parent,
         ("balance", f"adj_Capitalized{local}"): set(ASSET_PARENTS),
         ("balance", f"adj_EquityCapitalized{local}"): set(EQUITY_PARENTS),
-        ("cashflow", f"adj_Amortization{local}"): {CFO},
-        ("cashflow", f"adj_Capitalized{local}"): {CFI},
+        ("cashflow", f"adj_Amortization{local}"): set(CFO_PARENTS),
+        ("cashflow", f"adj_Capitalized{local}"): set(CFI_PARENTS),
     }
     for (st, concept), parents in inserted.items():
         statement = adjusted.get(st)
@@ -164,7 +171,7 @@ def test_capitalized_opex_moves_every_period_by_its_schedule(data_ticker: str) -
         reported = [_row_values(base, st, parent) for parent in parents]
         expected_periods = {
             p
-            for p in spend
+            for p in restated
             if any(v is not None and pd.notna(v.get(p)) for v in reported)
         }
         assert expected_periods, (data_ticker, concept, "no period with a parent")

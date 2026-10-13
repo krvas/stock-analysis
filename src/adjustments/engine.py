@@ -171,13 +171,16 @@ def _insert_row(statement: Statement, new_row: NewRow, origin: str) -> Statement
             )
             if not in_tree.any():
                 continue
+            weight = new_row.weight
+            if isinstance(weight, dict):
+                weight = weight.get(period, 1.0)
             edges.append(
                 pd.DataFrame(
                     {
                         "period": [period],
                         "concept": [new_row.concept],
                         "parent_concept": [parent],
-                        "weight": [float(new_row.weight)],
+                        "weight": [float(weight)],
                     }
                 )
             )

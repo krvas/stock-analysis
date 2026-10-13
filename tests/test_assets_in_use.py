@@ -10,6 +10,7 @@ from src.adjustments.types.assets_in_use import GROSS_CONCEPT, NET_CONCEPT, TYPE
 from src.api.edgartools.source import load_statement_set
 from src.models.statement import Statement, StatementSet
 from src.web.routes.wizard_pages.business_understanding import fund_flow_table
+from tests import test_adjustment_pipeline as pipeline
 from tests.statement_fixtures import P1, P2, P3, _income_frame, _row, make_statement
 
 A = "us-gaap_Assets"
@@ -105,11 +106,15 @@ def test_netting_reduces_net_only_by_ticked_liabilities() -> None:
 
 
 def test_capitalized_opex_asset_counts_as_an_asset_leaf() -> None:
-    opex = AdjustmentSpec(
-        "opex_to_capex", {"rows": {"ResearchAndDevelopmentExpense": 2}}
-    )
-    assert _memo(_run({}, opex), GROSS_CONCEPT)[P1] == 180.0
-    assert _memo(_run({CAPITALIZED_RND: 0.0}, opex), GROSS_CONCEPT)[P1] == 175.0
+    def gross(params: dict) -> dict[str, float]:
+        specs = [pipeline.OPEX_SPEC, AdjustmentSpec(TYPE_ID, params)]
+        run = apply_adjustments(pipeline.filing(), specs)
+        return pipeline.value(run.statements, "balance", GROSS_CONCEPT)
+
+    reported = pipeline.value(pipeline.filing(), "balance", pipeline.ASSETS)
+    with_opex = {p: v + pipeline.NET[p] for p, v in reported.items()}
+    assert gross({}) == with_opex
+    assert gross({CAPITALIZED_RND: 0.0}) == reported
 
 
 def test_memo_rows_follow_total_assets_and_leave_reported_rows_alone() -> None:

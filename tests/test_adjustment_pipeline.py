@@ -6,6 +6,7 @@ amortization 10, 30, 60 and net capitalized asset 20, 50, 80.
 
 from __future__ import annotations
 
+import dataclasses
 import re
 from types import SimpleNamespace
 
@@ -19,7 +20,7 @@ from src.adjustments.registry import ADJUSTMENT_ORDER
 from src.adjustments.specs import describe
 from src.adjustments.types import assets_in_use, owner_earnings
 from src.models.balance_leaves import balance_leaves
-from src.models.statement import STATEMENT_TYPES, StatementSet
+from src.models.statement import STATEMENT_TYPES, Statement, StatementSet
 from src.web.templating import templates
 from tests.statement_fixtures import P1, P2, P3, _row, make_statement
 
@@ -141,11 +142,13 @@ def _statement(rows: list, statement_type: str):
     return make_statement(frame, statement_type)
 
 
-def filing(income: list = INCOME, balance: list = BALANCE) -> StatementSet:
+def filing(
+    income: list = INCOME, balance: list = BALANCE, cashflow: list = CASHFLOW
+) -> StatementSet:
     return StatementSet(
         income=_statement(income, "income"),
         balance=_statement(balance, "balance"),
-        cashflow=_statement(CASHFLOW, "cashflow"),
+        cashflow=_statement(cashflow, "cashflow"),
     )
 
 
@@ -314,3 +317,167 @@ def test_note_names_a_missing_lookup_in_a_sentence() -> None:
         "Adjusted basis (no adjustments applied)",
         "Not applied: Owner earnings: could not find nwc in these statements",
     ]
+
+
+CONTINUING = "us-gaap_IncomeLossFromContinuingOperations"
+CFO_CONTINUING = f"{CFO}ContinuingOperations"
+PARTNERS = "us-gaap_PartnersCapitalIncludingPortionAttributableToNoncontrollingInterest"
+PROFIT = "us-gaap_ProfitLoss"
+OPEX = "us-gaap_OperatingExpenses"
+
+
+def _renamed(rows: list, old: str, new: str) -> list:
+    return [
+        (new if c == old else c, label, std, new if p == old else p, weight, values)
+        for c, label, std, p, weight, values in rows
+    ]
+
+
+def _with_parent(rows: list, child: str, concept: str) -> list:
+    """``rows`` with ``concept`` inserted between ``child`` and its parent."""
+    out = []
+    for c, label, std, p, weight, values in rows:
+        if c == child:
+            out.append((c, label, std, concept, weight, values))
+            out.append((concept, concept, None, p, 1.0, values))
+        else:
+            out.append((c, label, std, p, weight, values))
+    return out
+
+
+def _restates_every_period(run, base: StatementSet, cfo: str, equity: str) -> None:
+    assert run.applied == (OPEX_SPEC,) and run.skipped == ()
+    adjusted = run.statements
+    assert delta(adjusted, base, "balance", ASSETS) == NET
+    assert delta(adjusted, base, "balance", equity) == NET
+    assert delta(adjusted, base, "balance", LE) == NET
+    assert delta(adjusted, base, "cashflow", cfo) == SPEND
+    assert delta(adjusted, base, "cashflow", CFI) == {p: -v for p, v in SPEND.items()}
+    assert delta(adjusted, base, "cashflow", CASH_CHANGE) == _values(0, 0, 0)
+
+
+def test_opex_hangs_cash_rows_under_continuing_operations_cfo() -> None:
+    income = _with_parent(INCOME, PRETAX, CONTINUING)
+    cashflow = _renamed(_renamed(CASHFLOW, CFO, CFO_CONTINUING), NI, CONTINUING)
+    base = filing(income, cashflow=cashflow)
+    run = apply_adjustments(base, [OPEX_SPEC])
+    _restates_every_period(run, base, CFO_CONTINUING, EQUITY)
+    assert value(run.statements, "cashflow", CONTINUING) == value(
+        run.statements, "income", CONTINUING
+    )
+
+
+def test_opex_hangs_the_equity_offset_under_partners_capital() -> None:
+    base = filing(balance=_renamed(BALANCE, EQUITY, PARTNERS))
+    run = apply_adjustments(base, [OPEX_SPEC])
+    _restates_every_period(run, base, CFO, PARTNERS)
+
+
+def _with_p2_edges(ss: StatementSet, statement: str, edit) -> StatementSet:
+    """``ss`` with P2's calc edges on ``statement`` replaced by ``edit(edges)``."""
+    st = ss.get(statement)
+    edges = st.calc_edges
+    p2 = edges["period"] == P2
+    edited = pd.concat([edges[~p2], edit(edges[p2])], ignore_index=True)
+    return dataclasses.replace(
+        ss, **{statement: Statement(st.frame, st.statement_type, edited)}
+    )
+
+
+def _edge(concept: str, parent: str) -> pd.DataFrame:
+    return pd.DataFrame(
+        {
+            "period": [P2],
+            "concept": [concept],
+            "parent_concept": [parent],
+            "weight": [1.0],
+        }
+    )
+
+
+@pytest.mark.parametrize(
+    ("statement", "keep", "reason"),
+    [
+        (
+            "cashflow",
+            lambda e: e["period"] != P2,
+            "the cash flow statement does not total operating and investing cash",
+        ),
+        (
+            "cashflow",
+            lambda e: e["concept"] != NI,
+            "the cash flow statement does not start from net income",
+        ),
+        (
+            "balance",
+            lambda e: ~e["parent_concept"].isin([ASSETS, NONCURRENT]),
+            "the balance sheet does not total its assets and equity",
+        ),
+        (
+            "balance",
+            lambda e: e["parent_concept"] != EQUITY,
+            "the balance sheet does not total its assets and equity",
+        ),
+    ],
+    ids=["no-cash-flow-tree", "net-income-outside-cfo", "no-asset-total", "no-equity"],
+)
+def test_opex_leaves_a_period_with_no_parent_as_reported(
+    statement: str, keep, reason: str
+) -> None:
+    base = _with_p2_edges(filing(), statement, lambda e: e[keep(e)])
+    run = apply_adjustments(base, [OPEX_SPEC])
+    assert run.applied == (OPEX_SPEC,)
+    assert [s.reason for s in run.skipped] == [
+        f"Research and development left as an expense in {P2}: {reason}"
+    ]
+    adjusted = run.statements
+    for st in STATEMENT_TYPES:
+        before = base.get(st).frame.set_index("row_id")[P2]
+        after = adjusted.get(st).frame.set_index("row_id").loc[before.index, P2]
+        pd.testing.assert_series_equal(after, before, check_dtype=False, obj=st)
+
+    # P2's spend stays expensed, so only P3's and P1's spend is capitalized.
+    assert value(adjusted, "income", RND) == _values(0, 60, 0)
+    net = {P1: 60.0, P2: 0.0, P3: 20.0}
+    assert delta(adjusted, base, "balance", ASSETS) == net
+    assert delta(adjusted, base, "balance", LE) == net
+    spend = {P1: 90.0, P2: 0.0, P3: 30.0}
+    assert delta(adjusted, base, "cashflow", CFO) == spend
+    assert delta(adjusted, base, "cashflow", CASH_CHANGE) == _values(0, 0, 0)
+
+
+def test_opex_leaves_a_period_that_adds_net_income_twice_as_reported() -> None:
+    income = _with_parent(INCOME, PRETAX, PROFIT)
+    cashflow = [*CASHFLOW, (PROFIT, "Profit", None, None, 1.0, _values(160, 160, 170))]
+    base = _with_p2_edges(
+        filing(income, cashflow=cashflow),
+        "cashflow",
+        lambda e: pd.concat([e, _edge(PROFIT, CFO)]),
+    )
+    run = apply_adjustments(base, [OPEX_SPEC])
+    reason = "the cash flow statement adds net income in more than once"
+    assert [s.reason for s in run.skipped] == [
+        f"Research and development left as an expense in {P2}: {reason}"
+    ]
+    spend = {P1: 90.0, P2: 0.0, P3: 30.0}
+    assert delta(run.statements, base, "cashflow", CFO) == spend
+    assert delta(run.statements, base, "cashflow", CASH_CHANGE) == _values(0, 0, 0)
+
+
+def test_opex_amortization_takes_the_expense_weight_of_each_period() -> None:
+    """R&D sits under a positive-weight expense subtotal only in P2."""
+    income = [
+        *INCOME[:1],
+        (OPEX, "Operating expenses", None, OI, -1.0, _values(90, 60, 30)),
+        *INCOME[1:],
+    ]
+    base = _with_p2_edges(
+        filing(income),
+        "income",
+        lambda e: pd.concat([e[e["concept"] != RND], _edge(RND, OPEX)]),
+    )
+    run = apply_adjustments(base, [OPEX_SPEC])
+    assert run.skipped == ()
+    spend_less_amort = {P1: 30.0, P2: 30.0, P3: 20.0}
+    assert delta(run.statements, base, "income", NI) == spend_less_amort
+    assert delta(run.statements, base, "cashflow", CFO) == SPEND
