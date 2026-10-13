@@ -18,7 +18,6 @@ from src.api.edgartools.standard_terms import (
     CFO,
     DA_COMPONENT_AXIS,
     EQUITY_PARENTS,
-    PRETAX_INCOME,
 )
 from src.models.statement import bool_flag
 
@@ -243,19 +242,16 @@ def _working_capital_cash_impact(cashflow) -> pd.Series:
 def test_owner_earnings_memo_rows_hold_every_period(data_ticker: str) -> None:
     """Every period's memo rows match the formula on independently read inputs.
 
-    Pretax income comes from the income statement and ΔNWC from the calc
-    tree (:func:`_working_capital_cash_impact`), not from owner-earnings
-    code. D&A comes from ``oe.da_items``, the same selection ``apply`` uses,
-    so this test checks only the D&A arithmetic; D&A row selection is covered
-    by ``tests/test_owner_earnings_adjustment.py`` and the tracked bug that
+    ΔNWC comes from the calc tree (:func:`_working_capital_cash_impact`), not
+    from owner-earnings code. Pretax income and D&A come from
+    ``oe.pretax_income`` and ``oe.da_items``, the selections ``apply`` uses,
+    so this test checks only their arithmetic; their row selection is covered
+    by the fixture tests in ``tests/test_adjustment_pipeline.py`` and
+    ``tests/test_owner_earnings_adjustment.py``, and the tracked bug that
     D&A components are used in every period with no per-period fallback.
     """
     base = load_statement_set(data_ticker, "annual")
-    income = base.income.frame
-    pretax_rows = income[
-        income["standard_concept"].eq(PRETAX_INCOME) & ~bool_flag(income, "dimension")
-    ]
-    assert not pretax_rows.empty, (data_ticker, "no pretax income row")
+    pretax = pd.Series(oe.pretax_income(base.income), dtype=float)
     items = oe.da_items(base.cashflow)
     assert not items.empty, (data_ticker, "no D&A item to set maintenance on")
     spec = AdjustmentSpec(
@@ -265,7 +261,7 @@ def test_owner_earnings_memo_rows_hold_every_period(data_ticker: str) -> None:
     assert run.applied == (spec,) and run.skipped == (), data_ticker
 
     periods = base.cashflow.periods
-    pretax = pd.to_numeric(pretax_rows.iloc[0].reindex(periods), errors="coerce")
+    pretax = pretax.reindex(periods)
     da = items[periods].fillna(0).sum()
     nwc = _working_capital_cash_impact(base.cashflow)
     with_pretax = [p for p in periods if pd.notna(pretax[p])]
