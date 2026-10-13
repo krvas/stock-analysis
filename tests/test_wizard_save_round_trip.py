@@ -231,6 +231,21 @@ def test_handler_value_error_is_a_400_naming_the_line(client: TestClient) -> Non
     assert _cells(_save_form(client, url).table)[(row_id, col_id)] is None
 
 
+def test_opex_to_capex_bad_years_is_a_400_naming_the_line(client: TestClient) -> None:
+    url = f"/wizard/{TICKER}/adjustments/opex-to-capex"
+    form = _save_form(client, url)
+    row_id = form.table["rows"][0]["id"]
+    edits = {(row_id, "capitalize"): True, (row_id, "years"): 0.0}
+
+    response = client.post(url, json=_serialize(form.table, edits))
+
+    assert response.status_code == 400
+    assert response.json() == {
+        "detail": f"{row_id}: years must be a whole number from 1 to 100"
+    }
+    assert _cells(_save_form(client, url).table)[(row_id, "capitalize")] is None
+
+
 @pytest.mark.parametrize("url", NO_SAVE_PAGES)
 def test_sub_page_without_a_post_handler_is_404(client: TestClient, url: str) -> None:
     response = client.post(url, json={"rows": []})
