@@ -164,6 +164,9 @@ def _insert_row(statement: Statement, new_row: NewRow, origin: str) -> Statement
         tree = statement.calc_edges
         for period in periods:
             parent = parents.get(period) if isinstance(parents, dict) else parents
+            weight = new_row.weight
+            if isinstance(weight, dict):
+                weight = weight.get(period, 1.0)
             if parent is None:
                 continue
             in_tree = (tree["period"] == period) & (
@@ -177,7 +180,7 @@ def _insert_row(statement: Statement, new_row: NewRow, origin: str) -> Statement
                         "period": [period],
                         "concept": [new_row.concept],
                         "parent_concept": [parent],
-                        "weight": [float(new_row.weight)],
+                        "weight": [float(weight)],
                     }
                 )
             )

@@ -12,6 +12,7 @@ from httpx import Response
 from src.adjustments.base import AdjustmentSpec
 from src.web import adjusted_statements
 from src.web.app import app
+from tests.test_adjustment_pipeline import filing
 from tests.test_statement_pages import P1, P2, P3, RND, _statement_set
 
 FUND_FLOW = "/wizard/AAPL/business-understanding/fund-flow"
@@ -117,7 +118,10 @@ def test_statement_page_note_counts_only_what_applied(
 ) -> None:
     specs = [AdjustmentSpec("opex_to_capex", {"rows": rows})]
     _save(client, basis="adjusted", next="/statements/AAPL/income")
-    with patch.object(adjusted_statements, "load_specs", return_value=specs):
+    with (
+        patch.object(adjusted_statements, "load_statement_set", return_value=filing()),
+        patch.object(adjusted_statements, "load_specs", return_value=specs),
+    ):
         html = client.get("/statements/AAPL/income").text
     notes = re.findall(r'class="adjustments-note[^"]*">(.*?)</p>', html, re.DOTALL)
     assert [" ".join(note.split()) for note in notes] == expected

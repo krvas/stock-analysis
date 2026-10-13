@@ -69,6 +69,7 @@ class _Parents:
     """Calc parents of the inserted rows in one period."""
 
     expense: str
+    expense_weight: float
     asset: str
     equity: str
     cfo: str
@@ -90,6 +91,7 @@ def _parents(ss: StatementSet, concept: str, period: str) -> _Parents | str:
     """Where ``concept``'s rows hang in ``period``, or why they can't."""
     income = _period_tree(ss.income, period)
     parent_of = dict(zip(income["concept"], income["parent_concept"], strict=True))
+    weight_of = dict(zip(income["concept"], income["weight"], strict=True))
     ancestors, node = [], concept
     while node in parent_of and parent_of[node] not in ancestors:
         node = parent_of[node]
@@ -107,12 +109,15 @@ def _parents(ss: StatementSet, concept: str, period: str) -> _Parents | str:
     if cfo is None or cfi is None:
         return "the cash flow statement does not total operating and investing cash"
     starts = set(cashflow.loc[cashflow["parent_concept"] == cfo, "concept"])
-    if not starts & set(ancestors) & set(NET_INCOME_CONCEPTS):
+    starts &= set(ancestors) & set(NET_INCOME_CONCEPTS)
+    if not starts:
         return "the cash flow statement does not start from net income"
-    return _Parents(ancestors[0], asset, equity, cfo, cfi)
+    if len(starts) > 1:
+        return "the cash flow statement adds net income in more than once"
+    return _Parents(ancestors[0], float(weight_of[concept]), asset, equity, cfo, cfi)
 
 
-def _slot(parents: dict[str, _Parents], slot: str) -> dict[str, str]:
+def _slot(parents: dict[str, _Parents], slot: str) -> dict[str, Any]:
     return {period: getattr(found, slot) for period, found in parents.items()}
 
 
@@ -171,9 +176,6 @@ def apply(ss: StatementSet, spec: AdjustmentSpec) -> AdjustmentResult:
         net = {p: net[p] for p in parents}
         spend = {p: reported[p] for p in parents}
 
-        tree = income.calc_edges[income.calc_edges["concept"] == concept]
-        weight = float(tree["weight"].iloc[0]) if len(tree) else 1.0
-
         result.overrides.append(Override("income", row_id, {p: 0.0 for p in spend}))
         result.new_rows.append(
             NewRow(
@@ -182,7 +184,7 @@ def apply(ss: StatementSet, spec: AdjustmentSpec) -> AdjustmentResult:
                 f"Amortization of capitalized {name.lower()}",
                 amort,
                 parent_concept=_slot(parents, "expense"),
-                weight=weight,
+                weight=_slot(parents, "expense_weight"),
                 tags=("da",),
                 after=row_id,
             )

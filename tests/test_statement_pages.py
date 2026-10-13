@@ -16,6 +16,7 @@ from src.web.settings import Settings, resolve
 from src.web.statements_registry import get_statement_page
 from src.web.wizard_registry import get_subpage
 from tests.statement_fixtures import make_statement
+from tests.test_adjustment_pipeline import filing
 
 P1, P2, P3 = "2024-09-28", "2023-09-30", "2022-09-24"
 RND = "us-gaap_ResearchAndDevelopmentExpense"
@@ -63,11 +64,18 @@ def _rows_by_id(table: dict) -> dict[str, dict]:
     return {row["id"]: row for row in table["rows"]}
 
 
-def _statement(slug: str, specs: list | None = None, **values: object) -> dict:
+def _statement(
+    slug: str,
+    specs: list | None = None,
+    statements: StatementSet | None = None,
+    **values: object,
+) -> dict:
     page = get_statement_page(slug)
     with (
         patch.object(
-            adjusted_statements, "load_statement_set", return_value=_statement_set()
+            adjusted_statements,
+            "load_statement_set",
+            return_value=statements or _statement_set(),
         ),
         patch.object(adjusted_statements, "load_specs", return_value=specs or []),
     ):
@@ -123,9 +131,9 @@ NO_NOTE = {"applied": [], "skipped": []}
 
 def test_basis_decides_whether_saved_adjustments_load() -> None:
     spec = AdjustmentSpec("opex_to_capex", {"rows": {RND: 5.0}})
-    reported = _statement("income", specs=[spec])
+    reported = _statement("income", specs=[spec], statements=filing())
     assert (reported["basis"], reported["adjustments"]) == ("reported", NO_NOTE)
-    adjusted = _statement("income", specs=[spec], basis="adjusted")
+    adjusted = _statement("income", [spec], filing(), basis="adjusted")
     assert adjusted["basis"] == "adjusted"
     assert adjusted["adjustments"] == {
         "applied": [{"type": "opex_to_capex", "label": "Opex capitalized (1)"}],
