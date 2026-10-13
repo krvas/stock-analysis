@@ -22,13 +22,33 @@ apply inside every pstack step.
 Jev (TypeSafe) is available to make typed judgments and choices. The key is
 `TYPESAFE_API_KEY` in `.env`. Jev is not a routing step to run before every
 choice. Use it for the pstack decisions below, where one Jev call costs far
-fewer tokens than reasoning through the choice yourself:
+fewer tokens than reasoning through the choice yourself. Each runs as
+`make jev KIND=<kind> INPUT=<path.json>`, writes `<input stem>.jev.json`
+beside the input, and logs every result to `logs/jev/decisions.jsonl`:
 
-- **Review findings.** `make triage FINDINGS=<path>` scores each finding in
-  the bloat-reviewer findings JSON format. It returns `execute` (score of at
-  least 0.85), `drop` (score of at most 0.15) or `human`; a finding marked
-  `needs_user_decision` is always `human`. Apply `execute` findings, discard
-  `drop` ones, and show `human` ones to the user.
+- **Review findings** (`KIND=findings`, input in the bloat-reviewer findings
+  JSON format). Returns `execute` (score of at least 0.85), `drop` (score of
+  at most 0.15) or `human`; a finding marked `needs_user_decision` is always
+  `human`. Apply `execute` findings, discard `drop` ones, and show `human`
+  ones to the user.
+- **PR review comments** during Babysit (`KIND=comments`, input a list of
+  `{id, author, bot, body, path?, line?, diff_hunk?}`). A human comment is
+  `mechanical` (make the edit) or `judgment` (leave the code, reply with what
+  you would do). A bot comment is `fix`, `dismiss` or `ask`, per pstack's
+  bugbot triage rubric: fix it, reply with the reason and resolve, or ask the
+  user.
+- **Playbook pick** (`KIND=playbook`, input `{request, agent_choice}`). Log
+  only. Pick the playbook yourself first, pass your pick as `agent_choice`,
+  and follow your pick, not Jev's. The log records whether Jev agreed.
+- **Reasoning effort for a delegate** (`KIND=effort`, input `{brief}`).
+  Returns a level (`low` to `max`) or `session`. A level picks the
+  `pstack:poteto-agent-<level>` or `pstack:effort-<level>` agent per pstack's
+  Reasoning effort rules; `session` means the usual agent. Skip it when the
+  override sheet pins a level for the role.
+- **Arena pre-filter** (`KIND=arena`, input a list of `{id, report}` from the
+  runners). Returns `exclude` for a candidate that is obviously broken and
+  `keep` otherwise. The judge skips `exclude` candidates. Jev never picks the
+  base or ranks the rest.
 - **Model tier for a delegate** when `~/.claude/pstack-models.md` does not pin
   the role, or when a step leaves the tier open (for example "trivial
   mechanical edits go to your fast code model"). Run the `jevrouter` skill
