@@ -13,6 +13,6 @@ fix:
 	.venv/bin/ruff format .
 
 # Ask Jev for one pstack decision: make jev KIND=<kind> INPUT=<path.json>
-# Kinds: findings, comments, playbook, effort, arena (see scripts/jev_decide.py).
+# Kinds and their input formats: scripts/jev_decide.py --help
 jev:
 	PYTHONPATH=. .venv/bin/python scripts/jev_decide.py $(KIND) $(INPUT)

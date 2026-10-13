@@ -1,6 +1,7 @@
 """Cheap pstack decisions made by Jev (TypeSafe System One).
 
-Usage (from the repo root): ``make jev KIND=<kind> INPUT=<path.json>``
+Usage (from the repo root): ``make jev KIND=<kind> INPUT=<path.json>``; run
+``scripts/jev_decide.py --help`` for each kind's input format.
 
 Each kind in ``KINDS`` says how to read its input, what to ask Jev, and how to
 turn Jev's answer into a decision. Hard rules live in each kind's ``decide``,
@@ -9,13 +10,16 @@ the key is missing, the API fails, or an item got no answer. All items of one
 run go to Jev in a single request.
 
 Writes ``<input stem>.jev.json`` beside the input and appends one JSON line
-per result to ``logs/jev/decisions.jsonl``.
+per result to ``logs/jev/decisions.jsonl``. Every constant below the imports
+can be overridden by the environment variable of the same name prefixed with
+``JEV_`` (``.env`` is read on import).
 
 Not part of the app package.
 """
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import re
@@ -31,13 +35,25 @@ from typing import Any
 
 from src.config import PROJECT_ROOT, load_project_dotenv
 
-API_URL = "https://api.typesafe.ai/v1/systemone"
-MODEL = "jev-latest"
-LOG_PATH = PROJECT_ROOT / "logs" / "jev" / "decisions.jsonl"
+load_project_dotenv()
 
+
+def _setting(name: str, default: str) -> str:
+    return os.environ.get(f"JEV_{name}", default)
+
+
+API_URL = _setting("API_URL", "https://api.typesafe.ai/v1/systemone")
+MODEL = _setting("MODEL", "jev-latest")
+MAX_ATTEMPTS = int(_setting("MAX_ATTEMPTS", "4"))
+TIMEOUT_SECONDS = float(_setting("TIMEOUT_SECONDS", "60"))
+# findings: execute at a score of at least 1 - margin, drop at most margin.
+FINDINGS_MARGIN = float(_setting("FINDINGS_MARGIN", "0.15"))
+COMMENTS_MIN_PROBABILITY = float(_setting("COMMENTS_MIN_PROBABILITY", "0.6"))
+EFFORT_MIN_CONFIDENCE = float(_setting("EFFORT_MIN_CONFIDENCE", "0.5"))
+ARENA_EXCLUDE = float(_setting("ARENA_EXCLUDE", "0.85"))
+
+LOG_PATH = PROJECT_ROOT / "logs" / "jev" / "decisions.jsonl"
 _RETRY_STATUSES = {429, 529}
-_MAX_ATTEMPTS = 4
-_TIMEOUT_SECONDS = 60
 
 Item = dict[str, Any]
 Answer = dict[str, Any]
@@ -51,6 +67,7 @@ class JevError(RuntimeError):
 class Kind:
     """One decision Jev makes; see the module docstring for the contract."""
 
+    usage: str
     items: Callable[[Any], list[Item]]
     state: Callable[[Any], dict[str, Any]]
     question: Callable[[Item], dict[str, Any]]
@@ -64,11 +81,11 @@ class Kind:
     )
 
 
-def _noul(instructions: str, true: str, false: str) -> dict[str, Any]:
+def _noul(instructions: str, yes: str, no: str) -> dict[str, Any]:
     return {
         "type": "noul",
         "instructions": instructions,
-        "criteria": {"true": true, "false": false},
+        "criteria": {"true": yes, "false": no},
     }
 
 
@@ -83,9 +100,6 @@ def _top(answer: Answer) -> tuple[str, float]:
 
 
 # findings: bloat-reviewer findings -> execute / drop / human
-
-FINDINGS_EXECUTE = 0.85
-FINDINGS_DROP = 0.15
 
 
 def _load_findings(path: Path) -> dict[str, Any]:
@@ -104,14 +118,17 @@ def _decide_finding(finding: Item, answer: Answer | None) -> tuple[str, str]:
     if answer is None:
         return "human", "no score"
     score = float(answer["noul"])
-    if score >= FINDINGS_EXECUTE:
-        return "execute", f"score {score:.2f} >= {FINDINGS_EXECUTE}"
-    if score <= FINDINGS_DROP:
-        return "drop", f"score {score:.2f} <= {FINDINGS_DROP}"
-    return "human", f"score {score:.2f} between {FINDINGS_DROP} and {FINDINGS_EXECUTE}"
+    execute, drop = 1 - FINDINGS_MARGIN, FINDINGS_MARGIN
+    if score >= execute:
+        return "execute", f"score {score:.2f} >= {execute:.2f}"
+    if score <= drop:
+        return "drop", f"score {score:.2f} <= {drop:.2f}"
+    return "human", f"score {score:.2f} between {drop:.2f} and {execute:.2f}"
 
 
 FINDINGS = Kind(
+    usage="a bloat-reviewer findings JSON list; intent-*.md notes beside it are "
+    "read too. Decides execute, drop or human.",
     load=_load_findings,
     items=lambda payload: payload["findings"],
     state=lambda payload: {
@@ -123,10 +140,10 @@ FINDINGS = Kind(
         "just written. Would a careful maintainer of this repository apply that "
         "exact change as written, with no further discussion, given the author's "
         "`intent_notes`?",
-        true="The change removes or relocates code that is clearly redundant, dead "
+        yes="The change removes or relocates code that is clearly redundant, dead "
         "or misplaced, matches the finding's stated fix, and contradicts nothing "
         "in the intent notes.",
-        false="The change is a judgment call, contradicts or ignores an intent "
+        no="The change is a judgment call, contradicts or ignores an intent "
         "note, removes code declared as intentionally kept, or alters behaviour "
         "or public API.",
     ),
@@ -136,7 +153,6 @@ FINDINGS = Kind(
 
 # comments: PR review comments -> mechanical / judgment (human), fix / dismiss / ask (bot)
 
-COMMENTS_MIN_PROBABILITY = 0.6
 _HIGH_RISK = re.compile(
     r"\b(security|privacy|data[ -]loss|auth(?!or)\w*|migrat\w*)", re.IGNORECASE
 )
@@ -176,6 +192,8 @@ def _decide_comment(comment: Item, answer: Answer | None) -> tuple[str, str]:
 
 
 COMMENTS = Kind(
+    usage="a list of {id, author, bot, body, path?, line?, diff_hunk?}. Decides "
+    "mechanical or judgment (human), fix, dismiss or ask (bot).",
     items=lambda comments: comments,
     state=lambda comments: {"comments": {str(c["id"]): c for c in comments}},
     question=lambda comment: _choice(
@@ -251,6 +269,8 @@ def _decide_playbook(request: Item, answer: Answer | None) -> tuple[str, str]:
 
 
 PLAYBOOK = Kind(
+    usage="{request, agent_choice}. Advisory: logs whether Jev agrees with "
+    "agent_choice, which stays the decision.",
     items=lambda payload: [{"id": "request", **payload}],
     state=lambda payload: {"request": payload["request"]},
     question=lambda request: _choice(
@@ -263,13 +283,11 @@ PLAYBOOK = Kind(
 
 # effort: reasoning effort for a delegate brief
 
-EFFORT_MIN_CONFIDENCE = 0.5
 _EFFORT_LEVELS = {
     "low": "Mechanical, fully specified edits or lookups with one obvious path.",
     "medium": "Routine changes in familiar code with a few small decisions.",
     "high": "Multi-file changes or debugging that need sustained reasoning.",
     "xhigh": "Hard design or subtle correctness work across subsystems.",
-    "max": "The hardest open-ended problems, where a wrong answer is very costly.",
 }
 
 
@@ -285,6 +303,7 @@ def _decide_effort(brief: Item, answer: Answer | None) -> tuple[str, str]:
 
 
 EFFORT = Kind(
+    usage="{brief}. Decides low, medium, high, xhigh or session.",
     items=lambda payload: [{"id": "brief", **payload}],
     state=lambda payload: {"brief": payload["brief"]},
     question=lambda brief: _choice(
@@ -298,8 +317,6 @@ EFFORT = Kind(
 
 
 # arena: flag only obviously broken candidates; never rank or pick a base
-
-ARENA_EXCLUDE = 0.85
 
 
 def _decide_candidate(candidate: Item, answer: Answer | None) -> tuple[str, str]:
@@ -325,14 +342,15 @@ def _keep_at_least_one(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 ARENA = Kind(
+    usage="a list of {id, report} from arena runners. Decides exclude or keep.",
     items=lambda candidates: candidates,
     state=lambda candidates: {"candidates": {str(c["id"]): c for c in candidates}},
     question=lambda candidate: _noul(
         f"Candidate `candidates.{candidate['id']}` is one runner's attempt at a "
         "shared task, described by its own report. Is it obviously broken?",
-        true="The report shows it fails to build, its tests fail, or it did not "
+        yes="The report shows it fails to build, its tests fail, or it did not "
         "do the task.",
-        false="It builds, its tests pass, and it attempted the task, whatever its "
+        no="It builds, its tests pass, and it attempted the task, whatever its "
         "quality relative to other candidates.",
     ),
     decide=_decide_candidate,
@@ -369,15 +387,15 @@ def _call_jev(
             "Content-Type": "application/json",
         },
     )
-    for attempt in range(_MAX_ATTEMPTS):
+    for attempt in range(MAX_ATTEMPTS):
         try:
-            with urllib.request.urlopen(request, timeout=_TIMEOUT_SECONDS) as resp:
+            with urllib.request.urlopen(request, timeout=TIMEOUT_SECONDS) as resp:
                 answers = json.load(resp)["answers"]
             for qid, answer in answers.items():
                 _check_answer(questions[qid], answer)
             return answers
         except urllib.error.HTTPError as exc:
-            if exc.code in _RETRY_STATUSES and attempt < _MAX_ATTEMPTS - 1:
+            if exc.code in _RETRY_STATUSES and attempt < MAX_ATTEMPTS - 1:
                 time.sleep(2**attempt)
                 continue
             raise JevError(f"HTTP {exc.code} from {API_URL}") from exc
@@ -438,14 +456,18 @@ def run(kind_name: str, payload: Any, api_key: str | None) -> dict[str, Any]:
 
 
 def main(argv: list[str]) -> int:
-    if len(argv) != 3 or argv[1] not in KINDS:
-        print(
-            f"usage: jev_decide.py {{{','.join(KINDS)}}} <input.json>", file=sys.stderr
-        )
-        return 2
-    kind_name, input_path = argv[1], Path(argv[2])
+    parser = argparse.ArgumentParser(
+        prog="jev_decide.py",
+        description="Ask Jev for one kind of pstack decision.",
+        epilog="kinds and their input:\n"
+        + "\n".join(f"  {name}: {kind.usage}" for name, kind in KINDS.items()),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument("kind", choices=KINDS)
+    parser.add_argument("input", type=Path, help="path to the input JSON")
+    args = parser.parse_args(argv[1:])
+    kind_name, input_path = args.kind, args.input
     payload = KINDS[kind_name].load(input_path)
-    load_project_dotenv()
     output = run(kind_name, payload, os.environ.get("TYPESAFE_API_KEY"))
 
     out_path = input_path.with_name(f"{input_path.stem}.jev.json")
