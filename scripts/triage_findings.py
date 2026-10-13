@@ -7,8 +7,10 @@ Jev one Noul question per finding ("would a careful maintainer apply this as
 written?"), and writes ``triage-<n>.json`` beside the input. A finding is
 ``execute`` only if Jev's score is at least ``EXECUTE_THRESHOLD`` and the
 reviewer did not mark it ``needs_user_decision`` (a rule kept in code, never
-left to the model); everything else is ``human``. If the key is missing or the
-API fails, every finding is ``human`` and ``api_status`` says why.
+left to the model). It is ``drop`` if the score is at most ``DROP_THRESHOLD``
+and it is not ``needs_user_decision``; everything else is ``human``. If the
+key is missing or the API fails, every finding is ``human`` and
+``api_status`` says why.
 
 Not part of the app package.
 """
@@ -29,6 +31,7 @@ from src.config import load_project_dotenv
 API_URL = "https://api.typesafe.ai/v1/systemone"
 MODEL = "jev-latest"
 EXECUTE_THRESHOLD = 0.85
+DROP_THRESHOLD = 0.15
 
 _RETRY_STATUSES = {429, 529}
 _MAX_ATTEMPTS = 4
@@ -104,7 +107,12 @@ def decide(finding: dict[str, Any], score: float | None) -> tuple[str, str]:
         return "human", "no score"
     if score >= EXECUTE_THRESHOLD:
         return "execute", f"score {score:.2f} >= {EXECUTE_THRESHOLD}"
-    return "human", f"score {score:.2f} < {EXECUTE_THRESHOLD}"
+    if score <= DROP_THRESHOLD:
+        return "drop", f"score {score:.2f} <= {DROP_THRESHOLD}"
+    return (
+        "human",
+        f"score {score:.2f} between {DROP_THRESHOLD} and {EXECUTE_THRESHOLD}",
+    )
 
 
 def triage(
@@ -141,7 +149,8 @@ def triage(
         )
     return {
         "api_status": status,
-        "threshold": EXECUTE_THRESHOLD,
+        "execute_threshold": EXECUTE_THRESHOLD,
+        "drop_threshold": DROP_THRESHOLD,
         "results": results,
     }
 

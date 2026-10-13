@@ -26,8 +26,9 @@ fewer tokens than reasoning through the choice yourself:
 
 - **Review findings.** `make triage FINDINGS=<path>` scores each finding in
   the bloat-reviewer findings JSON format. It returns `execute` (score of at
-  least 0.85, and not `needs_user_decision`) or `human`. Apply `execute`
-  findings; show `human` ones to the user.
+  least 0.85), `drop` (score of at most 0.15) or `human`; a finding marked
+  `needs_user_decision` is always `human`. Apply `execute` findings, discard
+  `drop` ones, and show `human` ones to the user.
 - **Model tier for a delegate** when `~/.claude/pstack-models.md` does not pin
   the role, or when a step leaves the tier open (for example "trivial
   mechanical edits go to your fast code model"). Run the `jevrouter` skill

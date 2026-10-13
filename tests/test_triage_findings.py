@@ -1,4 +1,4 @@
-"""The triage gate: threshold, hard exclusion, and fallback when Jev fails."""
+"""The triage gate: thresholds, hard exclusion, and fallback when Jev fails."""
 
 from __future__ import annotations
 
@@ -18,8 +18,11 @@ FINDINGS = [
     [
         ({"id": 1}, 0.85, "execute"),
         ({"id": 1}, 0.8499, "human"),
+        ({"id": 1}, 0.1501, "human"),
+        ({"id": 1}, 0.15, "drop"),
         ({"id": 1}, None, "human"),
         ({"id": 1, "needs_user_decision": True}, 0.99, "human"),
+        ({"id": 1, "needs_user_decision": True}, 0.05, "human"),
     ],
 )
 def test_decide(finding: dict, score: float | None, decision: str) -> None:
@@ -28,11 +31,11 @@ def test_decide(finding: dict, score: float | None, decision: str) -> None:
 
 def test_triage_scores_and_decides(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        tf, "_call_jev", lambda state, questions, key: {"1": 0.9, "2": 0.4, "3": 0.99}
+        tf, "_call_jev", lambda state, questions, key: {"1": 0.9, "2": 0.1, "3": 0.99}
     )
     out = tf.triage(FINDINGS, "notes", "key")
     assert out["api_status"] == "ok"
-    assert [r["decision"] for r in out["results"]] == ["execute", "human", "human"]
+    assert [r["decision"] for r in out["results"]] == ["execute", "drop", "human"]
     assert out["results"][2]["reason"] == "needs_user_decision"
 
 
