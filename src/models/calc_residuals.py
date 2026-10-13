@@ -30,7 +30,23 @@ RESIDUAL_COLUMNS: tuple[str, ...] = (
     "n_children",
     "n_nan_children",
     "n_missing_children",
+    "rounding",
 )
+
+# Largest reporting unit considered: filers round to millions at most, so a
+# coarser unit only means every value happens to be round.
+_MAX_UNIT = 1e6
+
+
+def _reporting_unit(values: np.ndarray) -> float:
+    """Largest power of ten, from 1 to :data:`_MAX_UNIT`, dividing every
+    non-zero value: the unit the filing rounded these values to (1e6 for a
+    filing "in millions")."""
+    values = values[np.isfinite(values) & (values != 0)]
+    unit = 1.0
+    while unit < _MAX_UNIT and np.all(np.mod(values, unit * 10) == 0):
+        unit *= 10
+    return unit
 
 
 def calc_residuals(statement: Statement) -> pd.DataFrame:
@@ -58,6 +74,12 @@ def calc_residuals(statement: Statement) -> pd.DataFrame:
       children only.
     - ``relative = residual / |reported|`` (``±inf`` when reported is 0 and
       the residual is not, NaN when both are 0).
+    - ``rounding`` bounds the residual that rounding alone can cause: each
+      reported value (the parent and each child with a value) is off by at
+      most half of ``p``'s reporting unit, so ``rounding = unit / 2 ·
+      (1 + Σ|w|)``. The unit is inferred from the values of ``p``'s calc
+      tree (see :func:`_reporting_unit`); XBRL Calculations 1.1 checks
+      totals against the same rounding interval.
 
     Rows are ordered by parent (frame order), then period (frame order).
     Columns: :data:`RESIDUAL_COLUMNS`. Pure: no I/O, frame untouched.
@@ -76,6 +98,11 @@ def calc_residuals(statement: Statement) -> pd.DataFrame:
     first_rows = non_dimensional[~non_dimensional["concept"].duplicated(keep="first")]
     index_by_concept = pd.Series(first_rows.index, index=first_rows["concept"])
     period_order = {period: i for i, period in enumerate(periods)}
+    units: dict[str, float] = {}
+    for period, tree in edges.groupby("period", sort=False):
+        concepts = pd.concat([tree["parent_concept"], tree["concept"]]).unique()
+        rows = index_by_concept.reindex(concepts).dropna().astype(int)
+        units[period] = _reporting_unit(values.loc[rows, period].to_numpy())
 
     keyed: list[tuple[int, int, dict[str, Any]]] = []
     for (period, parent_concept), group in edges.groupby(
@@ -92,6 +119,7 @@ def calc_residuals(statement: Statement) -> pd.DataFrame:
         child_values = values.loc[child_index[present].astype(int), period].to_numpy()
         weights = group.loc[present, "weight"].to_numpy()
         computed = float((np.nan_to_num(child_values, nan=0.0) * weights).sum())
+        summed_weight = float(np.abs(weights[~np.isnan(child_values)]).sum())
         residual = float(reported - computed)
         if reported != 0:
             relative = residual / abs(reported)
@@ -112,6 +140,7 @@ def calc_residuals(statement: Statement) -> pd.DataFrame:
             "n_children": int(present.sum()),
             "n_nan_children": int(np.isnan(child_values).sum()),
             "n_missing_children": int((~present).sum()),
+            "rounding": units[period] / 2 * (1 + summed_weight),
         }
         keyed.append((parent_index, period_order[period], record))
     keyed.sort(key=lambda item: item[:2])
