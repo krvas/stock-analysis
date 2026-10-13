@@ -13,7 +13,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 from src.config import load_project_dotenv
-from src.web.routes import api_router
+from src.web.routes import screener, settings, statements, wizard
 from src.web.templating import STATIC_DIR
 
 
@@ -30,7 +30,8 @@ app = FastAPI(
     lifespan=lifespan,
 )
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
-app.include_router(api_router)
+for route_module in (statements, screener, wizard, settings):
+    app.include_router(route_module.router)
 
 
 @app.get("/")

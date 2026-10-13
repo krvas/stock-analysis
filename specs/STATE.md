@@ -95,7 +95,9 @@ tests/                     pytest; pure seams (Settings, builders);
 - No migrations, backfills, or legacy-format fallbacks (pre-deployment): edit
   the schema/code directly and reset the DB.
 - Config only in `src/config.py`. Routers in `src/web/routes/`, registered in
-  `routes/__init__.py`. Templates extend `base.html`; pass `active_nav`.
+  `src/web/app.py`. `routes/__init__.py` stays empty: an import there runs for
+  every `src.web.routes.*` import and makes a cycle with `wizard_registry`.
+  Templates extend `base.html`; pass `active_nav`.
 - New financial tables: pandas → `Table` → `serialize()` → `{columns,
   linked_groups, rows}`. Do not invent another payload or pass DataFrame dicts
   to the browser. This also applies to the frontend, with the `TableModel`

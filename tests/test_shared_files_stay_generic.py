@@ -7,7 +7,6 @@ from pathlib import Path
 
 import pytest
 
-import src.web.routes  # noqa: F401
 from src.adjustments.registry import ADJUSTMENT_TYPES
 from src.web.wizard_registry import WIZARD_PAGES
 
