@@ -19,47 +19,10 @@ apply inside every pstack step.
 
 ## Jev for cheap decisions
 
-Jev (TypeSafe) is available to make typed judgments and choices. The key is
-`TYPESAFE_API_KEY` in `.env`. Jev is not a routing step to run before every
-choice. Use it for the pstack decisions below, where one Jev call costs far
-fewer tokens than reasoning through the choice yourself. Each runs as
-`make jev KIND=<kind> INPUT=<path.json>`, writes `<input stem>.jev.json`
-beside the input, and logs every result to `logs/jev/decisions.jsonl`:
-
-- **Review findings** (`KIND=findings`, input in the bloat-reviewer findings
-  JSON format). Returns `execute` (score of at least 0.85), `drop` (score of
-  at most 0.15) or `human`; a finding marked `needs_user_decision` is always
-  `human`. Apply `execute` findings, discard `drop` ones, and show `human`
-  ones to the user.
-- **PR review comments** during Babysit (`KIND=comments`, input a list of
-  `{id, author, bot, body, path?, line?, diff_hunk?}`). A human comment is
-  `mechanical` (make the edit) or `judgment` (leave the code, reply with what
-  you would do). A bot comment is `fix`, `dismiss` or `ask`, per pstack's
-  bugbot triage rubric: fix it, reply with the reason and resolve, or ask the
-  user.
-- **Playbook pick** (`KIND=playbook`, input `{request, agent_choice}`). Log
-  only. Pick the playbook yourself first, pass your pick as `agent_choice`,
-  and follow your pick, not Jev's. The log records whether Jev agreed.
-- **Reasoning effort for a delegate** (`KIND=effort`, input `{brief}`).
-  Returns a level (`low` to `max`) or `session`. A level picks the
-  `pstack:poteto-agent-<level>` or `pstack:effort-<level>` agent per pstack's
-  Reasoning effort rules; `session` means the usual agent. Skip it when the
-  override sheet pins a level for the role.
-- **Arena pre-filter** (`KIND=arena`, input a list of `{id, report}` from the
-  runners). Returns `exclude` for a candidate that is obviously broken and
-  `keep` otherwise. The judge skips `exclude` candidates. Jev never picks the
-  base or ranks the rest.
-- **Model tier for a delegate** when `~/.claude/pstack-models.md` does not pin
-  the role, or when a step leaves the tier open (for example "trivial
-  mechanical edits go to your fast code model"). Run the `jevrouter` skill
-  with haiku, sonnet and opus as candidates and pass the returned model to
-  the `Agent` call.
-- **One pick from a configured pool**, such as the arena cross-judge. Send
-  only the pool's models as candidates.
-
-Skip Jev when the config already fixes the choice, when the user named the
-tool or model, or when the choice is trivial. If the API fails, decide
-yourself and tell the user that Jev was unavailable.
+A few pstack decisions (review findings, PR review comments, delegate effort
+and model tier, arena pre-filter) can go to Jev instead of your own
+reasoning. When one comes up, follow the `jev` skill
+(`.claude/skills/jev/SKILL.md`).
 
 ## The failure mode this file exists to prevent
 
@@ -158,3 +121,4 @@ enforcing it is a repeat waiting to happen: encode it before adding another.
 | Rule | Enforced by |
 | --- | --- |
 | The app, its browser-pane server and agent worktrees run from this repo folder, never from a sibling folder (e.g. `../<name>` under `~/Documents`). Worktrees go in `.claude/worktrees/<name>` (gitignored); the app starts through `.claude/skills/verify/scripts/serve.py` or the `web` entry in `.claude/launch.json`. | `scripts/stay_in_repo.py`: a Bash `PreToolUse` hook in `.claude/settings.json` blocks out-of-repo `git worktree add` and app launches; `tests/test_stay_in_repo.py` fails on a `.claude/launch.json` entry that leaves the repo. |
+| A threshold pair that mirrors itself (execute at `1 - x`, drop at `x`) is one constant, not two. Jev's tunables sit at the top of `scripts/jev_decide.py` and each reads a `JEV_` override from `.env`. | `FINDINGS_MARGIN` is the only findings threshold; `test_one_margin_sets_both_finding_thresholds` in `tests/test_jev_decide.py` fails when the pair drifts apart or stops reading the environment. |
