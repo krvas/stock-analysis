@@ -26,11 +26,13 @@ DEPRECIATION_EXPENSE = "DepreciationExpense"
 # --- concept QNames -----------------------------------------------------------
 
 # Balance sheet: where capitalized assets and their equity offset hang
-# (first one present in a period's calc tree wins).
+# (first one that has children in a period's calc tree wins).
 ASSET_PARENTS = ("us-gaap_AssetsNoncurrent", "us-gaap_Assets")
 EQUITY_PARENTS = (
     "us-gaap_StockholdersEquity",
     "us-gaap_StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest",
+    "us-gaap_PartnersCapital",
+    "us-gaap_PartnersCapitalIncludingPortionAttributableToNoncontrollingInterest",
 )
 
 # Balance sheet calc-tree roots: assets side / liabilities-and-equity side.
@@ -40,14 +42,25 @@ BALANCE_LIABILITIES_EQUITY_ROOT = "us-gaap_LiabilitiesAndStockholdersEquity"
 # Cash-flow subtotals.
 CFO = "us-gaap_NetCashProvidedByUsedInOperatingActivities"
 CFI = "us-gaap_NetCashProvidedByUsedInInvestingActivities"
+CFO_PARENTS = (CFO, f"{CFO}ContinuingOperations")
+CFI_PARENTS = (CFI, f"{CFI}ContinuingOperations")
 
 # Working-capital change rows: presented under this header, else any concept
 # whose local name starts with the prefix.
 NWC_ABSTRACT = "us-gaap_IncreaseDecreaseInOperatingCapitalAbstract"
 NWC_PREFIX = "IncreaseDecreaseIn"
 
-# Concepts reported on both the income and cash-flow statements.
-NET_INCOME_CONCEPTS = ("us-gaap_NetIncomeLoss", "us-gaap_ProfitLoss")
+# Concepts reported on both the income and cash-flow statements: the line
+# operating cash flow starts from.
+NET_INCOME_CONCEPTS = (
+    "us-gaap_NetIncomeLoss",
+    "us-gaap_ProfitLoss",
+    "us-gaap_IncomeLossFromContinuingOperations",
+    (
+        "us-gaap_IncomeLossFromContinuingOperations"
+        "IncludingPortionAttributableToNoncontrollingInterest"
+    ),
+)
 
 # D&A components reported in the notes, added to the cash-flow D&A line as
 # dimensional breakdown rows on a synthetic axis (member = the note concept,
