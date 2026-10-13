@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import importlib
 import json
 from pathlib import Path
@@ -274,3 +275,22 @@ def test_help_lists_every_kind(capsys: pytest.CaptureFixture[str]) -> None:
     assert exit_info.value.code == 0
     out = capsys.readouterr().out
     assert all(f"  {name}: " in out for name in jd.KINDS)
+
+
+def test_every_tunable_reads_the_environment() -> None:
+    """A module-level number in jev_decide.py must come from ``_setting``."""
+    source = Path(jd.__file__).read_text(encoding="utf-8")
+    hardcoded = [
+        target.id
+        for node in ast.parse(source).body
+        if isinstance(node, ast.Assign)
+        and isinstance(node.value, ast.Constant)
+        and type(node.value.value) in (int, float)
+        for target in node.targets
+        if isinstance(target, ast.Name)
+    ]
+    assert not hardcoded, (
+        f"{hardcoded} in scripts/jev_decide.py: read each tunable with "
+        '_setting("<NAME>", "<default>") at the top of the file so .env can '
+        "override it as JEV_<NAME>."
+    )
