@@ -21,6 +21,9 @@ PAST_LAUNCH = (
     "cd ../stock-analysis-wt-settings && exec .venv/bin/uvicorn "
     "src.web.app:app --port 8766"
 )
+SERVE = ".claude/skills/verify/scripts/serve.py"
+# A commit message that mentions the launcher, refused as a launch until 2026-10-13.
+PAST_COMMIT = f"git commit -F - <<'EOF'\nchore: add {SERVE} launcher / helper\nEOF"
 PAST_LAUNCH_ENTRY = {
     "name": "web-settings-wt",
     "runtimeExecutable": "bash",
@@ -38,6 +41,9 @@ PAST_LAUNCH_ENTRY = {
         "git worktree add /tmp/elsewhere HEAD",
         "../stock-analysis-wt-settings/.venv/bin/uvicorn src.web.app:app",
         "cd && .venv/bin/python .claude/skills/verify/scripts/serve.py r 8790",
+        f"cd /tmp\n.venv/bin/python {SERVE} r 8790",
+        f"cat > m.txt <<'EOF'\nnotes\nEOF\ncd .. && exec .venv/bin/python -u {SERVE} r 8790",
+        "cd /tmp && PORT=1 nohup python3 -m uvicorn src.web.app:app",
     ],
 )
 def test_commands_that_leave_the_repo_are_refused(command: str) -> None:
@@ -53,6 +59,9 @@ def test_commands_that_leave_the_repo_are_refused(command: str) -> None:
         f'cd "{REPO}" && exec .venv/bin/uvicorn src.web.app:app --port 8765',
         "cd ../other-project && make test",
         "git worktree list",
+        PAST_COMMIT,
+        f"git commit -m 'add {SERVE}' -m 'see /docs'",
+        f"grep -n {SERVE} /tmp/hook.log",
     ],
 )
 def test_commands_inside_the_repo_are_allowed(command: str) -> None:
