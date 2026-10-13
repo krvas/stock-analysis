@@ -18,10 +18,14 @@ from src.api.edgartools.standard_terms import (
     CFO,
     DA_COMPONENT_AXIS,
     EQUITY_PARENTS,
+    NET_INCOME_CONCEPTS,
     PRETAX_INCOME,
 )
 from src.models.statement import bool_flag
 
+# Operating cash totals a filing may report: some filers (GEHC, recent BDX)
+# report only the continuing-operations total.
+OPERATING_CASH_TOTALS = (CFO, f"{CFO}ContinuingOperations")
 CASH_CHANGE = (
     "us-gaap_CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents"
     "PeriodIncreaseDecreaseIncludingExchangeRateEffect"
@@ -126,11 +130,14 @@ def test_capitalized_opex_moves_every_period_by_its_schedule(data_ticker: str) -
     _, net = schedule(spend, life)
     balance_concepts = set(base.balance.frame["concept"])
     equity = next(c for c in EQUITY_PARENTS if c in balance_concepts)
+    cash_concepts = set(base.cashflow.frame["concept"])
+    operating = {c for c in OPERATING_CASH_TOTALS if c in cash_concepts}
+    assert operating, (data_ticker, "no operating cash total")
     expected = {
         ("balance", "us-gaap_Assets"): net,
         ("balance", equity): net,
         ("balance", "us-gaap_LiabilitiesAndStockholdersEquity"): net,
-        ("cashflow", CFO): spend,
+        **{("cashflow", c): spend for c in operating},
         ("cashflow", CFI): {p: -v for p, v in spend.items()},
     }
     for (st, concept), change in expected.items():
@@ -155,7 +162,7 @@ def test_capitalized_opex_moves_every_period_by_its_schedule(data_ticker: str) -
         ("income", f"adj_Amortization{local}"): expense_parent,
         ("balance", f"adj_Capitalized{local}"): set(ASSET_PARENTS),
         ("balance", f"adj_EquityCapitalized{local}"): set(EQUITY_PARENTS),
-        ("cashflow", f"adj_Amortization{local}"): {CFO},
+        ("cashflow", f"adj_Amortization{local}"): operating,
         ("cashflow", f"adj_Capitalized{local}"): {CFI},
     }
     for (st, concept), parents in inserted.items():
@@ -179,14 +186,19 @@ def test_capitalized_opex_moves_every_period_by_its_schedule(data_ticker: str) -
         )[period]
         if pd.notna(assets) and pd.notna(total):
             assert assets == pytest.approx(total), (data_ticker, period)
-    income_ni = _row_values(adjusted, "income", "us-gaap_NetIncomeLoss")
-    cash_ni = _row_values(adjusted, "cashflow", "us-gaap_NetIncomeLoss")
-    for period in cash_ni.index:
-        if period in income_ni.index and pd.notna(income_ni[period]):
-            assert cash_ni[period] == pytest.approx(income_ni[period]), (
-                data_ticker,
-                period,
-            )
+    income_concepts = set(base.income.frame["concept"])
+    synced = [c for c in NET_INCOME_CONCEPTS if c in cash_concepts & income_concepts]
+    assert synced, (data_ticker, "no net income row on both IS and CF")
+    for concept in synced:
+        income_ni = _row_values(adjusted, "income", concept)
+        cash_ni = _row_values(adjusted, "cashflow", concept)
+        for period in cash_ni.index:
+            if period in income_ni.index and pd.notna(income_ni[period]):
+                assert cash_ni[period] == pytest.approx(income_ni[period]), (
+                    data_ticker,
+                    concept,
+                    period,
+                )
     if CASH_CHANGE in set(base.cashflow.frame["concept"]):
         assert np.allclose(
             _row_values(adjusted, "cashflow", CASH_CHANGE).fillna(0),
