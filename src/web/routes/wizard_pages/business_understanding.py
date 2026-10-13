@@ -2,19 +2,15 @@
 
 from __future__ import annotations
 
-import math
 from typing import Any
 
 import pandas as pd
 
+from src.adjustments.base import MEMO_TAG
 from src.adjustments.specs import describe
 from src.ai_tools.runner import run_task
 from src.ai_tools.tasks.one_line_answers import ONE_LINE_ANSWERS_TASK
-from src.api.edgartools.standard_terms import (
-    BALANCE_ASSETS_ROOT,
-    BALANCE_LIABILITIES_EQUITY_ROOT,
-    EQUITY_PARENTS,
-)
+from src.models.balance_leaves import balance_leaves
 from src.models.statement import Statement, StatementView
 from src.models.table import ColumnSpec, Table, period_column_specs
 from src.web.adjusted_statements import load_for_basis
@@ -43,37 +39,16 @@ def one_line_answers_context(ticker: str, settings: Settings) -> dict[str, Any]:
     }
 
 
-def _snapshot_items(balance: Any, period: str) -> dict[str, list[dict[str, Any]]]:
-    """Balance-sheet leaves of ``period`` split by calc root (assets / liabilities).
-
-    Equity leaves are netted into one item; other non-positive leaves drop.
-    """
-    edges = balance.calc_edges
-    edges = edges[edges["period"] == period]
-    parent = dict(zip(edges["concept"], edges["parent_concept"], strict=True))
-    parents = set(parent.values())
+def _snapshot_items(balance: Statement, period: str) -> dict[str, list[dict[str, Any]]]:
     items: dict[str, list[dict[str, Any]]] = {"assets": [], "liabilities": []}
     equity = 0.0
-    for row in balance.project("summary", [period]).to_dict("records"):
-        value, concept = row[period], row["concept"]
-        if concept in parents or not isinstance(value, float) or math.isnan(value):
-            continue
-        chain, node = [concept], concept
-        while node in parent and parent[node] not in chain:
-            node = parent[node]
-            chain.append(node)
-        root = chain[-1]
-        if root == BALANCE_ASSETS_ROOT:
-            side = "assets"
-        elif root == BALANCE_LIABILITIES_EQUITY_ROOT:
-            side = "liabilities"
-        else:
-            continue
-        if any(c in EQUITY_PARENTS for c in chain):
+    for leaf in balance_leaves(balance, period):
+        value = leaf.display_value
+        if leaf.is_equity:
             equity += value
         elif value > 0:
-            items[side].append(
-                {"row_id": row["row_id"], "label": row["label"], "value": value}
+            items[leaf.side].append(
+                {"row_id": leaf.row_id, "label": leaf.label, "value": value}
             )
     if equity > 0:
         items["liabilities"].append(
@@ -112,7 +87,10 @@ def balance_sheet_size_context(ticker: str, settings: Settings) -> dict[str, Any
 def fund_flow_table(
     balance: Statement, view: StatementView, current: str, previous: str
 ) -> Table:
+    tags = balance.frame["tags"]
+    memo = balance.frame.loc[tags.map(lambda t: MEMO_TAG in t), "row_id"]
     frame = balance.project(view, [current, previous])
+    frame = frame[~frame["row_id"].isin(memo)].reset_index(drop=True)
     columns = period_column_specs(frame) + [CHANGE_COLUMN]
     frame[CHANGE_COLUMN.id] = frame[current] - frame[previous]
     return Table(

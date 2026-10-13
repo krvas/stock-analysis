@@ -4,15 +4,20 @@ from __future__ import annotations
 
 from types import ModuleType
 
-from src.adjustments.types import opex_to_capex, owner_earnings
+from src.adjustments.types import assets_in_use, opex_to_capex, owner_earnings
 
 ADJUSTMENT_TYPES: dict[str, ModuleType] = {
     opex_to_capex.TYPE_ID: opex_to_capex,
     owner_earnings.TYPE_ID: owner_earnings,
+    assets_in_use.TYPE_ID: assets_in_use,
 }
 
 # Pipeline order: each type sees the output of the ones before it.
-ADJUSTMENT_ORDER: tuple[str, ...] = (opex_to_capex.TYPE_ID, owner_earnings.TYPE_ID)
+ADJUSTMENT_ORDER: tuple[str, ...] = (
+    opex_to_capex.TYPE_ID,
+    owner_earnings.TYPE_ID,
+    assets_in_use.TYPE_ID,
+)
 
 
 def get_adjustment_type(type_id: str) -> ModuleType:

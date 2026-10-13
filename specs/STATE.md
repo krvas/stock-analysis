@@ -3,9 +3,9 @@
 What exists today (not vision). Product intent: `specs/vision.md`.
 Adjustments/statement-model redesign: `specs/adjustments_architecture.md` —
 phases 1–2 (cache + `Statement`; row-id unification) implemented; the
-adjustment engine (`src/adjustments`, types `opex_to_capex` and
-`owner_earnings`) exists and the statement pages, Balance Sheet Size and
-Fund Flow consume it through the Basis Setting.
+adjustment engine (`src/adjustments`, types `opex_to_capex`,
+`owner_earnings` and `assets_in_use`) exists and the statement pages,
+Balance Sheet Size and Fund Flow consume it through the Basis Setting.
 Audience: planning and coding agents — prefer this file over guessing layout.
 
 Python 3.12, pandas, FastAPI + Jinja SSR, vanilla JS (no frontend libs). Local
@@ -54,6 +54,8 @@ src/database/              schema.sql + tables.py; wizard.sql + wizard_tables.py
 src/models/statement.py    Statement / StatementSet / get_row_id
                            (pure domain: pandas only, no I/O)
 src/models/calc_residuals.py  calc_residuals (calc-linkbase residuals; pure)
+src/models/balance_leaves.py  balance_leaves (balance-sheet leaves, side, equity
+                           flag, effective calc weight; pure)
 src/models/table.py        Table / ColumnSpec / LinkedGroupSpec  (FE↔BE contract)
 src/web/app.py             FastAPI; / → {statements, wizard, screener, docs}
 src/web/settings.py        Settings registry + pure rules (resolve,
@@ -66,7 +68,7 @@ src/web/routes/            statements.py, wizard.py, screener.py,
                            settings.py (cookies, POST /settings,
                            render_with_settings, NavContext)
 src/web/routes/wizard_pages/  business_understanding.py, adjustments_context.py,
-                           owner_earnings.py (builders),
+                           owner_earnings.py, assets_in_use.py (builders),
                            adjustments_post.py (POST handler)
 src/templates/shared/      _page_nav (nav + gear), _settings_drawer,
                            _adjustments_note
@@ -218,8 +220,14 @@ View detailed adds justification + source), `balance-sheet-size` (annual
 treemaps at `current_period`, `items_per_side` per side, on the chosen
 Basis), `fund-flow` (balance sheet at `current_period` vs `previous_period`
 + change column, server-built by `fund_flow_table`; notice when the offsets
-clamp to one period); `adjustments/` `opex-to-capex` and `owner-earnings`
-(both show the stage before their own adjustment, over `num_periods`).
+clamp to one period); `adjustments/` `opex-to-capex`, `owner-earnings` and
+`assets-in-use` (each shows the stage before its own adjustment, over
+`num_periods`; assets-in-use always loads annual and greys out period and
+view). The `assets_in_use` type declares `APPLIES_BY_DEFAULT`, so
+`specs.from_prefs` emits it with empty params even when nothing is saved:
+every adjusted balance sheet carries the Gross and Net Assets in Use memo
+rows. Memo rows (no calc parent) carry `MEMO_TAG` (`adjustments/base.py`):
+the statements page shows them, `fund_flow_table` leaves them out.
 The opex-to-capex builder: staged `income.project("detailed")` over
 `settings.recent_periods(...)`, `standard_concept` in `OPERATING_EXPENSES` (selection only),
 `Table` keyed by `row_id` (from `get_row_id`) with period cols + input
@@ -268,10 +276,10 @@ display controls exist; URLs carry no Settings.
 
 **wizard.duckdb** `adjustment_preferences`: PK `adjustment_id`, unique
 `(ticker, exchange, adjustment_type, base_concept)`; `base_concept` holds a
-row id (name predates row ids). Types intended:
-`opex_to_capex` | `maintenance_capex` | `assets_in_use`; `value` is years or
-%. Tested; written/read by `adjustments_post.py` / `adjustments_context.py`
-for `opex_to_capex` — other adjustment types still unused by routes.
+row id (name predates row ids). Types: `opex_to_capex` (value = years),
+`owner_earnings` (maintenance %), `assets_in_use` (% in use for an asset
+row, 1.0 = netted for a liability row). Each type is written by its
+sub-page POST handler.
 
 ## 5. Table / TableModel contract (`src/models/table.py`, `components/table_model.js`)
 
@@ -315,7 +323,7 @@ serialize() → {
   `input.subscribe` → `model.setCell`; `model.subscribe` → `input.set`.
   Must not read `input.value` / `input.checked`. Save posts
   `model.serialize()` (sub-pages with a save form: opex-to-capex,
-  owner-earnings). Convention: frontend module files that run
+  owner-earnings, assets-in-use). Convention: frontend module files that run
   wizard-page side effects wrap all their top-level execution in a single
   `main()` (or similarly named) function invoked once at the bottom, rather
   than having multiple bare top-level statements.
@@ -356,11 +364,12 @@ opex table; Table used by statements + opex;
 `table_wiring.js` wired for opex-to-capex (receive, render, live edits,
 linked-group math); prefs store (opex-to-capex save/prefill).
 
-Partial: adjustments (opex-to-capex and owner-earnings save/prefill and
-restate; other adjustment types unused); Finnhub; `load_to_database.py`.
+Partial: adjustments (opex-to-capex, owner-earnings and assets-in-use
+save/prefill and restate); Finnhub; `load_to_database.py`.
 
 NYI: wizard sub-pages other than One-line Answers, Balance Sheet Size, Fund
-Flow, Capitalizing Opex and Owner Earnings; screener; analytics; finfetch.
+Flow, Capitalizing Opex, Owner Earnings and Assets in Use; screener;
+analytics; finfetch.
 
 Tests cover clients, DBs, edgartools, Table, wizard DB, Settings
 (`test_settings.py`) and the page builders.

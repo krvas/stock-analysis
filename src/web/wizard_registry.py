@@ -15,6 +15,7 @@ from typing import Any, Final, Literal
 from src.web.routes.wizard_pages import (
     adjustments_context,
     adjustments_post,
+    assets_in_use,
     business_understanding,
     owner_earnings,
 )
@@ -132,7 +133,16 @@ WIZARD_PAGES: list[Page] = [
                 post_handler=owner_earnings.owner_earnings_post,
                 settings=SettingsDecl(cannot_honour={"view": "Fixed layout"}),
             ),
-            SubPage(slug="assets-in-use", title="Assets in Use", order=4),
+            SubPage(
+                slug="assets-in-use",
+                title="Assets in Use",
+                order=4,
+                context_builder=assets_in_use.assets_in_use_context,
+                post_handler=assets_in_use.assets_in_use_post,
+                settings=SettingsDecl(
+                    cannot_honour={"period": "Annual only", "view": "Fixed layout"}
+                ),
+            ),
         ],
     ),
     Page(
