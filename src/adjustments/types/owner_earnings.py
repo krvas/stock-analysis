@@ -24,7 +24,7 @@ from src.api.edgartools.standard_terms import (
     NWC_ABSTRACT,
     NWC_PREFIX,
     PRETAX_INCOME,
-    PRETAX_NAME,
+    PRETAX_LOCAL_NAME_FRAGMENT,
 )
 from src.models.statement import Statement, StatementSet, bool_flag
 
@@ -74,17 +74,12 @@ def nwc_rows(cashflow: Statement) -> pd.DataFrame:
 
 
 def pretax_income(income: Statement) -> dict[str, float]:
-    """Pretax income per period: the ``PretaxIncomeLoss`` row, else the
-    filer's own pretax concept (local name containing ``PRETAX_NAME``).
-
-    Raises ``ValueError`` when neither exists.
-    """
     frame = income.frame
     frame = frame[~bool_flag(frame, "dimension") & ~bool_flag(frame, "abstract")]
     rows = frame[frame["standard_concept"].eq(PRETAX_INCOME)]
     if rows.empty:
         local = frame["concept"].str.split("_").str[-1]
-        rows = frame[local.str.contains(PRETAX_NAME)]
+        rows = frame[local.str.contains(PRETAX_LOCAL_NAME_FRAGMENT)]
     if rows.empty:
         raise ValueError("income statement has no pretax income")
     row = rows.iloc[0]

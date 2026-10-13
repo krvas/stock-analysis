@@ -46,9 +46,7 @@ CFI = "us-gaap_NetCashProvidedByUsedInInvestingActivities"
 NWC_ABSTRACT = "us-gaap_IncreaseDecreaseInOperatingCapitalAbstract"
 NWC_PREFIX = "IncreaseDecreaseIn"
 
-# Pretax income when no row carries PRETAX_INCOME (a filer's extension
-# concept): the first concept whose local name contains this.
-PRETAX_NAME = "BeforeIncomeTax"
+PRETAX_LOCAL_NAME_FRAGMENT = "BeforeIncomeTax"
 
 # Concepts reported on both the income and cash-flow statements.
 NET_INCOME_CONCEPTS = ("us-gaap_NetIncomeLoss", "us-gaap_ProfitLoss")
