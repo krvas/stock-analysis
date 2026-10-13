@@ -322,6 +322,8 @@ def test_note_names_a_missing_lookup_in_a_sentence() -> None:
 CONTINUING = "us-gaap_IncomeLossFromContinuingOperations"
 CFO_CONTINUING = f"{CFO}ContinuingOperations"
 PARTNERS = "us-gaap_PartnersCapitalIncludingPortionAttributableToNoncontrollingInterest"
+PROFIT = "us-gaap_ProfitLoss"
+OPEX = "us-gaap_OperatingExpenses"
 
 
 def _renamed(rows: list, old: str, new: str) -> list:
@@ -430,3 +432,62 @@ def test_opex_leaves_a_period_with_no_parent_as_reported(
     spend = {P1: 90.0, P2: 0.0, P3: 30.0}
     assert delta(adjusted, base, "cashflow", CFO) == spend
     assert delta(adjusted, base, "cashflow", CASH_CHANGE) == _values(0, 0, 0)
+
+
+def _with_p2_edges(ss: StatementSet, statement: str, edit) -> StatementSet:
+    """``ss`` with P2's calc edges on ``statement`` replaced by ``edit(edges)``."""
+    st = ss.get(statement)
+    edges = st.calc_edges
+    p2 = edges["period"] == P2
+    edited = pd.concat([edges[~p2], edit(edges[p2])], ignore_index=True)
+    return dataclasses.replace(
+        ss, **{statement: Statement(st.frame, st.statement_type, edited)}
+    )
+
+
+def _edge(concept: str, parent: str, weight: float = 1.0) -> pd.DataFrame:
+    return pd.DataFrame(
+        {
+            "period": [P2],
+            "concept": [concept],
+            "parent_concept": [parent],
+            "weight": [weight],
+        }
+    )
+
+
+def test_opex_leaves_a_period_that_adds_net_income_twice_as_reported() -> None:
+    income = _with_parent(INCOME, PRETAX, PROFIT)
+    cashflow = [*CASHFLOW, (PROFIT, "Profit", None, None, 1.0, _values(160, 160, 170))]
+    base = _with_p2_edges(
+        filing(income, cashflow=cashflow),
+        "cashflow",
+        lambda e: pd.concat([e, _edge(PROFIT, CFO)]),
+    )
+    run = apply_adjustments(base, [OPEX_SPEC])
+    reason = "the cash flow statement adds net income in more than once"
+    assert [s.reason for s in run.skipped] == [
+        f"Research and development left as an expense in {P2}: {reason}"
+    ]
+    spend = {P1: 90.0, P2: 0.0, P3: 30.0}
+    assert delta(run.statements, base, "cashflow", CFO) == spend
+    assert delta(run.statements, base, "cashflow", CASH_CHANGE) == _values(0, 0, 0)
+
+
+def test_opex_amortization_takes_the_expense_weight_of_each_period() -> None:
+    """R&D sits under a positive-weight expense subtotal only in P2."""
+    income = [
+        *INCOME[:1],
+        (OPEX, "Operating expenses", None, OI, -1.0, _values(90, 60, 30)),
+        *INCOME[1:],
+    ]
+    base = _with_p2_edges(
+        filing(income),
+        "income",
+        lambda e: pd.concat([e[e["concept"] != RND], _edge(RND, OPEX)]),
+    )
+    run = apply_adjustments(base, [OPEX_SPEC])
+    assert run.skipped == ()
+    spend_less_amort = {P1: 30.0, P2: 30.0, P3: 20.0}
+    assert delta(run.statements, base, "income", NI) == spend_less_amort
+    assert delta(run.statements, base, "cashflow", CFO) == SPEND
