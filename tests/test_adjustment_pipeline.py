@@ -312,5 +312,32 @@ def test_note_names_a_missing_lookup_in_a_sentence() -> None:
     run = apply_adjustments(filing(_without(INCOME, PRETAX)), [OE_SPEC])
     assert _notes(run) == [
         "Adjusted basis (no adjustments applied)",
-        "Not applied: Owner earnings: could not find nwc in these statements",
+        "Not applied: Owner earnings: income statement has no pretax income",
+    ]
+
+
+EXTENSION_PRETAX = "mcd_IncomeLossFromContinuingOperationsBeforeIncomeTaxes"
+PRETAX_VALUES = _values(160, 160, 170)
+
+
+def test_owner_earnings_reads_pretax_from_a_filer_extension_concept() -> None:
+    income = [
+        (
+            OI,
+            "Operating income",
+            "OperatingIncomeLoss",
+            EXTENSION_PRETAX,
+            1.0,
+            PRETAX_VALUES,
+        ),
+        (EXTENSION_PRETAX, "Pretax income", None, NI, 1.0, PRETAX_VALUES),
+        (NI, "Net income", "NetIncomeLoss", None, 1.0, PRETAX_VALUES),
+    ]
+    run = apply_adjustments(filing(income), [OE_SPEC])
+    assert run.applied == (OE_SPEC,) and run.skipped == ()
+    assert value(run.statements, "cashflow", "adj_OwnerEarnings") == _values(
+        175, 175, 185
+    )
+    assert _notes(run) == [
+        "Adjusted for: Owner earnings: maintenance % set on 1 D&amp;A item(s), 0% of ΔNWC"
     ]
