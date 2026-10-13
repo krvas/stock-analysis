@@ -39,36 +39,57 @@ def from_prefs(rows: pd.DataFrame) -> AdjustmentSpec:
     )
 
 
-def _edge_weights(cashflow: Statement) -> dict[tuple[str, str], float]:
-    edges = cashflow.calc_edges
-    return {
-        (row.period, row.concept): float(row.weight)
-        for row in edges.itertuples(index=False)
-    }
+def _is_cfo(concept: str) -> bool:
+    """CFO or a variant of it, e.g. ``...OperatingActivitiesContinuingOperations``."""
+    return concept.split("_")[-1].startswith(CFO.split("_")[-1])
+
+
+def _cfo_weights(cashflow: Statement) -> dict[str, dict[str, float | None]]:
+    """Per concept summed into CFO in some period: ``{period: weight}``.
+
+    None where that period's calc tree sums the concept into something else.
+    A period whose tree lacks the concept takes the nearest period's CFO
+    weight: some filings carry no operating calc tree at all.
+    """
+    periods = cashflow.periods
+    placed: dict[str, dict[str, float | None]] = {}
+    for edge in cashflow.calc_edges.itertuples(index=False):
+        weight = float(edge.weight) if _is_cfo(edge.parent_concept) else None
+        placed.setdefault(edge.concept, {})[edge.period] = weight
+    out = {}
+    for concept, by_period in placed.items():
+        known = [i for i, p in enumerate(periods) if by_period.get(p) is not None]
+        if not known:
+            continue
+        out[concept] = {
+            p: by_period[p]
+            if p in by_period
+            else by_period[periods[min(known, key=lambda k: abs(k - i))]]
+            for i, p in enumerate(periods)
+        }
+    return out
 
 
 def nwc_rows(cashflow: Statement) -> pd.DataFrame:
     """Working-capital change rows with values on the CFO sign (cash impact).
 
     Rows presented under the "changes in operating assets and liabilities"
-    header, else any ``IncreaseDecreaseIn*`` concept summed into CFO. Value =
-    that period's calc weight × raw value. Columns: ``row_id, label`` +
-    periods.
+    header, else any ``IncreaseDecreaseIn*`` concept, that sum into CFO.
+    Value = calc weight into CFO (:func:`_cfo_weights`) × raw value.
+    Columns: ``row_id, label`` + periods.
     """
     frame = cashflow.frame
     rows = frame[~bool_flag(frame, "dimension") & ~bool_flag(frame, "abstract")]
     under_header = rows["parent_abstract_concept"].eq(NWC_ABSTRACT)
     if not under_header.any():
         under_header = rows["concept"].str.split("_").str[-1].str.startswith(NWC_PREFIX)
-    rows = rows[under_header]
-    weights = _edge_weights(cashflow)
+    weights = _cfo_weights(cashflow)
+    rows = rows[under_header & rows["concept"].isin(weights)]
     out = rows[["row_id", "label"]].copy()
     for period in cashflow.periods:
         raw = pd.to_numeric(rows[period], errors="coerce")
-        out[period] = [
-            v * weights.get((period, c), 1.0) if pd.notna(v) else None
-            for v, c in zip(raw, rows["concept"], strict=True)
-        ]
+        weight = rows["concept"].map(lambda c: weights[c][period]).astype(float)
+        out[period] = raw * weight
     return out[out[cashflow.periods].notna().any(axis=1)].reset_index(drop=True)
 
 
