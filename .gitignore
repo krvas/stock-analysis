@@ -4,7 +4,7 @@ __pycache__/
 *$py.class
 *.so
 .Python
-.venv/
+.venv
 venv/
 env/
 .env
@@ -24,9 +24,10 @@ data/processed/**/*.parquet
 data/processed/*.html
 data/duckdb/*.duckdb
 data/duckdb/*.wal
-data/edgartools_cache/*
+data/edgartools_cache
 data/ai_tools/
 tests/data_test_tickers.txt
+tests/data_test_tickers_long.txt
 
 # IDE
 .idea/
@@ -46,6 +47,6 @@ feature-list.md
 .vibe-wise/
 
 # Node / JS tooling
-node_modules/
+node_modules
 # Agent worktrees stay inside the repo (scripts/stay_in_repo.py)
 .claude/worktrees/

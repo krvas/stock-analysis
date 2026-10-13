@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import os
-
 import numpy as np
 import pandas as pd
 import pytest
@@ -15,8 +13,6 @@ from src.adjustments.types.opex_to_capex import schedule
 from src.adjustments.types.owner_earnings import maintenance_da, owner_earnings
 from src.api.edgartools.source import load_statement_set
 from src.api.edgartools.standard_terms import DA_COMPONENT_AXIS
-from src.config import load_project_dotenv
-from tests.test_edgar_data import TICKERS_FILE, _test_tickers
 
 CASH_CHANGE = (
     "us-gaap_CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents"
@@ -80,58 +76,46 @@ def _value(ss, statement: str, concept: str, period: str) -> float:
 
 
 @pytest.mark.data
-def test_engine_invariants_on_test_tickers() -> None:
-    load_project_dotenv()
-    if not os.environ.get("EDGAR_IDENTITY") or not TICKERS_FILE.exists():
-        pytest.skip("data test prerequisites missing")
-    for ticker in _test_tickers():
-        base = load_statement_set(ticker, "annual")
-        unchanged = apply_adjustments(base, [])
-        for st in ("income", "balance", "cashflow"):
-            periods = base.get(st).periods
-            a = base.get(st).frame[periods].apply(pd.to_numeric, errors="coerce")
-            b = unchanged.get(st).frame[periods].apply(pd.to_numeric, errors="coerce")
-            assert np.allclose(a.fillna(0), b.fillna(0)), (ticker, st)
+def test_engine_invariants_on_test_tickers(data_ticker: str) -> None:
+    base = load_statement_set(data_ticker, "annual")
+    unchanged = apply_adjustments(base, [])
+    for st in ("income", "balance", "cashflow"):
+        periods = base.get(st).periods
+        a = base.get(st).frame[periods].apply(pd.to_numeric, errors="coerce")
+        b = unchanged.get(st).frame[periods].apply(pd.to_numeric, errors="coerce")
+        assert np.allclose(a.fillna(0), b.fillna(0)), (data_ticker, st)
 
-        opex = base.income.find(standard_concept="ResearchAndDevelopmentExpenses")
-        if opex.empty:
-            continue
-        spec = AdjustmentSpec("opex_to_capex", {"rows": {opex["row_id"].iloc[0]: 5}})
-        adjusted = apply_adjustments(base, [spec])
-        period = base.income.periods[0]
-        assert _value(adjusted, "balance", "us-gaap_Assets", period) == pytest.approx(
-            _value(
-                adjusted, "balance", "us-gaap_LiabilitiesAndStockholdersEquity", period
-            )
-        ), ticker
-        assert _value(adjusted, "income", "us-gaap_NetIncomeLoss", period) == (
-            pytest.approx(_value(adjusted, "cashflow", "us-gaap_NetIncomeLoss", period))
-        ), ticker
-        if CASH_CHANGE in set(base.cashflow.frame["concept"]):
-            assert _value(adjusted, "cashflow", CASH_CHANGE, period) == pytest.approx(
-                _value(base, "cashflow", CASH_CHANGE, period)
-            ), ticker
+    opex = base.income.find(standard_concept="ResearchAndDevelopmentExpenses")
+    if opex.empty:
+        return
+    spec = AdjustmentSpec("opex_to_capex", {"rows": {opex["row_id"].iloc[0]: 5}})
+    adjusted = apply_adjustments(base, [spec])
+    period = base.income.periods[0]
+    assert _value(adjusted, "balance", "us-gaap_Assets", period) == pytest.approx(
+        _value(adjusted, "balance", "us-gaap_LiabilitiesAndStockholdersEquity", period)
+    ), data_ticker
+    assert _value(adjusted, "income", "us-gaap_NetIncomeLoss", period) == (
+        pytest.approx(_value(adjusted, "cashflow", "us-gaap_NetIncomeLoss", period))
+    ), data_ticker
+    if CASH_CHANGE in set(base.cashflow.frame["concept"]):
+        assert _value(adjusted, "cashflow", CASH_CHANGE, period) == pytest.approx(
+            _value(base, "cashflow", CASH_CHANGE, period)
+        ), data_ticker
 
 
 @pytest.mark.data
-def test_da_breakdown_rows_sum_to_da_line() -> None:
-    load_project_dotenv()
-    if not os.environ.get("EDGAR_IDENTITY") or not TICKERS_FILE.exists():
-        pytest.skip("data test prerequisites missing")
-    for ticker in _test_tickers():
-        cashflow = load_statement_set(ticker, "annual").cashflow
-        frame = cashflow.frame
-        parts = frame[frame["dimension_axis"].eq(DA_COMPONENT_AXIS)]
-        if parts.empty:
-            continue
-        line = frame[frame["row_id"] == parts["concept"].iloc[0]].iloc[0]
-        assert (
-            parts["row_id"]
-            .str.startswith(f"{line['concept']}|{DA_COMPONENT_AXIS}=")
-            .all()
-        ), ticker
-        assert not parts["in_standard"].any(), ticker
-        for period in cashflow.periods:
-            values = pd.to_numeric(parts[period], errors="coerce")
-            if values.notna().any() and pd.notna(line[period]):
-                assert values.sum() == pytest.approx(line[period]), (ticker, period)
+def test_da_breakdown_rows_sum_to_da_line(data_ticker: str) -> None:
+    cashflow = load_statement_set(data_ticker, "annual").cashflow
+    frame = cashflow.frame
+    parts = frame[frame["dimension_axis"].eq(DA_COMPONENT_AXIS)]
+    if parts.empty:
+        return
+    line = frame[frame["row_id"] == parts["concept"].iloc[0]].iloc[0]
+    assert (
+        parts["row_id"].str.startswith(f"{line['concept']}|{DA_COMPONENT_AXIS}=").all()
+    ), data_ticker
+    assert not parts["in_standard"].any(), data_ticker
+    for period in cashflow.periods:
+        values = pd.to_numeric(parts[period], errors="coerce")
+        if values.notna().any() and pd.notna(line[period]):
+            assert values.sum() == pytest.approx(line[period]), (data_ticker, period)

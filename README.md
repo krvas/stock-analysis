@@ -83,22 +83,21 @@ freshness needs differ. Filings are fetched directly from the SEC on cache miss.
 ### Tests
 
 ```bash
-pytest            # unit tests (offline)
-pytest -m data    # data test over real SEC filings (needs EDGAR_IDENTITY)
+make test            # lint, unit tests, data tests over the short ticker list
+make test-data-long  # data tests over the long ticker list
+pytest -m data       # data tests alone (needs EDGAR_IDENTITY)
 ```
 
-The data test needs `tests/data_test_tickers.txt`, which is gitignored, so
-create it after cloning: one ticker per line, `#` starts a comment, e.g.
-
-```text
-AAPL
-MU
-SNDK
-```
-
-Without the file the data test is skipped. Listed tickers are pinned in the
-company cache (never evicted, and they don't count toward
-`EDGARTOOLS_COMPANY_CACHE_SIZE`) and loaded through the app's own cache.
+Data tests read two gitignored ticker lists, so create them after cloning:
+`tests/data_test_tickers.txt` (short, used by `make test`) and
+`tests/data_test_tickers_long.txt` (`DATA_TICKERS=long`). One ticker per line,
+`#` starts a comment. Each ticker is its own test id. A missing list or
+`EDGAR_IDENTITY` skips the data tests, and fails them under
+`REQUIRE_DATA_TESTS=1`, which `make test` sets. Listed tickers are added to
+the pinned tickers in the company cache (never evicted, and they don't count
+toward `EDGARTOOLS_COMPANY_CACHE_SIZE`) and loaded through the app's own cache.
+In a git worktree, `make test` first runs `scripts/link_worktree_files.py`,
+which symlinks these local files from the main checkout.
 
 ### DatabaseManager
 
