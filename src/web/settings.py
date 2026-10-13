@@ -11,152 +11,23 @@ knows the cookie's name, HTTP, or any specific page.
 from __future__ import annotations
 
 import json
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from types import MappingProxyType
-from typing import Final, Literal, cast, get_args
+from typing import Final, Literal, cast
 
-from src.config import MAX_CACHE_QUARTERS, MAX_ITEMS_PER_SIDE, MAX_PERIODS_BY_PERIOD
-from src.models.statement import (
-    PERIOD_TYPES,
-    STATEMENT_VIEWS,
-    PeriodType,
-    StatementView,
+from src.config import MAX_PERIODS_BY_PERIOD
+from src.models.statement import PeriodType, StatementView
+from src.web.setting_types import ChoiceSetting, SettingDef, SettingValue
+from src.web.settings_registry import (
+    GLOBAL_SETTING_IDS,
+    RULES,
+    SETTINGS,
+    SUBPAGE_SETTING_IDS,
 )
 
-GlobalSettingId = Literal["period", "num_periods", "view"]
-SubpageSettingId = Literal[
-    "basis", "current_period", "previous_period", "items_per_side"
-]
-SettingId = GlobalSettingId | SubpageSettingId
 OffsetSettingId = Literal["current_period", "previous_period"]
 Basis = Literal["reported", "adjusted"]
-SettingValue = str | int
-
-GLOBAL_SETTING_IDS: Final[frozenset[str]] = frozenset(get_args(GlobalSettingId))
-SUBPAGE_SETTING_IDS: Final[frozenset[str]] = frozenset(get_args(SubpageSettingId))
-
-
-@dataclass(frozen=True)
-class ChoiceSetting:
-    id: SettingId
-    label: str
-    options: tuple[tuple[str, str], ...]  # (value, display label), drawer order
-    default: str
-    # Applies as soon as it changes (own form, submits on change).
-    instant: bool = False
-
-    def parse(self, raw: object) -> str | None:
-        """``raw`` if it is one of the option values, else None."""
-        if isinstance(raw, str) and any(raw == value for value, _ in self.options):
-            return raw
-        return None
-
-
-@dataclass(frozen=True)
-class IntSetting:
-    id: SettingId
-    label: str
-    min: int
-    max: int
-    default: int
-    # "offset" renders as a select of "Latest", "1 back", ...
-    widget: Literal["number", "offset"] = "number"
-    instant: bool = False
-
-    def parse(self, raw: object) -> int | None:
-        """``raw`` as an int in ``[min, max]`` (an int or ASCII-digit str), else None."""
-        if isinstance(raw, bool):
-            return None
-        if isinstance(raw, str):
-            if not (raw.isascii() and raw.isdigit()):
-                return None
-            raw = int(raw)
-        if isinstance(raw, int) and self.min <= raw <= self.max:
-            return raw
-        return None
-
-
-SettingDef = ChoiceSetting | IntSetting
-
-SETTINGS: Final[tuple[SettingDef, ...]] = (
-    ChoiceSetting(
-        "period",
-        "Period type",
-        tuple((p, p.capitalize()) for p in PERIOD_TYPES),
-        "annual",
-    ),
-    # The per-period-type cache cap is a clamp at load time, not a validation
-    # bound, so switching period type never invalidates the stored count.
-    IntSetting("num_periods", "Number of periods", 1, MAX_CACHE_QUARTERS, 10),
-    ChoiceSetting(
-        "view",
-        "View",
-        tuple((v, v.capitalize()) for v in STATEMENT_VIEWS),
-        "standard",
-        instant=True,
-    ),
-    ChoiceSetting(
-        "basis",
-        "Basis",
-        (("reported", "Reported"), ("adjusted", "Adjusted")),
-        "reported",
-    ),
-    IntSetting(
-        "current_period",
-        "Current period",
-        0,
-        MAX_CACHE_QUARTERS - 1,
-        0,
-        widget="offset",
-    ),
-    IntSetting(
-        "previous_period",
-        "Previous period",
-        0,
-        MAX_CACHE_QUARTERS - 1,
-        1,
-        widget="offset",
-    ),
-    IntSetting("items_per_side", "Items per side", 1, MAX_ITEMS_PER_SIDE, 5),
-)
-SETTINGS_BY_ID: Final[Mapping[str, SettingDef]] = MappingProxyType(
-    {s.id: s for s in SETTINGS}
-)
-
-if set(SETTINGS_BY_ID) != GLOBAL_SETTING_IDS | SUBPAGE_SETTING_IDS or len(
-    SETTINGS_BY_ID
-) != len(SETTINGS):
-    raise RuntimeError(
-        "SETTINGS ids must match GlobalSettingId | SubpageSettingId exactly"
-    )
-
-
-@dataclass(frozen=True)
-class CrossRule:
-    """A rule over several Settings. It binds only where all its ids are in play.
-
-    ``repair`` gives the values that make a failing rule hold for one render
-    (``resolve``); a submission that breaks the rule is refused instead.
-    """
-
-    ids: tuple[SettingId, ...]
-    holds: Callable[[Mapping[str, SettingValue]], bool]
-    repair: Callable[[Mapping[str, SettingValue]], Mapping[str, SettingValue]]
-    message: str
-
-
-RULES: Final[tuple[CrossRule, ...]] = (
-    CrossRule(
-        ids=("current_period", "previous_period"),
-        holds=lambda v: (
-            cast(int, v["previous_period"]) > cast(int, v["current_period"])
-        ),
-        # Keep the current period: pages share it, so it must not move.
-        repair=lambda v: {"previous_period": cast(int, v["current_period"]) + 1},
-        message="Previous period must be older than the current period",
-    ),
-)
 
 
 @dataclass(frozen=True)
@@ -166,8 +37,8 @@ class SettingsDecl:
     The default instance uses none and honours every Global Setting.
     """
 
-    uses: tuple[SubpageSettingId, ...] = ()
-    cannot_honour: Mapping[GlobalSettingId, str] = field(default_factory=dict)
+    uses: tuple[str, ...] = ()
+    cannot_honour: Mapping[str, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         for setting_id in self.uses:
@@ -210,7 +81,7 @@ class Settings:
     decl: SettingsDecl
     values: Mapping[str, SettingValue]
 
-    def _read(self, setting_id: SettingId) -> SettingValue:
+    def _read(self, setting_id: str) -> SettingValue:
         if not self.decl.applies(setting_id):
             raise SettingNotApplicable(
                 f"read of {setting_id!r}, which this page's SettingsDecl greys "
