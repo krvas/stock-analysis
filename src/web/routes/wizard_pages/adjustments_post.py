@@ -17,6 +17,24 @@ from src.web.routes.wizard_pages.adjustments_context import (
 
 logger = logging.getLogger(__name__)
 
+# schedule() runs its amortization loop once per year of life for every period,
+# so the cap bounds that work; lives past the cached history are still valid.
+MAX_YEARS = 100
+
+
+def _years(value: object, row_id: str) -> float:
+    if value == "" or isinstance(value, bool):
+        raise ValueError(f"{row_id}: years must be a number")
+    try:
+        years = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{row_id}: years must be a number") from exc
+    if not years.is_integer() or not 1 <= years <= MAX_YEARS:
+        raise ValueError(
+            f"{row_id}: years must be a whole number from 1 to {MAX_YEARS}"
+        )
+    return years
+
 
 def _validate_opex_to_capex_body(
     body: dict[str, Any],
@@ -62,7 +80,7 @@ def _validate_opex_to_capex_body(
         validated_rows.append(
             {
                 "base_concept": str(row_id).strip(),
-                "years": float(years),
+                "years": _years(years, str(row_id).strip()),
             }
         )
 

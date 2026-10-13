@@ -105,3 +105,38 @@ def test_validate_opex_to_capex_body_stores_dimensional_row_id_verbatim() -> Non
 
     assert validated_rows == [{"base_concept": row_id, "years": 4.0}]
     assert row_ids_to_delete == []
+
+
+@pytest.mark.parametrize("years", [-5, 0, 2.5, 101])
+def test_validate_opex_to_capex_body_years_out_of_range_names_the_line(
+    years: object,
+) -> None:
+    rows = [{"id": "us-gaap_X", "cells": {"capitalize": True, "years": years}}]
+
+    with pytest.raises(ValueError) as excinfo:
+        _validate_opex_to_capex_body(_body(rows))
+
+    assert str(excinfo.value) == "us-gaap_X: years must be a whole number from 1 to 100"
+
+
+@pytest.mark.parametrize("years", ["abc", "", True])
+def test_validate_opex_to_capex_body_years_not_a_number_names_the_line(
+    years: object,
+) -> None:
+    rows = [{"id": "us-gaap_X", "cells": {"capitalize": True, "years": years}}]
+
+    with pytest.raises(ValueError) as excinfo:
+        _validate_opex_to_capex_body(_body(rows))
+
+    assert str(excinfo.value) == "us-gaap_X: years must be a number"
+
+
+@pytest.mark.parametrize("years", [1, 100, 7.0])
+def test_validate_opex_to_capex_body_accepts_whole_years_in_range(
+    years: object,
+) -> None:
+    rows = [{"id": "us-gaap_X", "cells": {"capitalize": True, "years": years}}]
+
+    validated_rows, _ = _validate_opex_to_capex_body(_body(rows))
+
+    assert validated_rows == [{"base_concept": "us-gaap_X", "years": float(years)}]
