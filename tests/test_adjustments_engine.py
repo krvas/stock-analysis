@@ -215,10 +215,9 @@ def test_da_breakdown_rows_sum_to_da_line(data_ticker: str) -> None:
 
 
 def _working_capital_cash_impact(cashflow) -> pd.Series:
-    """NaN for a period with no operating calc tree. Picks rows by the filer's
-    working-capital header, not by the ``IncreaseDecrease*`` name: filers
-    present deferred-tax and pension changes outside the header, and rows
-    with other names under it."""
+    """Picks rows by the filer's working-capital header, not by the
+    ``IncreaseDecrease*`` name: filers present deferred-tax and pension
+    changes outside the header, and rows with other names under it."""
     frame = cashflow.frame
     rows = frame[~bool_flag(frame, "dimension")]
     under_header = rows["parent_abstract_concept"].eq(NWC_ABSTRACT)

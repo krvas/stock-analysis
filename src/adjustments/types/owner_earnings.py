@@ -12,6 +12,7 @@ amortization). Each item's maintenance % is saved under its row id.
 
 from __future__ import annotations
 
+from collections.abc import Collection
 from typing import Any
 
 import pandas as pd
@@ -66,10 +67,12 @@ def _cfo_weights(cashflow: Statement) -> dict[str, dict[str, float]]:
     return out | _balance_weights(cashflow, exclude=placed.keys())
 
 
-def _balance_weights(cashflow: Statement, exclude) -> dict[str, dict[str, float]]:
-    """XBRL requires a calc weight of +1 between concepts of the same balance
-    type and -1 between opposite ones, which signs a row the calc tree never
-    places. us-gaap rows carry no balance type in the cache and stay unsigned."""
+def _balance_weights(
+    cashflow: Statement, exclude: Collection[str]
+) -> dict[str, dict[str, float]]:
+    """XBRL requires a positive calc weight between concepts of the same
+    balance type and a negative one between opposite ones, which signs a row
+    the calc tree never places."""
     frame = cashflow.frame
     typed = frame[frame["balance"].notna()]
     cfo = typed.loc[typed["concept"].map(_is_cfo), "balance"]
