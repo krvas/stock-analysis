@@ -7,11 +7,14 @@ import json
 from pathlib import Path
 
 import pytest
+from fastapi.testclient import TestClient
 
 from src.adjustments.engine import apply_adjustments
 from src.adjustments.types import owner_earnings as oe
 from src.database.wizard_manager import WizardDatabaseManager
+from src.models.statement import StatementSet
 from src.web import adjusted_statements
+from src.web.app import app
 from src.web.routes.wizard_pages import owner_earnings as page
 from src.web.settings import resolve
 from src.web.wizard_registry import get_subpage
@@ -19,11 +22,13 @@ from tests.js_fixtures import check_calculated_cells_fixture
 from tests.owner_earnings_fixture import (
     AMORTIZATION,
     DEPRECIATION,
+    INVENTORIES,
     OWNER_EARNINGS,
+    PRETAX,
     SAVED,
     filing,
 )
-from tests.statement_fixtures import P1, P2, P3
+from tests.statement_fixtures import P1, P2, P3, make_statement
 
 
 @pytest.fixture(autouse=True)
@@ -173,3 +178,29 @@ def test_js_owner_earnings_fixture_matches_the_page_and_engine_after_a_save() ->
         {(page.OE_ROW, period): value for period, value in OWNER_EARNINGS.items()}
     )
     check_calculated_cells_fixture("owner_earnings_table.json", table, expected)
+
+
+def _without_pretax() -> StatementSet:
+    ss = filing()
+    income = ss.income.frame
+    return StatementSet(
+        income=make_statement(income[income["concept"] != PRETAX], "income"),
+        balance=ss.balance,
+        cashflow=ss.cashflow,
+    )
+
+
+def test_page_without_pretax_says_why_and_still_shows_nwc(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        adjusted_statements, "load_statement_set", lambda *_: _without_pretax()
+    )
+    response = TestClient(app).get("/wizard/AAPL/adjustments/owner-earnings")
+
+    assert response.status_code == 200
+    assert "income statement has no pretax income" in response.text
+    assert 'id="nwc-table"' in response.text
+    assert INVENTORIES in response.text
+    assert 'id="oe-table"' not in response.text
+    assert 'id="owner-earnings-form"' not in response.text

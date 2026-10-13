@@ -125,13 +125,21 @@ def _oe_table(
 
 def owner_earnings_context(ticker: str, settings: Settings) -> dict[str, object]:
     _, staged, specs = load_adjusted(ticker, settings.period, until=oe.TYPE_ID)
-    parts = oe.components(staged)
+    nwc = oe.nwc_rows(staged.cashflow)
+    try:
+        parts = oe.components(staged)
+    except ValueError as exc:
+        periods = settings.recent_periods(staged.cashflow.periods)
+        return {
+            "nwc_table": _nwc_table(nwc, periods).serialize(),
+            "oe_unavailable": str(exc),
+        }
     periods = settings.recent_periods(list(parts.index))
     items = oe.da_items(staged.cashflow)
     items = items[items[periods].notna().any(axis=1)]
     saved = next((dict(s.params) for s in specs if s.type_id == oe.TYPE_ID), {})
     return {
-        "nwc_table": _nwc_table(oe.nwc_rows(staged.cashflow), periods).serialize(),
+        "nwc_table": _nwc_table(nwc, periods).serialize(),
         "oe_table": _oe_table(parts, items, periods, saved).serialize(),
     }
 

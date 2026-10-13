@@ -20,10 +20,14 @@
 {{ table_macro.table('nwc-table', nwc_table) }}
 
 <h2 class="wizard-table-title">Owner earnings</h2>
+{% if oe_unavailable %}
+<p class="wizard-nyi">Owner earnings can't be computed for {{ ticker }}: {{ oe_unavailable }}.</p>
+{% else %}
 <p class="wizard-table-note">Enter the share of D&amp;A and ΔNWC that only maintains the business. Owner earnings update as you type.</p>
 {% call form_macro.form(post_url, form_id='owner-earnings-form', wizard_save='owner-earnings', data_table_id='oe-table') %}
 {{ table_macro.table('oe-table', oe_table) }}
 {% endcall %}
+{% endif %}
 <p class="wizard-next-link">
   <a href="/statements/{{ ticker }}">View statements →</a>
 </p>

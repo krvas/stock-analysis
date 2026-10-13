@@ -24,6 +24,7 @@ from src.api.edgartools.standard_terms import (
     NWC_ABSTRACT,
     NWC_PREFIX,
     PRETAX_INCOME,
+    PRETAX_LOCAL_NAME_FRAGMENT,
 )
 from src.models.statement import Statement, StatementSet, bool_flag
 
@@ -72,15 +73,17 @@ def nwc_rows(cashflow: Statement) -> pd.DataFrame:
     return out[out[cashflow.periods].notna().any(axis=1)].reset_index(drop=True)
 
 
-def _first_value(statement: Statement, mask: pd.Series) -> dict[str, float]:
-    frame = statement.frame
-    rows = frame[mask & ~bool_flag(frame, "dimension")]
+def pretax_income(income: Statement) -> dict[str, float]:
+    frame = income.frame
+    frame = frame[~bool_flag(frame, "dimension") & ~bool_flag(frame, "abstract")]
+    rows = frame[frame["standard_concept"].eq(PRETAX_INCOME)]
     if rows.empty:
-        return {}
+        local = frame["concept"].str.split("_").str[-1]
+        rows = frame[local.str.contains(PRETAX_LOCAL_NAME_FRAGMENT)]
+    if rows.empty:
+        raise ValueError("income statement has no pretax income")
     row = rows.iloc[0]
-    return {
-        p: float(row[p]) for p in statement.periods if pd.notna(pd.to_numeric(row[p]))
-    }
+    return {p: float(row[p]) for p in income.periods if pd.notna(pd.to_numeric(row[p]))}
 
 
 def da_items(cashflow: Statement) -> pd.DataFrame:
@@ -107,8 +110,8 @@ def da_items(cashflow: Statement) -> pd.DataFrame:
 
 def components(ss: StatementSet) -> pd.DataFrame:
     """Per period: ``pretax``, ``da`` (Σ items), ``nwc`` (index = periods)."""
-    income, cashflow = ss.income, ss.cashflow
-    pretax = _first_value(income, income.frame["standard_concept"].eq(PRETAX_INCOME))
+    cashflow = ss.cashflow
+    pretax = pretax_income(ss.income)
     items = da_items(cashflow)
     nwc = nwc_rows(cashflow)
     periods = [p for p in cashflow.periods if p in pretax]

@@ -46,6 +46,8 @@ CFI = "us-gaap_NetCashProvidedByUsedInInvestingActivities"
 NWC_ABSTRACT = "us-gaap_IncreaseDecreaseInOperatingCapitalAbstract"
 NWC_PREFIX = "IncreaseDecreaseIn"
 
+PRETAX_LOCAL_NAME_FRAGMENT = "BeforeIncomeTax"
+
 # Concepts reported on both the income and cash-flow statements.
 NET_INCOME_CONCEPTS = ("us-gaap_NetIncomeLoss", "us-gaap_ProfitLoss")
 
