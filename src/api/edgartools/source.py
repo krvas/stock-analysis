@@ -49,6 +49,7 @@ from src.models.statement import (
     Statement,
     StatementSet,
     StatementType,
+    dimension_pairs,
     format_dimension_key,
     get_row_id,
 )
@@ -346,6 +347,19 @@ def _concept_id(element_id: str) -> str:
     return f"{prefix}_{local}" if colon else element_id
 
 
+def _role_uri(xbrl, statement) -> str | None:
+    """The role URI of ``statement`` in one filing, resolved the way
+    edgartools' ``Statement.extension_arcs`` does (``find_statement`` on the
+    canonical type, else ``role_or_type``); ``None`` if the lookup fails."""
+    lookup_key = statement.canonical_type or statement.role_or_type
+    try:
+        _, role_uri, _ = xbrl.find_statement(lookup_key)
+    except Exception:  # noqa: BLE001 - StatementNotFound and assorted errors
+        logger.warning("Role lookup failed for %r", lookup_key)
+        return None
+    return role_uri or None
+
+
 def _role_calc_edges(xbrl, statement) -> list[tuple[str, str, float]]:
     """Every arc of the calc tree of ``statement``'s own role in one filing.
 
@@ -357,15 +371,10 @@ def _role_calc_edges(xbrl, statement) -> list[tuple[str, str, float]]:
     edgartools error or a role without a calc tree, logs a warning and
     returns no edges.
     """
-    lookup_key = statement.canonical_type or statement.role_or_type
-    try:
-        _, role_uri, _ = xbrl.find_statement(lookup_key)
-    except Exception:  # noqa: BLE001 - StatementNotFound and assorted errors
-        logger.warning("Calc role lookup failed for %r; no calc edges", lookup_key)
-        return []
+    role_uri = _role_uri(xbrl, statement)
     tree = xbrl.calculation_trees.get(role_uri) if role_uri else None
     if tree is None:
-        logger.warning("No calc tree for role %r (%r)", role_uri, lookup_key)
+        logger.warning("No calc tree for role %r; no calc edges", role_uri)
         return []
     edges: list[tuple[str, str, float]] = []
     for element_id, node in tree.all_nodes.items():
@@ -375,6 +384,84 @@ def _role_calc_edges(xbrl, statement) -> list[tuple[str, str, float]]:
             (_concept_id(element_id), _concept_id(node.parent), float(node.weight))
         )
     return edges
+
+
+def _non_dimensional_facts(xbrl) -> set[tuple[str, float]] | None:
+    try:
+        facts = xbrl.facts.to_dataframe()
+    except Exception:  # noqa: BLE001 - edgartools raises assorted errors
+        facts = None
+    if not isinstance(facts, pd.DataFrame) or facts.empty:
+        logger.warning("Could not read XBRL facts; total rows keep edgartools' fills")
+        return None
+    facts = facts[
+        ~facts["is_dimensioned"].fillna(False).astype(bool)
+        & facts["numeric_value"].notna()
+    ]
+    return set(
+        zip(
+            facts["concept"].map(_concept_id),
+            facts["numeric_value"].astype(float),
+            strict=True,
+        )
+    )
+
+
+def _presented_elements(xbrl, statement) -> set[str]:
+    """Element ids (``prefix_Local``) in the presentation tree of
+    ``statement``'s role: its line items, axes and members."""
+    role_uri = _role_uri(xbrl, statement)
+    tree = xbrl.presentation_trees.get(role_uri) if role_uri else None
+    if tree is None:
+        return set()
+    return {_concept_id(element_id) for element_id in tree.all_nodes}
+
+
+def _presented_breakdown_totals(
+    frame: pd.DataFrame, column: str, presented: set[str]
+) -> set[tuple[str, float]]:
+    """``(concept, sum)`` for each single-axis breakdown in ``column`` whose
+    axis and every member are on the statement's face."""
+    members: dict[tuple[str, str], list[tuple[str, float]]] = {}
+    for record in frame[frame["dimension"].fillna(False).astype(bool)].to_dict(
+        orient="records"
+    ):
+        pairs = dimension_pairs(record)
+        value = pd.to_numeric(record.get(column), errors="coerce")
+        if len(pairs) == 1 and pd.notna(value):
+            axis, member = (_concept_id(part) for part in pairs[0])
+            members.setdefault((record["concept"], axis), []).append((member, value))
+    return {
+        (concept, float(sum(value for _, value in values)))
+        for (concept, axis), values in members.items()
+        if axis in presented and all(member in presented for member, _ in values)
+    }
+
+
+def _without_dimensional_fills(
+    frame: pd.DataFrame, facts: set[tuple[str, float]], presented: set[str]
+) -> pd.DataFrame:
+    """edgartools fills a total row from one axis's dimensional members (a
+    member's value or their sum) when the filing has no non-dimensional fact
+    for that concept and period (edgartools issue #646,
+    ``XBRL._compute_synthetic_total``), including members that only a note
+    reports (ET's operating cash flow on the lease axis). A fill is kept only
+    when the statement itself presents that axis and its members (SNDK's
+    accounts payable by related party).
+    """
+    total_rows = ~frame["dimension"].fillna(False).astype(bool)
+    for column in _period_columns(frame):
+        kept = facts | _presented_breakdown_totals(frame, column, presented)
+        values = pd.to_numeric(frame[column], errors="coerce")
+        unbacked = pd.Series(
+            [
+                (concept, value) not in kept
+                for concept, value in zip(frame["concept"], values, strict=True)
+            ],
+            index=frame.index,
+        )
+        frame.loc[total_rows & values.notna() & unbacked, column] = None
+    return frame
 
 
 def _filing_frame(
@@ -405,6 +492,11 @@ def _filing_frame(
         frame["dimension_key"] = [_dimension_key(item) for item in items]
         frame["weight"] = _role_weights(frame, items)
     frame["in_standard"] = _in_standard(statement, frame)
+    facts = _non_dimensional_facts(xbrl)
+    if facts is not None:
+        frame = _without_dimensional_fills(
+            frame, facts, _presented_elements(xbrl, statement)
+        )
     return frame, _role_calc_edges(xbrl, statement)
 
 
