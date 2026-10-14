@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
+import pandas as pd
 import pytest
 
 from src.adjustments.base import MEMO_TAG, AdjustmentSpec
 from src.adjustments.engine import apply_adjustments
 from src.adjustments.types import owner_earnings as oe
 from src.api.edgartools.standard_terms import CFO
+from src.models.statement import Statement
 from tests.owner_earnings_fixture import (
     CFI,
     DEPRECIATION,
+    INVENTORIES,
     MAINTENANCE_CAPEX,
     MAINTENANCE_NWC,
     OWNER_EARNINGS,
@@ -40,7 +43,7 @@ def test_apply_adds_memo_rows_with_hand_computed_values() -> None:
         assert row.statement == "cashflow"
         assert row.values == pytest.approx(values), concept
         assert row.tags == (MEMO_TAG,)
-        assert row.parent_concept is None
+        assert row.parents == {}
         assert row.is_total == (concept == "adj_OwnerEarnings")
     assert rows["adj_MaintenanceWorkingCapital"].label == (
         "Maintenance working capital (50% of ΔNWC)"
@@ -98,3 +101,16 @@ def test_describe_counts_da_items_and_shows_the_nwc_pct(
         "type": oe.TYPE_ID,
         "label": label,
     }
+
+
+def test_nwc_takes_the_cfo_weight_of_a_row_summed_into_two_totals() -> None:
+    cashflow = filing().cashflow
+    edges = cashflow.calc_edges
+    subtotal = edges[edges["concept"] == INVENTORIES].assign(
+        parent_concept="us-gaap_IncreaseDecreaseInOperatingCapital", weight=1.0
+    )
+    both = Statement(
+        cashflow.frame, "cashflow", pd.concat([edges, subtotal], ignore_index=True)
+    )
+    rows = oe.nwc_rows(both).set_index("row_id")
+    assert rows.loc[INVENTORIES, [P1, P2, P3]].tolist() == [-4.0, 2.0, -1.0]

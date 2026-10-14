@@ -503,7 +503,7 @@ def test_calc_edges_given_are_kept_per_period() -> None:
         (lambda e: e.assign(period=[P1, P1, P2, "1999-12-31"]), "unknown period"),
         (
             lambda e: e.assign(concept=["Revenues", "Revenues", "Revenues", "C"]),
-            "more than one parent",
+            "repeats the edge",
         ),
     ],
     ids=["no-weight-column", "nan-weight", "nan-parent", "unknown-period", "dup"],
@@ -511,6 +511,28 @@ def test_calc_edges_given_are_kept_per_period() -> None:
 def test_calc_edges_validation(change, match: str) -> None:
     with pytest.raises(ValueError, match=match):
         Statement(_income_frame(), "income", calc_edges=change(_per_period_edges()))
+
+
+def test_calc_edges_keep_a_concept_summed_into_two_totals() -> None:
+    edges = _per_period_edges()
+    second = pd.DataFrame(
+        [
+            {
+                "period": P1,
+                "concept": "Revenues",
+                "parent_concept": "Sales",
+                "weight": -1.0,
+            }
+        ]
+    )
+    statement = Statement(
+        _income_frame(), "income", calc_edges=pd.concat([edges, second])
+    )
+    assert _edge_set(statement.calc_edges, P1) == {
+        ("Revenues", "GrossProfit", 1.0),
+        ("CostOfRevenue", "GrossProfit", -1.0),
+        ("Revenues", "Sales", -1.0),
+    }
 
 
 def test_calc_edges_carried_by_with_values_and_insert() -> None:
