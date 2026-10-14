@@ -377,6 +377,60 @@ def _role_calc_edges(xbrl, statement) -> list[tuple[str, str, float]]:
     return edges
 
 
+def _non_dimensional_facts(xbrl) -> set[tuple[str, float]] | None:
+    """``(concept, value)`` of every numeric non-dimensional fact in a filing.
+
+    ``None`` if the filing's facts cannot be read.
+    """
+    try:
+        facts = xbrl.facts.to_dataframe()
+    except Exception:  # noqa: BLE001 - edgartools raises assorted errors
+        facts = None
+    if not isinstance(facts, pd.DataFrame) or not {
+        "concept",
+        "is_dimensioned",
+        "numeric_value",
+    }.issubset(facts.columns):
+        logger.warning("Could not read XBRL facts; total rows keep edgartools' fills")
+        return None
+    facts = facts[
+        ~facts["is_dimensioned"].fillna(False).astype(bool)
+        & facts["numeric_value"].notna()
+    ]
+    return set(
+        zip(
+            facts["concept"].map(_concept_id),
+            facts["numeric_value"].astype(float),
+            strict=True,
+        )
+    )
+
+
+def _without_dimensional_fills(
+    frame: pd.DataFrame, facts: set[tuple[str, float]]
+) -> pd.DataFrame:
+    """Blank each non-dimensional cell that no non-dimensional fact backs.
+
+    When a filing has no non-dimensional fact for a concept and period,
+    edgartools fills the total row from its dimensional facts (one member's
+    value, or the members' sum): ET's FY2019 operating cash flow came out as
+    the operating-lease axis value. A cell is kept when the filing has a
+    non-dimensional fact of the row's concept with that value.
+    """
+    total_rows = ~frame["dimension"].fillna(False).astype(bool)
+    for column in _period_columns(frame):
+        values = pd.to_numeric(frame[column], errors="coerce")
+        unbacked = pd.Series(
+            [
+                (concept, value) not in facts
+                for concept, value in zip(frame["concept"], values, strict=True)
+            ],
+            index=frame.index,
+        )
+        frame.loc[total_rows & values.notna() & unbacked, column] = None
+    return frame
+
+
 def _filing_frame(
     xbrl, statement_type: StatementType
 ) -> tuple[pd.DataFrame, list[tuple[str, str, float]]] | None:
@@ -388,7 +442,8 @@ def _filing_frame(
     :func:`_in_standard`), and replaces ``weight`` with this statement role's
     calc weight (:func:`_role_weights`). Raw data is fetched and aligned once
     (:func:`_raw_items`); if that fails, ``dimension_key`` falls back to the
-    primary pair and ``weight`` stays edgartools'.
+    primary pair and ``weight`` stays edgartools'. Non-dimensional cells hold
+    only filed non-dimensional facts (:func:`_without_dimensional_fills`).
     """
     getter = getattr(xbrl.statements, _STATEMENT_METHODS[statement_type])
     statement = getter(view="detailed")
@@ -405,6 +460,9 @@ def _filing_frame(
         frame["dimension_key"] = [_dimension_key(item) for item in items]
         frame["weight"] = _role_weights(frame, items)
     frame["in_standard"] = _in_standard(statement, frame)
+    facts = _non_dimensional_facts(xbrl)
+    if facts is not None:
+        frame = _without_dimensional_fills(frame, facts)
     return frame, _role_calc_edges(xbrl, statement)
 
 

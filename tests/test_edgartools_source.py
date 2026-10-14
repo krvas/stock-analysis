@@ -140,6 +140,7 @@ def _mock_xbrl(
     frames_by_statement: dict[str, pd.DataFrame],
     standard_by_statement: dict[str, pd.DataFrame | Exception] | None = None,
     calc_trees: dict[str, dict[str, tuple[str | None, float]]] | None = None,
+    facts: pd.DataFrame | None = None,
 ) -> MagicMock:
     """A filing whose statements return the given frames.
 
@@ -147,9 +148,13 @@ def _mock_xbrl(
     (or raises it, if an exception), defaulting to :func:`_default_standard`.
     ``calc_trees`` maps a statement type to its role's calc nodes
     (``{element_id: (parent, weight)}``, default empty); ``find_statement``
-    resolves each statement's canonical type to that role.
+    resolves each statement's canonical type to that role. ``facts`` is the
+    filing's ``xbrl.facts.to_dataframe()`` (default: a MagicMock, which the
+    source treats as unreadable facts).
     """
     xbrl = MagicMock()
+    if facts is not None:
+        xbrl.facts.to_dataframe.return_value = facts
     standard_by_statement = standard_by_statement or {}
     calc_trees = calc_trees or {}
     xbrl.find_statement.side_effect = lambda key: ([], _role(key), key)
@@ -563,6 +568,63 @@ def test_build_warns_when_filing_has_no_column_for_its_period(
         assert "filing 0" in messages[0]
     else:
         assert messages == []
+
+
+def _facts(rows: list[tuple[str, bool, float]]) -> pd.DataFrame:
+    """An ``xbrl.facts.to_dataframe()`` frame of ``(concept, is_dimensioned,
+    numeric_value)`` facts."""
+    concepts, dimensioned, values = zip(*rows, strict=True)
+    return pd.DataFrame(
+        {
+            "concept": list(concepts),
+            "is_dimensioned": list(dimensioned),
+            "numeric_value": list(values),
+        }
+    )
+
+
+@patch("src.api.edgartools.source.determine_optimal_periods")
+def test_build_blanks_total_cells_without_a_non_dimensional_fact(
+    mock_periods: MagicMock,
+) -> None:
+    """edgartools fills a total row from dimensional facts when the filing has
+    no non-dimensional fact (ET's FY2019 CFO came out as the operating-lease
+    axis value). Only a filed non-dimensional fact may fill a total row."""
+    lease = ("us-gaap_LeaseArrangementTypeAxis", "us-gaap_OperatingLeasesMember")
+    frame = _filing_df(
+        "2019-12-31 (FY)",
+        [
+            {
+                "concept": "us-gaap_NetCashProvidedByUsedInOperatingActivities",
+                "value": -159.0,
+            },
+            {
+                "concept": "us-gaap_NetCashProvidedByUsedInOperatingActivities",
+                "axes": [lease],
+                "value": -159.0,
+            },
+            {"concept": "us-gaap_ProfitLoss", "value": 3592.0},
+        ],
+    )
+    facts = _facts(
+        [
+            ("us-gaap:NetCashProvidedByUsedInOperatingActivities", True, -159.0),
+            ("us-gaap:ProfitLoss", False, 3592.0),
+        ]
+    )
+    xbrls = MagicMock()
+    xbrls.xbrl_list = [_mock_xbrl({"cashflow": frame}, facts=facts)]
+    mock_periods.return_value = [
+        {"xbrl_index": 0, "end_date": "2019-12-31", "period_type": "duration"}
+    ]
+
+    built = _build_statement(xbrls, "cashflow", max_periods=8).frame
+
+    values = dict(zip(built["row_id"], built["2019-12-31"], strict=True))
+    cfo = "us-gaap_NetCashProvidedByUsedInOperatingActivities"
+    assert np.isnan(values[cfo])
+    assert values[f"{cfo}|LeaseArrangementTypeAxis={lease[1]}"] == -159.0
+    assert values["us-gaap_ProfitLoss"] == 3592.0
 
 
 # Old tree: ProfitLoss under NetIncomeLoss; new tree: pretax income directly.

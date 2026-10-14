@@ -179,9 +179,9 @@ def test_save_and_load_round_trips_empty_calc_edges(tmp_path: Path) -> None:
     assert list(edges.columns) == ["period", "concept", "parent_concept", "weight"]
 
 
-def test_schema_version_is_8() -> None:
-    """Bumped for the note-reported D&A breakdown rows on the cash flow."""
-    assert CACHE_SCHEMA_VERSION == 8
+def test_schema_version_is_9() -> None:
+    """Bumped when total rows stopped taking dimensional facts' values."""
+    assert CACHE_SCHEMA_VERSION == 9
 
 
 def test_load_returns_none_when_statement_file_missing(tmp_path: Path) -> None:

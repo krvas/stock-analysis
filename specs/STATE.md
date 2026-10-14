@@ -149,7 +149,12 @@ defaults it to `not dimension or not is_breakdown`. The aligned raw items
 `weight`: edgartools' frame weight comes from the concept's first fact and can
 be another role's calc tree, the raw item's is this role's (same node as
 `parent_concept`); dimensional rows take their concept's role weight. If
-alignment fails, edgartools' weight is kept. Rows
+alignment fails, edgartools' weight is kept. A non-dimensional (total) cell
+keeps its value only when the filing has a non-dimensional fact of that
+concept with that value (`_without_dimensional_fills`): with no such fact,
+edgartools fills the total from dimensional facts (e.g. ET's FY2019 CFO was
+the operating-lease axis value), and we leave the cell empty. If the facts
+cannot be read, edgartools' values are kept. Rows
 matched across filings by `get_row_id`; metadata from the newest filing a
 row appears in, except `weight` = newest non-NaN across filings. Values
 stored with **raw** XBRL signs. Because filers restructure calc trees, those
