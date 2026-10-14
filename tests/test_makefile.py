@@ -35,7 +35,8 @@ def _pytest_commands(target: str, env: dict[str, str]) -> list[str]:
 @pytest.mark.parametrize("target", ["test", "test-data-long"])
 def test_pytest_sees_no_git_variables(target: str, tmp_path: Path) -> None:
     env = {k: v for k, v in os.environ.items() if not k.startswith(("MAKE", "MFLAGS"))}
-    env |= {"GIT_EDITOR": "true", "GIT_DIR": str(tmp_path)}
+    env |= {"GIT_EDITOR": "true", "GIT_DIR": str(tmp_path / "git")}
+    env["DATA_RUN_LOCK"] = str(tmp_path / "data-run.lock")
     commands = _pytest_commands(target, env)
     assert commands, f"make {target} runs no pytest command"
     for command in commands:
