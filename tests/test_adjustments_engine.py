@@ -79,6 +79,12 @@ def test_from_prefs_groups_by_type() -> None:
     assert specs[1].params == {"maintenance_da": 60.0, "maintenance_nwc": 50.0}
 
 
+def _computed_periods(statement, concept: str) -> set[str]:
+    """Periods where ``concept`` has calc children, so the engine recomputes it."""
+    edges = statement.calc_edges
+    return set(edges.loc[edges["parent_concept"] == concept, "period"])
+
+
 def _row_values(ss, statement: str, concept: str) -> pd.Series | None:
     frame = ss.get(statement).frame
     rows = frame[(frame["concept"] == concept) & ~frame["dimension"].eq(True)]
@@ -129,14 +135,20 @@ def test_capitalized_opex_moves_every_period_by_its_schedule(data_ticker: str) -
     balance_concepts = set(base.balance.frame["concept"])
     equity = next(c for c in EQUITY_PARENTS if c in balance_concepts)
     cash_concepts = set(base.cashflow.frame["concept"])
-    operating = {c for c in OPERATING_CASH_TOTALS if c in cash_concepts}
-    assert operating, (data_ticker, "no operating cash total")
+    operating_spend = {
+        c: {p: v for p, v in spend.items() if p in _computed_periods(base.cashflow, c)}
+        for c in OPERATING_CASH_TOTALS
+        if c in cash_concepts
+    }
+    operating = {c for c, moved in operating_spend.items() if moved}
+    assert operating, (data_ticker, "no computed operating cash total")
+    investing = _computed_periods(base.cashflow, CFI)
     expected = {
         ("balance", "us-gaap_Assets"): net,
         ("balance", equity): net,
         ("balance", "us-gaap_LiabilitiesAndStockholdersEquity"): net,
-        **{("cashflow", c): spend for c in operating},
-        ("cashflow", CFI): {p: -v for p, v in spend.items()},
+        **{("cashflow", c): operating_spend[c] for c in operating},
+        ("cashflow", CFI): {p: -v for p, v in spend.items() if p in investing},
     }
     for (st, concept), change in expected.items():
         before = _row_values(base, st, concept)
