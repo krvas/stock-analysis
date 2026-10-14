@@ -184,6 +184,25 @@ def test_calc_residuals_rounding_skips_unreported_children_and_caps_unit() -> No
     assert residuals["rounding"].tolist() == [1e6]
 
 
+def test_calc_residuals_rounding_unit_is_per_parent_not_per_period_tree() -> None:
+    # BDX's income tree: dollar totals in millions next to EPS in cents. Each
+    # summation is rounded in its own unit; EPS must not shrink the dollars'.
+    frame = pd.DataFrame(
+        [
+            _row("NetIncome", "Net income", **{P1: 1_001e6}),
+            _row("Cont", "Continuing", parent_concept="NetIncome", **{P1: 800e6}),
+            _row("Disc", "Discontinued", parent_concept="NetIncome", **{P1: 200e6}),
+            _row("EPS", "EPS", **{P1: 6.49}),
+            _row("EPSCont", "EPS cont.", parent_concept="EPS", **{P1: 5.19}),
+            _row("EPSDisc", "EPS disc.", parent_concept="EPS", **{P1: 1.30}),
+        ]
+    )
+    residuals = calc_residuals(make_statement(frame, "income")).set_index("row_id")
+
+    assert residuals.at["NetIncome", "residual"] == 1e6
+    assert residuals.at["NetIncome", "rounding"] == 1.5e6
+
+
 def test_calc_residuals_counts_missing_children() -> None:
     # The calc tree has a child (C) the statement does not present.
     frame = pd.DataFrame(
