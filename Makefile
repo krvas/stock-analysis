@@ -1,19 +1,24 @@
 .PHONY: test test-data-long fix jev
 
+# Runs a command with every GIT_* variable unset. The agent shell exports
+# GIT_EDITOR and git rebase -x sets GIT_DIR; a test that runs git in a temp
+# repo inherits them, and one once corrupted this repo's .git that way.
+NO_GIT_ENV := env $(addprefix -u ,$(filter GIT_%,$(.VARIABLES)))
+
 # Lint, format check, unit tests. Run before every commit.
 test:
 	python3 scripts/link_worktree_files.py
 	.venv/bin/ruff check .
 	.venv/bin/ruff format --check .
-	.venv/bin/python -m pytest -q
-	REQUIRE_DATA_TESTS=1 .venv/bin/python -m pytest -m data -q
+	$(NO_GIT_ENV) .venv/bin/python -m pytest -q
+	$(NO_GIT_ENV) REQUIRE_DATA_TESTS=1 .venv/bin/python -m pytest -m data -q
 	npm run lint
 	npm test
 
 # Data tests only, over tests/data_test_tickers_long.txt.
 test-data-long:
 	python3 scripts/link_worktree_files.py
-	REQUIRE_DATA_TESTS=1 DATA_TICKERS=long .venv/bin/python -m pytest -m data -q
+	$(NO_GIT_ENV) REQUIRE_DATA_TESTS=1 DATA_TICKERS=long .venv/bin/python -m pytest -m data -q
 
 # Apply what ruff can fix (lint autofixes and formatting).
 fix:
