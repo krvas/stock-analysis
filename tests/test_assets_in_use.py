@@ -8,6 +8,7 @@ from src.adjustments.engine import apply_adjustments
 from src.adjustments.specs import describe, from_prefs
 from src.adjustments.types.assets_in_use import GROSS_CONCEPT, NET_CONCEPT, TYPE_ID
 from src.api.edgartools.source import load_statement_set
+from src.models.balance_leaves import balance_leaves
 from src.models.statement import Statement, StatementSet
 from src.web.routes.wizard_pages.business_understanding import fund_flow_table
 from tests import test_adjustment_pipeline as pipeline
@@ -214,3 +215,40 @@ def test_defaults_reproduce_total_assets_on_test_tickers(data_ticker: str) -> No
         assert frame.at[NET_CONCEPT, period] == pytest.approx(total), data_ticker
         if LE in frame.index and pd.notna(frame.at[LE, period]):
             assert frame.at[LE, period] == pytest.approx(total), data_ticker
+
+
+def test_a_leaf_summed_into_two_totals_counts_once_toward_total_assets() -> None:
+    # JPM's balance sheet: loans and their allowance sum into both the net
+    # loans line and Assets; the net loans line is not itself under Assets.
+    net = "us-gaap_LoansReceivableNet"
+    rows = [
+        ("Cash", "Cash", 50.0),
+        ("Loans", "Loans", 100.0),
+        ("Allowance", "Allowance for loan losses", 10.0),
+        (net, "Loans, net", 90.0),
+        (A, "Total assets", 140.0),
+    ]
+    frame = pd.DataFrame([_row(c, label, **{P1: v}) for c, label, v in rows])
+    arcs = [
+        ("Loans", net, 1.0),
+        ("Allowance", net, -1.0),
+        ("Cash", A, 1.0),
+        ("Loans", A, 1.0),
+        ("Allowance", A, -1.0),
+    ]
+    edges = pd.DataFrame(
+        [
+            {"period": P1, "concept": c, "parent_concept": p, "weight": w}
+            for c, p, w in arcs
+        ]
+    )
+    balance = Statement(frame, "balance", calc_edges=edges)
+
+    leaves = balance_leaves(balance, P1)
+
+    assert {leaf.row_id: (leaf.side, leaf.chain_weight) for leaf in leaves} == {
+        "Cash": ("assets", 1.0),
+        "Loans": ("assets", 1.0),
+        "Allowance": ("assets", -1.0),
+    }
+    assert sum(leaf.contribution for leaf in leaves) == 140.0

@@ -54,6 +54,8 @@ src/database/              schema.sql + tables.py; wizard.sql + wizard_tables.py
 src/models/statement.py    Statement / StatementSet / get_row_id
                            (pure domain: pandas only, no I/O)
 src/models/calc_residuals.py  calc_residuals (calc-linkbase residuals; pure)
+src/models/calc_graph.py   CalcGraph (one period's calc DAG: parents, ancestors,
+                           path coefficients, depth; every calc walk; pure)
 src/models/balance_leaves.py  balance_leaves (balance-sheet leaves, side, equity
                            flag, effective calc weight; pure)
 src/models/table.py        Table / ColumnSpec / LinkedGroupSpec  (FE↔BE contract)
@@ -156,9 +158,13 @@ stored with **raw** XBRL signs. Because filers restructure calc trees, those
 `parent_concept` / `weight` columns are newest-filing metadata only:
 `Statement.calc_edges` (long frame `period, concept, parent_concept, weight`,
 stored as `{statement}_calc.parquet`) gives each period every arc of the
-statement role's calc tree (`xbrl.find_statement` → `calculation_trees`, no
-cross-role fallback) of the filing that period's values came from; calc code
-must use it. Without stored edges, `Statement` broadcasts the frame's own
+statement role's calc network (`xbrl.find_statement` → `calculation_trees` →
+`all_arcs`, no cross-role fallback) of the filing that period's values came
+from; calc code must use it. The network is a DAG: a concept a filer sums
+into two totals (JPM's loans into net loans and Assets) has one edge per
+parent, unique per `(period, parent_concept, concept)`. Code that walks it
+goes through `Statement.calc_graph(period)` (`CalcGraph`), never a
+`concept → parent` dict. Without stored edges, `Statement` broadcasts the frame's own
 tree to every period. `Statement.children(row_id, period)` returns the
 non-dimensional child rows in that period's edges, `weight` = edge weight.
 Rebuilt on `schema_version` mismatch (`CACHE_SCHEMA_VERSION`) or

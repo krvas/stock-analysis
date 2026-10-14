@@ -9,8 +9,9 @@ stored with **raw** XBRL signs; ``preferred_sign`` is applied only in
 :meth:`Statement.project`.
 
 The calc tree is per period: :attr:`Statement.calc_edges` is a long frame
-(``period, concept, parent_concept, weight``) holding, for each period, the
-calc tree of the filing that period's values came from. Filers restructure
+(``period, concept, parent_concept, weight``) holding, for each period, every
+calc arc of the filing that period's values came from; a concept summed into
+two totals has two rows. :meth:`Statement.calc_graph` walks one period's arcs. Filers restructure
 their calc trees over the years, so the frame's own ``parent_concept`` /
 ``weight`` columns (edgartools-mirror metadata from the newest filing a row
 appears in) must not be used for calc math across periods; calc code uses
@@ -30,6 +31,7 @@ from typing import Any, Literal, get_args
 import numpy as np
 import pandas as pd
 
+from src.models.calc_graph import CalcGraph
 from src.utils.text import clean_str, is_missing
 
 StatementType = Literal["income", "balance", "cashflow"]
@@ -293,12 +295,12 @@ def _validated_calc_edges(edges: pd.DataFrame, periods: Sequence[str]) -> pd.Dat
     unknown = sorted(set(out["period"]) - set(periods))
     if unknown:
         raise ValueError(f"calc_edges has unknown period(s): {unknown}")
-    duplicated = out[out.duplicated(["period", "concept"], keep=False)]
+    duplicated = out[out.duplicated(["period", "parent_concept", "concept"])]
     if not duplicated.empty:
         first = duplicated.iloc[0]
         raise ValueError(
-            "calc_edges has more than one parent for "
-            f"{first['concept']!r} in {first['period']!r}"
+            f"calc_edges repeats the edge {first['concept']!r} → "
+            f"{first['parent_concept']!r} in {first['period']!r}"
         )
     return out
 
@@ -386,13 +388,19 @@ class Statement:
     def calc_edges(self) -> pd.DataFrame:
         """Per-period calc tree (raw signs). Do not mutate.
 
-        Columns :data:`CALC_EDGE_COLUMNS`: one row per ``(period, concept)``
-        with a calc parent in the statement role's calc tree of the filing
-        that ``period``'s values came from (``weight`` ±1 etc., never NaN).
+        Columns :data:`CALC_EDGE_COLUMNS`: one row per ``(period,
+        parent_concept, concept)`` arc in the statement role's calc network of
+        the filing that ``period``'s values came from (``weight`` ±1 etc.,
+        never NaN); a concept summed into two totals has two rows.
         Concept-level, not row-level: dimensional rows share their concept's
         edge. Includes calc-tree concepts the statement does not present.
         """
         return self._calc_edges
+
+    def calc_graph(self, period: str) -> CalcGraph:
+        """``period``'s calc network (:attr:`calc_edges`) as a graph."""
+        edges = self._calc_edges
+        return CalcGraph.from_edges(edges[edges["period"] == period])
 
     @property
     def periods(self) -> list[str]:

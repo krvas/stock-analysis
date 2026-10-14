@@ -158,35 +158,24 @@ def _insert_row(statement: Statement, new_row: NewRow, origin: str) -> Statement
     after = new_row.after if new_row.after in set(statement.frame["row_id"]) else None
     inserted = statement.insert(row, after=after)
 
-    edges = [statement.calc_edges]
-    parents = new_row.parent_concept
-    if parents is not None:
-        tree = statement.calc_edges
-        for period in periods:
-            parent = parents.get(period) if isinstance(parents, dict) else parents
-            if parent is None:
-                continue
-            in_tree = (tree["period"] == period) & (
-                (tree["parent_concept"] == parent) | (tree["concept"] == parent)
-            )
-            if not in_tree.any():
-                continue
-            weight = new_row.weight
-            if isinstance(weight, dict):
-                weight = weight.get(period, 1.0)
-            edges.append(
-                pd.DataFrame(
-                    {
-                        "period": [period],
-                        "concept": [new_row.concept],
-                        "parent_concept": [parent],
-                        "weight": [float(weight)],
-                    }
-                )
-            )
-    return Statement(
-        inserted.frame, statement.statement_type, pd.concat(edges, ignore_index=True)
-    )
+    tree = statement.calc_edges
+    added = [
+        {
+            "period": period,
+            "concept": new_row.concept,
+            "parent_concept": parent,
+            "weight": float(weight),
+        }
+        for period, parents in new_row.parents.items()
+        if period in periods
+        for parent, weight in parents.items()
+        if (
+            (tree["period"] == period)
+            & ((tree["parent_concept"] == parent) | (tree["concept"] == parent))
+        ).any()
+    ]
+    edges = pd.concat([tree, pd.DataFrame(added)], ignore_index=True) if added else tree
+    return Statement(inserted.frame, statement.statement_type, edges)
 
 
 def _level_after(statement: Statement, after: str | None) -> int:
@@ -246,15 +235,15 @@ def _recompute(
     touched: set[str] = set()
     for period in statement.periods:
         tree = edges[edges["period"] == period]
-        parent_of = dict(zip(tree["concept"], tree["parent_concept"], strict=True))
+        graph = statement.calc_graph(period)
         children = tree.groupby("parent_concept")
         values = pd.to_numeric(frame[period], errors="coerce").astype(float)
         frame[period] = values
-        pending = {parent_of[c] for c in dirty if c in parent_of}
+        pending = {p for c in dirty for p in graph.parents(c)}
         seen: set[str] = set()
         while pending:
             # Recompute deepest parents first so each sees final child values.
-            parent = max(pending, key=lambda c: _depth(c, parent_of))
+            parent = max(pending, key=graph.depth)
             pending.discard(parent)
             if parent in seen or parent not in rows.index:
                 continue
@@ -271,14 +260,5 @@ def _recompute(
                     if pd.notna(child_value):
                         total += weight * child_value
             frame.at[index, period] = total
-            if parent in parent_of:
-                pending.add(parent_of[parent])
+            pending.update(graph.parents(parent))
     return Statement(frame, statement.statement_type, statement.calc_edges), touched
-
-
-def _depth(concept: str, parent_of: dict[str, str]) -> int:
-    depth = 0
-    while concept in parent_of and depth < 100:
-        concept = parent_of[concept]
-        depth += 1
-    return depth

@@ -481,3 +481,56 @@ def test_opex_amortization_takes_the_expense_weight_of_each_period() -> None:
     spend_less_amort = {P1: 30.0, P2: 30.0, P3: 20.0}
     assert delta(run.statements, base, "income", NI) == spend_less_amort
     assert delta(run.statements, base, "cashflow", CFO) == SPEND
+
+
+SEGMENTS = "us-gaap_SegmentOperatingIncome"
+COSTS = "us-gaap_CostsAndExpenses"
+
+
+def _with_edges(ss: StatementSet, statement: str, *edges: tuple) -> StatementSet:
+    """``ss`` with ``(concept, parent, weight)`` edges added in every period."""
+    st = ss.get(statement)
+    added = pd.DataFrame(
+        [
+            {"period": p, "concept": c, "parent_concept": parent, "weight": w}
+            for c, parent, w in edges
+            for p in st.periods
+        ]
+    )
+    return dataclasses.replace(
+        ss,
+        **{
+            statement: Statement(
+                st.frame,
+                st.statement_type,
+                pd.concat([st.calc_edges, added], ignore_index=True),
+            )
+        },
+    )
+
+
+def test_engine_recomputes_every_total_a_changed_row_sums_into() -> None:
+    income = [*INCOME, (SEGMENTS, "Segment income", None, None, 1.0, INCOME[2][5])]
+    base = _with_edges(filing(income), "income", (OI, SEGMENTS, 1.0))
+    run = apply_adjustments(base, [OPEX_SPEC])
+    assert run.applied == (OPEX_SPEC,) and run.skipped == ()
+    spend_less_amort = {P1: 30.0, P2: 30.0, P3: 20.0}
+    assert delta(run.statements, base, "income", PRETAX) == spend_less_amort
+    assert delta(run.statements, base, "income", SEGMENTS) == spend_less_amort
+
+
+def test_opex_amortization_joins_every_total_the_expense_sums_into() -> None:
+    income = [*INCOME, (COSTS, "Total costs", None, None, 1.0, _values(90, 60, 30))]
+    base = _with_edges(filing(income), "income", (RND, COSTS, 1.0))
+    run = apply_adjustments(base, [OPEX_SPEC])
+    assert run.applied == (OPEX_SPEC,) and run.skipped == ()
+    adjusted = run.statements
+    assert delta(adjusted, base, "income", COSTS) == {P1: -30.0, P2: -30.0, P3: -20.0}
+    assert delta(adjusted, base, "income", NI) == {P1: 30.0, P2: 30.0, P3: 20.0}
+    edges = adjusted.income.calc_edges
+    amortization = edges[edges["concept"] == AMORTIZATION]
+    assert set(zip(amortization["parent_concept"], amortization["weight"])) == {
+        (OI, -1.0),
+        (COSTS, 1.0),
+    }
+    assert len(amortization) == 6

@@ -347,12 +347,13 @@ def _concept_id(element_id: str) -> str:
 
 
 def _role_calc_edges(xbrl, statement) -> list[tuple[str, str, float]]:
-    """Every arc of the calc tree of ``statement``'s own role in one filing.
+    """Every arc of the calc network of ``statement``'s own role in one filing.
 
     Resolves the role the way edgartools' ``Statement.extension_arcs`` does
     (``find_statement`` on the canonical type, else ``role_or_type``) and
-    emits ``(concept, parent_concept, weight)`` for each calc node with a
-    parent, including concepts the statement does not present. No cross-role
+    emits ``(concept, parent_concept, weight)`` once per filed arc
+    (``tree.all_arcs``), so a concept summed into two totals keeps both,
+    including concepts the statement does not present. No cross-role
     fallback: another role's tree (e.g. the EPS note's) is never used. On an
     edgartools error or a role without a calc tree, logs a warning and
     returns no edges.
@@ -367,14 +368,13 @@ def _role_calc_edges(xbrl, statement) -> list[tuple[str, str, float]]:
     if tree is None:
         logger.warning("No calc tree for role %r (%r)", role_uri, lookup_key)
         return []
-    edges: list[tuple[str, str, float]] = []
-    for element_id, node in tree.all_nodes.items():
-        if node.parent is None or node.weight is None:
+    edges: dict[tuple[str, str], float] = {}
+    for arc in tree.all_arcs:
+        if arc.weight is None:
             continue
-        edges.append(
-            (_concept_id(element_id), _concept_id(node.parent), float(node.weight))
-        )
-    return edges
+        key = (_concept_id(arc.child_id), _concept_id(arc.parent_id))
+        edges.setdefault(key, float(arc.weight))
+    return [(concept, parent, weight) for (concept, parent), weight in edges.items()]
 
 
 def _filing_frame(

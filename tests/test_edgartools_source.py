@@ -139,14 +139,14 @@ def _role(statement_type: str) -> str:
 def _mock_xbrl(
     frames_by_statement: dict[str, pd.DataFrame],
     standard_by_statement: dict[str, pd.DataFrame | Exception] | None = None,
-    calc_trees: dict[str, dict[str, tuple[str | None, float]]] | None = None,
+    calc_trees: dict[str, list[tuple[str, str, float]]] | None = None,
 ) -> MagicMock:
     """A filing whose statements return the given frames.
 
     ``to_dataframe(view="standard")`` returns ``standard_by_statement``'s frame
     (or raises it, if an exception), defaulting to :func:`_default_standard`.
-    ``calc_trees`` maps a statement type to its role's calc nodes
-    (``{element_id: (parent, weight)}``, default empty); ``find_statement``
+    ``calc_trees`` maps a statement type to its role's calc arcs
+    (``[(child, parent, weight)]``, default empty); ``find_statement``
     resolves each statement's canonical type to that role.
     """
     xbrl = MagicMock()
@@ -155,12 +155,10 @@ def _mock_xbrl(
     xbrl.find_statement.side_effect = lambda key: ([], _role(key), key)
     xbrl.calculation_trees = {
         _role(statement_type): SimpleNamespace(
-            all_nodes={
-                element_id: SimpleNamespace(parent=parent, weight=weight)
-                for element_id, (parent, weight) in calc_trees.get(
-                    statement_type, {}
-                ).items()
-            }
+            all_arcs=[
+                SimpleNamespace(parent_id=parent, child_id=child, weight=weight)
+                for child, parent, weight in calc_trees.get(statement_type, [])
+            ]
         )
         for statement_type in _GETTERS
     }
@@ -566,18 +564,16 @@ def test_build_warns_when_filing_has_no_column_for_its_period(
 
 
 # Old tree: ProfitLoss under NetIncomeLoss; new tree: pretax income directly.
-_OLD_TREE = {
-    "us-gaap_NetIncomeLoss": (None, 1.0),
-    "us-gaap_ProfitLoss": ("us-gaap_NetIncomeLoss", 1.0),
-    "us-gaap_MinorityInterest": ("us-gaap_NetIncomeLoss", -1.0),
-}
-_NEW_TREE = {
-    "us-gaap_NetIncomeLoss": (None, 1.0),
-    "us-gaap_IncomeBeforeTax": ("us-gaap_NetIncomeLoss", 1.0),
-    "us-gaap_IncomeTaxExpenseBenefit": ("us-gaap_NetIncomeLoss", -1.0),
+_OLD_TREE = [
+    ("us-gaap_ProfitLoss", "us-gaap_NetIncomeLoss", 1.0),
+    ("us-gaap_MinorityInterest", "us-gaap_NetIncomeLoss", -1.0),
+]
+_NEW_TREE = [
+    ("us-gaap_IncomeBeforeTax", "us-gaap_NetIncomeLoss", 1.0),
+    ("us-gaap_IncomeTaxExpenseBenefit", "us-gaap_NetIncomeLoss", -1.0),
     # Calc-only concept (not presented on the statement): still an edge.
-    "aapl_NotPresented": ("us-gaap_IncomeBeforeTax", 1.0),
-}
+    ("aapl_NotPresented", "us-gaap_IncomeBeforeTax", 1.0),
+]
 
 
 def _edges(frame: pd.DataFrame, period: str) -> set[tuple[str, str, float]]:
@@ -634,11 +630,10 @@ def test_build_gives_each_period_its_own_filings_calc_tree(
 
 @patch("src.api.edgartools.source.determine_optimal_periods")
 def test_build_normalizes_colon_element_ids(mock_periods: MagicMock) -> None:
-    tree = {
-        "us-gaap:NetIncomeLoss": (None, 1.0),
-        "us-gaap:ProfitLoss": ("us-gaap:NetIncomeLoss", 1.0),
-        "us-gaap_Tax": ("us-gaap:NetIncomeLoss", -1.0),
-    }
+    tree = [
+        ("us-gaap:ProfitLoss", "us-gaap:NetIncomeLoss", 1.0),
+        ("us-gaap_Tax", "us-gaap:NetIncomeLoss", -1.0),
+    ]
     xbrl = _mock_xbrl(
         {"income": _filing_df("2024-09-28 (FY)", [{"concept": "X", "value": 1.0}])},
         calc_trees={"income": tree},
@@ -654,6 +649,37 @@ def test_build_normalizes_colon_element_ids(mock_periods: MagicMock) -> None:
     assert _edges(edges, "2024-09-28") == {
         ("us-gaap_ProfitLoss", "us-gaap_NetIncomeLoss", 1.0),
         ("us-gaap_Tax", "us-gaap_NetIncomeLoss", -1.0),
+    }
+
+
+@patch("src.api.edgartools.source.determine_optimal_periods")
+def test_build_keeps_every_parent_of_a_concept(mock_periods: MagicMock) -> None:
+    # GEHC's cash-flow role: continuing-operations income starts both CFO-CO
+    # and ProfitLoss; a filing repeating an arc yields one edge.
+    start = "us-gaap_IncomeLossFromContinuingOperations"
+    tree = [
+        (start, "us-gaap_CFOContinuingOperations", 1.0),
+        (start, "us-gaap_ProfitLoss", 1.0),
+        (start, "us-gaap_ProfitLoss", 1.0),
+        ("us-gaap_DiscontinuedOperations", "us-gaap_ProfitLoss", 1.0),
+    ]
+    xbrl = _mock_xbrl(
+        {"cashflow": _filing_df("2025-09-30 (FY)", [{"concept": "X", "value": 1.0}])},
+        calc_trees={"cashflow": tree},
+    )
+    xbrls = MagicMock()
+    xbrls.xbrl_list = [xbrl]
+    mock_periods.return_value = [
+        {"xbrl_index": 0, "end_date": "2025-09-30", "period_type": "duration"}
+    ]
+
+    edges = _build_statement(xbrls, "cashflow", max_periods=16).calc_edges
+
+    assert len(edges) == 3
+    assert _edges(edges, "2025-09-30") == {
+        (start, "us-gaap_CFOContinuingOperations", 1.0),
+        (start, "us-gaap_ProfitLoss", 1.0),
+        ("us-gaap_DiscontinuedOperations", "us-gaap_ProfitLoss", 1.0),
     }
 
 
