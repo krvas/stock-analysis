@@ -541,3 +541,38 @@ def test_missing_or_invalid_pinned_tickers_tolerated(
     assert get_pinned_tickers(cache_dir) == expected
     touch_company_cache(cik=789019, ticker="MSFT")
     assert set(_load_index(cache_dir)["companies"]) == {"789019"}
+
+
+# Every worktree shares data/edgartools_cache through a symlink. A schema bump
+# on one branch once discarded the bundles every other branch still read.
+
+
+def test_another_schema_version_keeps_its_bundles_apart(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "edgartools_cache"
+    _save(cache_mod.bundle_cache_dir(root))
+    monkeypatch.setattr(cache_mod, "CACHE_SCHEMA_VERSION", CACHE_SCHEMA_VERSION + 1)
+    assert _load(cache_mod.bundle_cache_dir(root)) is None
+    monkeypatch.undo()
+    assert _load(cache_mod.bundle_cache_dir(root)) is not None
+
+
+def test_unversioned_bundles_of_this_version_are_copied_in(tmp_path: Path) -> None:
+    """Bundles from before version directories stay usable without a refetch,
+    and stay in place for branches that still read them there."""
+    root = tmp_path / "edgartools_cache"
+    _save(root)
+    _save(root, cik=789019)
+    old_meta = root / "companies" / "789019" / "annual" / "meta.json"
+    old_meta.write_text(
+        json.dumps({**json.loads(old_meta.read_text()), "schema_version": 1})
+    )
+    set_pinned_tickers(["AAPL"], cache_dir=root)
+
+    bundles = cache_mod.bundle_cache_dir(root)
+    assert get_pinned_tickers(bundles) == {"AAPL"}
+    assert _load(bundles) is not None
+    assert not (bundles / "companies" / "789019").exists()
+    assert _load(root) is not None
+    assert old_meta.exists()

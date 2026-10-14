@@ -34,6 +34,7 @@ import pandas as pd
 from edgar import Company
 
 from src.api.edgartools.cache import (
+    BUNDLE_CACHE_DIR,
     find_cached_cik,
     get_cached_company_list,
     read_cache_entry,
@@ -42,7 +43,7 @@ from src.api.edgartools.source import (
     FORM_BY_PERIOD,
     setup_edgartools,
 )
-from src.config import EDGARTOOLS_CACHE_DIR, MAX_PERIODS_BY_PERIOD
+from src.config import MAX_PERIODS_BY_PERIOD
 from src.models.calc_residuals import RESIDUAL_COLUMNS, tagged_residuals
 from src.models.statement import PERIOD_TYPES, STATEMENT_TYPES, PeriodType
 
@@ -120,7 +121,7 @@ def _companies(tickers: Sequence[str] | None, cache_dir: Path) -> dict[str, str]
 def collect_residuals(
     tickers: Sequence[str] | None = None,
     periods: Sequence[PeriodType] = PERIOD_TYPES,
-    cache_dir: Path = EDGARTOOLS_CACHE_DIR,
+    cache_dir: Path = BUNDLE_CACHE_DIR,
 ) -> pd.DataFrame:
     """All parent × period residuals for the cached bundles, tagged by
     ``ticker`` / ``period_type`` / ``statement``. Cache reads only."""
@@ -398,7 +399,7 @@ def run_report(
     csv_path: Path | None,
     compare_viewer: bool = False,
     viewer_filings: int | None = None,
-    cache_dir: Path = EDGARTOOLS_CACHE_DIR,
+    cache_dir: Path = BUNDLE_CACHE_DIR,
 ) -> None:
     residuals = collect_residuals(tickers, periods, cache_dir)
     summary = summarize(residuals, tolerance)

@@ -50,6 +50,7 @@ def _isolated_edgartools_cache(monkeypatch, tmp_path, use_cache_dir) -> None:
     off the real data/ cache: every cache dir points at tmp_path."""
     monkeypatch.setenv("EDGAR_LOCAL_DATA_DIR", str(tmp_path))
     monkeypatch.setattr(source, "EDGARTOOLS_CACHE_DIR", tmp_path)
+    monkeypatch.setattr(source, "BUNDLE_CACHE_DIR", tmp_path)
     use_cache_dir(tmp_path)
 
 

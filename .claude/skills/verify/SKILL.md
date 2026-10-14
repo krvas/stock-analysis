@@ -46,6 +46,9 @@ Then open it: `mcp__Claude_Browser__navigate {url: "http://127.0.0.1:$PORT/..."}
 
 Statement data comes from the edgartools cache in `data/edgartools_cache/`.
 AAPL, MU and SNDK are cached; another ticker triggers a slow SEC download.
+Bundles sit in `v<CACHE_SCHEMA_VERSION>/` under it, one directory per schema
+version, so a branch that bumps the version fetches its own and leaves the
+others' alone.
 
 ## Doctor
 

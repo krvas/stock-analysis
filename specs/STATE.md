@@ -129,10 +129,15 @@ Needs `EDGAR_IDENTITY`. 3 statements (income, balance, cashflow) × 3 views
 documents): once the `_cache`/`_tcache` directories under
 `data/edgartools_cache` are over `EDGARTOOLS_HTTP_CACHE_MAX_MB` (default
 300), setup clears them completely with edgartools' own `clear_cache` (which
-only touches `_cache`/`_tcache`, never our `companies/` bundles).
+only touches `_cache`/`_tcache`, never our `v{N}/` bundles).
 
 `load_statement_set(ticker, period) -> StatementSet` (`source.py`) is the
-only entry point. Cache key `(cik, period)`, no `num_periods`:
+only entry point. Bundles live under `BUNDLE_CACHE_DIR`,
+`data/edgartools_cache/v{CACHE_SCHEMA_VERSION}/`, so branches on different
+schema versions share the symlinked cache without discarding each other's
+bundles; a new version directory starts with a copy of the unversioned
+layout's `company_lru.json` and same-version bundles, which stay in place.
+Cache key `(cik, period)`, no `num_periods`:
 `companies/{cik}/{period}/{income,balance,cashflow}.parquet` +
 `{statement}_calc.parquet` + `meta.json` (`schema_version`, `period`,
 `latest_filing_date`); `read_cache_entry` returns a `CachedStatementSet` (a `StatementSet` plus
