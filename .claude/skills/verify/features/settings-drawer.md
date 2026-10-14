@@ -22,11 +22,12 @@ with a reason.
 Preconditions: baseline.
 
 - **Open.** `find` `Settings` button, click. Heading `Settings` appears with `Global` and `This page` sections.
-- **Apply.** Set `#setting-num_periods` to `3` via `form_input`, click `Apply`. The table shows 3 period columns.
+- **Apply.** `find` `Number of periods` textbox, `triple_click`, type `3`, click `Apply`. The table shows 3 period columns.
+- **Instant.** On `/statements/AAPL/balance`, set `#setting-view` to `detailed` with `form_input` and do not click `Apply`. The page reloads on its own: the drawer reads `Detailed` and the `statement-table-data` row count differs from the Standard view's. Set it back to `standard` the same way.
 - **Greyed.** On `/wizard/AAPL/adjustments/assets-in-use`, `#setting-period` is disabled and `#setting-period-reason` reads `Annual only`.
 - **Refused.** On `/wizard/AAPL/business-understanding/fund-flow`, set current and previous period to the same offset, Apply; the drawer reopens with `Previous period must be older than the current period`.
 
 ## Gotchas
 
 - Settings are a cookie in the browser pane, shared by every page in it; restore defaults when done.
-- `form_input` on a select sets the option value (`adjusted`), not the label.
+- Selects are the one place `form_input` is allowed (see SKILL.md); it takes the option value (`adjusted`), not the label.

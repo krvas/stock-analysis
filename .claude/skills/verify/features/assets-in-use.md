@@ -25,20 +25,41 @@ and Net Assets in Use as memo rows after Total assets.
 ## Driving it with the built-in browser
 
 Preconditions: baseline; AAPL has no saved `assets_in_use` rows in the run DB
-(`scripts/prefs.py "$RUN" AAPL` shows none).
+(`scripts/prefs.py "$RUN" AAPL` shows none). `X` below is
+`scripts/expected.py "$RUN" AAPL assets-in-use --settings '<drawer JSON>'`.
 
-- **Defaults.** Open the page. Read `td[data-calc-slot][data-row-id="gross_assets_in_use"]` and `...="net_assets_in_use"` for the first period; both equal the `total_assets` row (AAPL 2025-09-27: 359,241).
-- **Live Gross.** `find 'type="number"'`; the asset inputs follow `Number of periods`, and PP&E is the 8th asset. `scroll_to` + `triple_click` its ref, type `50`, press `Tab`. Confirm `td[data-input-slot][data-row-id="us-gaap_PropertyPlantAndEquipmentNet"][data-col-id="pct_in_use"] input` reads 50. Gross and Net become 359,241 − 0.5 × 49,834 = 334,324.
-- **Live Net.** `find` checkbox refs; the first is Accounts payable (`data-row-id="us-gaap_AccountsPayableCurrent"`, `data-col-id="net_out"`). `scroll_to` it, `left_click`. Net becomes 334,324 − 69,860 = 264,464; Gross unchanged.
-- **Save.** `find` `Save`, click. `.wizard-save-status` reads `Saved ✓`. `scripts/prefs.py "$RUN" AAPL` lists PP&E `50.0` and Accounts payable `1.0` (plus every other asset at `100.0`).
-- **Reload.** Navigate to the page again; PP&E shows 50, Accounts payable is ticked, Gross/Net as above.
-- **Validate.** Clear a % input and Save; the status shows an error naming that line and `prefs.py` is unchanged.
-- **Memo rows.** Open `/statements/AAPL/balance`, Settings → `#setting-basis` = `adjusted` → Apply. Rows `Gross assets in use` 334,324 and `Net assets in use` 264,464 sit right after `Total assets`; `Total assets` equals `Total liabilities and shareholders’ equity`.
-- **Proof.** Save the before/after cell reads, `prefs.py` output and the balance-sheet rows to `$RUN/evidence/aiu-*.json`.
+- **Targets.** Run `X`. `targets.asset` and `targets.liability` name the row
+  id and unique label of the largest asset and liability; use those below.
+- **Defaults.** Open the page. Run the `X --js` snippet: no mismatches across
+  every row, with Gross = Net = Total assets in each period.
+- **Live Gross.** Reach the target asset's `% in use` input (label ref, then
+  the next `find textbox` ref), `scroll_to`, `triple_click`, type `50`, press
+  `Tab`. The input reader shows only that row at `50`. Run
+  `X --pct <asset id>=50 --js`: no mismatches.
+- **Live Net.** Reach the target liability's `Net out` checkbox (label ref,
+  then the next `find checkbox` ref), `scroll_to`, `left_click`. Run
+  `X --pct <asset id>=50 --net <liability id> --rows total_assets,gross_assets_in_use,net_assets_in_use --js`:
+  no mismatches; Net moved and Gross did not.
+- **Save.** `find` `Save`, click, poll `.wizard-save-status` to `Saved ✓`.
+  `scripts/prefs.py "$RUN" AAPL` lists the asset at `50.0`, the liability at
+  `1.0` and every other asset at `100.0`.
+- **Reload.** Navigate to the page again. The input reader shows the asset at
+  50 and the liability ticked; `X --rows gross_assets_in_use,net_assets_in_use --js`
+  (now read from the saved choices) has no mismatches.
+- **Validate.** Clear the asset's input (`triple_click`, `Delete`, `Tab`) and
+  Save. The status reads `<asset label>: % in use is required` with
+  `data-state="error"`, and `prefs.py` output is unchanged.
+- **Memo rows.** Open `/statements/AAPL/balance`, set Basis `Adjusted` in
+  the drawer, Apply. Run
+  `scripts/expected.py "$RUN" AAPL balance --settings '<drawer JSON>' --rows us-gaap_Assets,adj_GrossAssetsInUse,adj_NetAssetsInUse,us-gaap_LiabilitiesAndStockholdersEquity --js`:
+  no mismatches. Rows `adj_GrossAssetsInUse` and `adj_NetAssetsInUse` follow
+  `us-gaap_Assets` in the `statement-table-data` row order.
+- **Proof.** Save each `expected.py` JSON, each snippet result and the
+  `prefs.py` output to `$RUN/evidence/aiu-*.json`.
 
 ## Gotchas
 
 - With 10 periods the `Net out` column is past the right edge; `scroll_to` the checkbox ref first.
-- Labels repeat (`Marketable securities` ×3, `Term debt` ×2); select rows by `data-row-id`, not label.
+- Labels repeat (`Marketable securities`, `Term debt`); act only on rows whose label is unique, and confirm by `data-row-id`.
 - Save writes a row for every asset, including those left at 100.
 - Basis is a cookie in the browser pane; set it back to `Reported` afterwards.

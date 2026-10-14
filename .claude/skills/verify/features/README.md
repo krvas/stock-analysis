@@ -9,14 +9,17 @@ this index, then use the matching feature file as the recipe.
   `scripts/doctor.sh "$RUN"` printing no `FAIL`.
 - Ticker `AAPL` (cached). `MU` is the cached ticker with no saved choices.
 - Settings drawer at defaults: Period type `Annual`, Number of periods `10`,
-  View `Standard`, Basis `Reported`.
+  View `Standard`, Basis `Reported`, Current period `Latest`, Previous period
+  `1 back`, Items per side `5`.
 
 ## Driving conventions
 
 - Built-in browser tools only (`mcp__Claude_Browser__*`); `curl` for raw HTML.
 - Prefer accessible names and the `data-row-id` / `data-col-id` slots over
   coordinates.
-- Set values with real clicks and typing; read them with `javascript_tool`.
+- Set values with real clicks and typing (`form_input` only for a native
+  select); read them with `javascript_tool`.
+- Expected numbers come from `scripts/expected.py`, never from a recipe.
 - After a save, reload the page before claiming persistence.
 
 ## Proof and skip reporting
@@ -39,4 +42,6 @@ built-in browser`, `Gotchas`.
 - [Owner Earnings](./owner-earnings.md): maintenance % inputs and the live Owner Earnings row.
 - [Capitalizing Opex](./opex-to-capex.md): capitalize checkbox + years, and the capitalized asset downstream.
 - [Statements pages](./statements.md): income / balance / cash-flow tables, reported vs adjusted basis and the adjustments note.
+- [Fund Flow](./fund-flow.md): current vs previous balance sheet with the change per line.
+- [Balance Sheet Size](./balance-sheet-size.md): asset and liability treemaps, items per side.
 - [Settings drawer](./settings-drawer.md): global and per-page settings, greyed settings with reasons.
