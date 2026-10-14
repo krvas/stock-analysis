@@ -2,8 +2,10 @@
 
 What exists today (not vision). Product intent: `specs/vision.md`.
 Adjustments/statement-model redesign: `specs/adjustments_architecture.md` —
-phases 1–2 (cache + `Statement`; row-id unification) implemented; phases
-3–5 (adjustment engine, opex-to-capex type, consumers) not.
+phases 1–2 (cache + `Statement`; row-id unification) implemented; the
+adjustment engine (`src/adjustments`, types `opex_to_capex` and
+`owner_earnings`) exists and the statement pages, Balance Sheet Size and
+Fund Flow consume it through the Basis Setting.
 Audience: planning and coding agents — prefer this file over guessing layout.
 
 Python 3.12, pandas, FastAPI + Jinja SSR, vanilla JS (no frontend libs). Local
@@ -53,20 +55,31 @@ src/models/statement.py    Statement / StatementSet / get_row_id
                            (pure domain: pandas only, no I/O)
 src/models/calc_residuals.py  calc_residuals (calc-linkbase residuals; pure)
 src/models/table.py        Table / ColumnSpec / LinkedGroupSpec  (FE↔BE contract)
-src/models/edgartools/html_renderer.py   DataFrames → Table.serialize() payload
 src/web/app.py             FastAPI; / → {statements, wizard, screener, docs}
-src/web/wizard_registry.py page/sub-page identity (only place)
-src/web/routes/            statements.py, wizard.py, screener.py
-src/web/routes/wizard_pages/  adjustments_context.py (builder),
+src/web/settings.py        Settings registry + pure rules (resolve,
+                           apply_submission, build_drawer); no HTTP
+src/web/wizard_registry.py wizard page/sub-page identity (only place)
+src/web/statements_registry.py  statement page identity (income, balance,
+                           cashflow)
+src/web/adjusted_statements.py  load_adjusted (staged), load_for_basis
+src/web/routes/            statements.py, wizard.py, screener.py,
+                           settings.py (cookies, POST /settings,
+                           render_with_settings, NavContext)
+src/web/routes/wizard_pages/  business_understanding.py, adjustments_context.py,
+                           owner_earnings.py (builders),
                            adjustments_post.py (POST handler)
-src/templates/wizard/      landing, base_subpage, _nav, not_implemented,
+src/templates/shared/      _page_nav (nav + gear), _settings_drawer,
+                           _adjustments_note
+src/templates/wizard/      landing, base_subpage, not_implemented,
                            {page}/{subpage}.html
+src/templates/statements/statement_view.html
 src/templates/macros/line_item_table.html
 src/static/js/             api_client.js (only fetch() home; wizard save posts)
                            components/table_model.js, linked_groups.js,
                            table_view.js, generic_input.js, table_wiring.js
-                           statement_view.js, utils.js
-tests/                     pytest; no HTTP/route tests
+                           settings_drawer.js, utils.js
+tests/                     pytest; pure seams (Settings, builders);
+                           test_settings_routes.py over HTTP (TestClient)
 ```
 
 `finfetch_client.py` is a broken stub; ignore as a template.
@@ -105,9 +118,11 @@ tests/                     pytest; no HTTP/route tests
 has an explicit unfinished TODO; don’t extend its shape without expecting a
 refactor. Finnhub is thin (quote snapshot, guessy statements).
 
-**EDGAR.** `GET /statements/{ticker}?period=annual|quarterly&num_periods=1..64`
-(default annual, 10; clamped to `MAX_CACHE_*` and to cached periods). Needs
-`EDGAR_IDENTITY`. 3 statements (income, balance, cashflow) × 3 views
+**EDGAR.** `GET /statements/{ticker}/{income|balance|cashflow}` (bare
+`/statements/{ticker}` → 307 to `income`; unknown slug → 404). Period type,
+number of periods, View and Basis come from Settings (§4 Settings), never the
+URL; the period count is clamped to `MAX_CACHE_*` and to cached periods.
+Needs `EDGAR_IDENTITY`. 3 statements (income, balance, cashflow) × 3 views
 (summary, standard, detailed). edgartools' own HTTP cache (filing
 documents): once the `_cache`/`_tcache` directories under
 `data/edgartools_cache` are over `EDGARTOOLS_HTTP_CACHE_MAX_MB` (default
@@ -159,10 +174,10 @@ LRU eviction and don't count toward the size; staleness still applies.
 Views are projections: `Statement.project(view, periods)` — summary =
 non-dimensional rows, standard = `in_standard` (edgartools' standard-view
 membership, read from its standard frame at cache build), detailed = all;
-`preferred_sign` applied only here. `html_renderer.py` projects each
-statement to every view over `periods[:num_periods]`. Payload is nested Table JSON;
-`statement_view.js` toggles type/level and balance-sheet fund-flow
-client-side.
+`preferred_sign` applied only here. `routes/statements.py::statement_context`
+projects the page's one statement in the resolved View over
+`settings.recent_periods(...)` on the resolved Basis (`load_for_basis`) into
+one `Table` payload; nothing switches client-side.
 
 `get_row_id` (`statement.py`; only place ids are formed): `concept`, plus
 `|Axis=member` for every axis of a dimensional row (axis local name, sorted;
@@ -183,22 +198,30 @@ EPS-note role).
 
 - `GET /wizard?ticker=` → `/wizard/{TICKER}` landing (form + grouped pages)
 - `/wizard/{t}/{page}` → first sub-page by `order`
-- `/wizard/{t}/{page}/{subpage}?period=annual` — unknown slug → 404
+- `/wizard/{t}/{page}/{subpage}` — unknown slug → 404; no query params
 
 Identity: frozen `Page` / `SubPage` in `WIZARD_PAGES`. Groups: `business`,
-`people`, `price`, `red_flags`. `context_builder(ticker, period) -> dict`
-(default `{}`). Template `wizard/{page}/{subpage}.html` or
-`not_implemented.html`. Extend `base_subpage.html` (tabs, breadcrumb, blocks
-`subpage_content` / `computed_values` / `human_input` / `source_trace`).
+`people`, `price`, `red_flags`. `context_builder(ticker, settings) -> dict`
+(default `{}`), `settings` = the resolved `Settings`. Template
+`wizard/{page}/{subpage}.html` or `not_implemented.html`. Extend
+`base_subpage.html` (shared nav, breadcrumb, blocks `subpage_content` /
+`computed_values` / `human_input` / `source_trace`).
 
-**Add a sub-page:** (1) `SubPage` on the right `Page` in the registry, (2)
-template under `templates/wizard/<page>/<subpage>.html`, (3) optional builder
-in `wizard_pages/` — registry = identity, builders = data. Do not add
-per-sub-page routes.
+**Add a sub-page:** (1) `SubPage` on the right `Page` in the registry, with
+its `settings=SettingsDecl(...)` if it uses Sub-page Settings or greys out a
+Global one, (2) template under `templates/wizard/<page>/<subpage>.html`, (3)
+optional builder in `wizard_pages/` — registry = identity, builders = data.
+Do not add per-sub-page routes.
 
-Slots match `vision.md`; **only `adjustments/opex-to-capex` has UI.** That
-builder: `load_statement_set(...).income.project("detailed")` over the newest
-2 periods, `standard_concept` in `OPERATING_EXPENSES` (selection only),
+Sub-pages with UI: `business-understanding/` `one-line-answers` (AI answers;
+View detailed adds justification + source), `balance-sheet-size` (annual
+treemaps at `current_period`, `items_per_side` per side, on the chosen
+Basis), `fund-flow` (balance sheet at `current_period` vs `previous_period`
++ change column, server-built by `fund_flow_table`; notice when the offsets
+clamp to one period); `adjustments/` `opex-to-capex` and `owner-earnings`
+(both show the stage before their own adjustment, over `num_periods`).
+The opex-to-capex builder: staged `income.project("detailed")` over
+`settings.recent_periods(...)`, `standard_concept` in `OPERATING_EXPENSES` (selection only),
 `Table` keyed by `row_id` (from `get_row_id`) with period cols + input
 `capitalize` (bool) + `years` (number). The posted row `id` is that row id
 and is stored verbatim in `adjustment_preferences.base_concept` (column name
@@ -214,7 +237,34 @@ to `/wizard/{ticker}/{page_slug}/{subpage_slug}` →
 `adjustment_preferences`). Saved prefs are read back and pre-filled into the
 `Table` on load via
 `wizard_pages/adjustments_context.py::_apply_saved_opex_to_capex_preferences`.
-No restatement (prefs only, not applied to displayed numbers).
+The adjustment engine (`src/adjustments`) restates statements from saved
+prefs; pages read it through `src/web/adjusted_statements.py`.
+
+**Settings** (`src/web/settings.py`, `src/web/routes/settings.py`). A Setting
+is a display choice (CONTEXT.md). `SETTINGS` defines each once (id, label,
+`Option(value, label)` choices or int range, default; `instant` = View only,
+submits on change).
+Global: `period`, `num_periods`, `view`. Sub-page: `basis`,
+`current_period`, `previous_period` (offsets from the latest period),
+`items_per_side`. Every `SubPage` and `StatementPage` carries a
+`SettingsDecl(uses=..., cannot_honour={global_id: reason})` (identity, in the
+registries; validated at import). `resolve(cookie, decl)` falls back per
+field to defaults and never rewrites the cookie; reading a greyed or
+undeclared Setting raises `SettingNotApplicable`. `recent_periods` /
+`period_at` are the only data-dependent clamp (stored values stay as chosen).
+`RULES`: `previous_period > current_period`; on read a failing pair renders
+previous = current + 1, on save it is refused (only when both are
+submitted). Storage: one JSON cookie `settings` (HttpOnly, SameSite=Lax,
+path /, one year), written only by `POST /settings` (urlencoded form, parsed
+with `parse_qsl`, 303 to a same-site `next`); a refused save sets a one-shot
+`settings_error` cookie that opens the drawer once. Every page with the
+shared nav renders through `render_with_settings` with a `NavContext`
+(prefix, pages, current page/sub-page; pages are typed by the `NavPage`
+protocol, which `Page` and `StatementPage` satisfy; the current sub-page by
+`NavSubPage`, which `SubPage` satisfies); `shared/_page_nav.html`
+names neither half of the app and hosts the gear + `<dialog>` drawer (Global
+section; This page section for declared Sub-page Settings). No in-page
+display controls exist; URLs carry no Settings.
 
 **wizard.duckdb** `adjustment_preferences`: PK `adjustment_id`, unique
 `(ticker, exchange, adjustment_type, base_concept)`; `base_concept` holds a
@@ -259,20 +309,19 @@ serialize() → {
   only module that creates an `<input>` and attaches `input`/`change`
   listeners; `subscribe` receives the coerced value; `set()` writes the
   element and skips notify when unchanged.
-- **Wiring** (`components/table_wiring.js`): wizard hydration — JSON →
+- **Wiring** (`components/table_wiring.js`): table hydration (wizard
+  sub-pages and the statement pages) — JSON →
   `TableModel.fromSerialized` → `render_table` → one `GenericInput` per slot;
   `input.subscribe` → `model.setCell`; `model.subscribe` → `input.set`.
   Must not read `input.value` / `input.checked`. Save posts
-  `model.serialize()`. Currently just `adjustments/opex-to-capex` (see §4),
-  not every wizard sub-page. Convention: frontend module files that run
+  `model.serialize()` (sub-pages with a save form: opex-to-capex,
+  owner-earnings). Convention: frontend module files that run
   wizard-page side effects wrap all their top-level execution in a single
   `main()` (or similarly named) function invoked once at the bottom, rather
   than having multiple bare top-level statements.
-- **Statements** (`statement_view.js`): calls `render_table` with the nested
-  statement view object or a fund-flow-shaped plain object (latest, previous,
-  change columns) built client-side; `staticPeriodColumnIds` is local to
-  that file. Page `<select>` listeners stay there (controls, not table-cell
-  inputs).
+- **Statements**: one `Table` payload per page, embedded with the
+  `line_item_table` macro and hydrated by `table_wiring.js`; no
+  statement-specific JS. Fund Flow is a wizard sub-page built server-side.
 - `Table.serialize()` / `TableModel.fromSerialized()` (receive direction) and
   `TableModel.serialize()` (send direction) are **intentionally asymmetric**,
   not two encodings of the same shape. Receive: full `{columns,
@@ -295,27 +344,30 @@ serialize() → {
   read-only.
 
 Embed: `{% table(id, data) %}` → JSON script + empty `<table>`;
-`base_subpage.html` loads `components/table_wiring.js` to hydrate wizard
-tables. Statements nest the same object under `statements[type][view]` and
-use `statement_view.js` → `render_table`. Tests: `tests/test_table.py`.
+`base_subpage.html` and `statements/statement_view.html` load
+`components/table_wiring.js` to hydrate them. Tests: `tests/test_table.py`.
 
 ## 6. Status (short)
 
 Working: vendor DuckDB + IndianAPI/AlphaVantage; edgartools fetch/cache;
-`/statements`; wizard shell + opex table; Table used by statements + opex;
+`/statements/{t}/{statement}`; shared nav + Settings drawer; wizard shell +
+opex table; Table used by statements + opex;
 `TableModel` + `linked_groups` + view slots + `GenericInput` subscriptions in
 `table_wiring.js` wired for opex-to-capex (receive, render, live edits,
 linked-group math); prefs store (opex-to-capex save/prefill).
 
-Partial: opex (save/prefill for `adjustments/opex-to-capex` only; no
-restatement); Finnhub; `load_to_database.py`.
+Partial: adjustments (opex-to-capex and owner-earnings save/prefill and
+restate; other adjustment types unused); Finnhub; `load_to_database.py`.
 
-NYI: every other wizard sub-page; adjustment engine / restatement
-(design phases 3–5); screener; analytics;
-finfetch.
+NYI: wizard sub-pages other than One-line Answers, Balance Sheet Size, Fund
+Flow, Capitalizing Opex and Owner Earnings; screener; analytics; finfetch.
 
-Tests cover clients, DBs, edgartools, Table, wizard DB. No web tests. Cache
-miss hits live SEC. `pytest -m data` (deselected by default)
+Tests cover clients, DBs, edgartools, Table, wizard DB, Settings
+(`test_settings.py`) and the page builders.
+`test_settings_routes.py` is the only HTTP suite: TestClient over fixture
+statements for the statements redirect and 404, `POST /settings` (redirect
+guard, cookie attributes, refused saves), cookie round-trips and the drawer
+per page. Cache miss hits live SEC. `pytest -m data` (deselected by default)
 runs the calc-residual check on real filings for the tickers in the gitignored
 `tests/data_test_tickers.txt` (pinned in the company LRU, loaded through the
 app cache).

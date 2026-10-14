@@ -1,5 +1,3 @@
-"""Adjustments › Owner Earnings: context builder honours the period Settings."""
-
 from __future__ import annotations
 
 import json

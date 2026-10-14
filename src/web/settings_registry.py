@@ -11,7 +11,7 @@ from typing import Final, cast
 
 from src.config import MAX_CACHE_QUARTERS, MAX_ITEMS_PER_SIDE
 from src.models.statement import PERIOD_TYPES, STATEMENT_VIEWS
-from src.web.setting_types import ChoiceSetting, CrossRule, IntSetting
+from src.web.setting_types import ChoiceSetting, CrossRule, IntSetting, Option
 
 RULES: Final[tuple[CrossRule, ...]] = (
     CrossRule(
@@ -32,18 +32,16 @@ class GlobalSetting(Enum):
     PERIOD = ChoiceSetting(
         "period",
         "Period type",
-        tuple((p, p.capitalize()) for p in PERIOD_TYPES),
+        tuple(Option(p, p.capitalize()) for p in PERIOD_TYPES),
         "annual",
     )
-    # The per-period-type cache cap is a clamp at load time, not a validation
-    # bound, so switching period type never invalidates the stored count.
     NUM_PERIODS = IntSetting(
         "num_periods", "Number of periods", 1, MAX_CACHE_QUARTERS, 10
     )
     VIEW = ChoiceSetting(
         "view",
         "View",
-        tuple((v, v.capitalize()) for v in STATEMENT_VIEWS),
+        tuple(Option(v, v.capitalize()) for v in STATEMENT_VIEWS),
         "standard",
         instant=True,
     )
@@ -55,7 +53,7 @@ class SubpageSetting(Enum):
     BASIS = ChoiceSetting(
         "basis",
         "Basis",
-        (("reported", "Reported"), ("adjusted", "Adjusted")),
+        (Option("reported", "Reported"), Option("adjusted", "Adjusted")),
         "reported",
     )
     CURRENT_PERIOD = IntSetting(

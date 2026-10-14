@@ -1,5 +1,3 @@
-"""Settings registry, resolution and submission (pure; no HTTP)."""
-
 from __future__ import annotations
 
 import json
@@ -31,7 +29,7 @@ FUND_FLOW_LIKE = SettingsDecl(
     ),
     cannot_honour={GlobalSetting.NUM_PERIODS: "Two periods"},
 )
-PERIODS = [f"20{y:02d}-12-31" for y in range(24, 0, -1)]  # newest first, 24
+PERIODS = [f"20{y:02d}-12-31" for y in range(24, 0, -1)]
 
 
 def _cookie(**values: object) -> str:
@@ -150,7 +148,6 @@ def test_rule_refuses_only_when_both_offsets_submitted() -> None:
     assert refused == Refused(
         "/p", "Previous period must be older than the current period"
     )
-    # A page showing only the current period cannot fix the previous one.
     out = apply_submission({"current_period": "3"}, stored)
     assert isinstance(out, Saved)
     assert json.loads(out.cookie_value) == {"previous_period": 1, "current_period": 3}
