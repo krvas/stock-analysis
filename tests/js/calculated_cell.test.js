@@ -9,6 +9,7 @@ import { loadFixture } from "./load_fixture.js";
 const PAGE_FIXTURES = [
   ["Assets in Use", "assets_in_use_table.json", 4],
   ["Owner Earnings", "owner_earnings_table.json", 3],
+  ["Owner Earnings, AAPL shape", "owner_earnings_aapl_shape_table.json", 3],
 ];
 
 for (const [page, name, count] of PAGE_FIXTURES) {

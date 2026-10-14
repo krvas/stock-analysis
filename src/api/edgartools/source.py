@@ -30,6 +30,7 @@ from src.api.edgartools.cache import (
 from src.api.edgartools.standard_terms import (
     COMPONENT_DA_CONCEPTS,
     DA_COMPONENT_AXIS,
+    DA_REMAINDER_TOLERANCE,
     DEPRECIATION_EXPENSE,
     OTHER_DA_MEMBER,
 )
@@ -629,7 +630,7 @@ def _with_da_breakdown(
         parts = [v[label] for v in values.values() if label in v]
         if pd.notna(total) and parts:
             remainder = float(total) - sum(parts)
-            if abs(remainder) > 0.5:
+            if abs(remainder) > DA_REMAINDER_TOLERANCE:
                 other[label] = remainder
     if other:
         values[OTHER_DA_MEMBER] = other

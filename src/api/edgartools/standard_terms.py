@@ -59,3 +59,4 @@ COMPONENT_DA_CONCEPTS = (
 )
 DA_COMPONENT_AXIS = "DepreciationAmortizationComponentAxis"
 OTHER_DA_MEMBER = "OtherDepreciationAndAmortization"
+DA_REMAINDER_TOLERANCE = 0.5

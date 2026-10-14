@@ -3,11 +3,6 @@
 ``OE = pretax income + Σ D&A_i + ΔNWC − Σ pct_i·D&A_i − pct_nwc·ΔNWC``,
 with ΔNWC on the CFO sign convention (cash impact of the working-capital
 change rows) and maintenance amounts as user-chosen percentages.
-
-D&A items (:func:`da_items`) are the note-reported D&A components (cash-flow
-breakdown rows on ``DA_COMPONENT_AXIS``), else the D&A line itself, plus every
-``da``-tagged row added by earlier adjustments (capitalized-opex
-amortization). Each item's maintenance % is saved under its row id.
 """
 
 from __future__ import annotations
@@ -20,6 +15,7 @@ from src.adjustments.base import MEMO_TAG, AdjustmentResult, AdjustmentSpec, New
 from src.api.edgartools.standard_terms import (
     CFO,
     DA_COMPONENT_AXIS,
+    DA_REMAINDER_TOLERANCE,
     DEPRECIATION_EXPENSE,
     NWC_ABSTRACT,
     NWC_PREFIX,
@@ -83,26 +79,77 @@ def _first_value(statement: Statement, mask: pd.Series) -> dict[str, float]:
     }
 
 
-def da_items(cashflow: Statement) -> pd.DataFrame:
-    """D&A items, one row each: ``row_id, label`` + periods (raw values).
+LINE_SLOT_SUFFIX = " (years without a note breakdown)"
 
-    Note-reported components when the cache has them, else the D&A line;
-    then every ``da``-tagged adjustment row.
+
+def _local_name(concepts: pd.Series) -> pd.Series:
+    return concepts.fillna("").str.split("_").str[-1]
+
+
+def _da_lines(cashflow: Statement) -> pd.DataFrame:
+    frame = cashflow.frame
+    rows = frame[~bool_flag(frame, "dimension") & ~bool_flag(frame, "abstract")]
+    edges = cashflow.calc_edges
+    cfo = _local_name(edges["parent_concept"]).str.startswith(CFO.split("_")[-1])
+    into_cfo = edges.loc[cfo, "concept"]
+    extension = (
+        rows["standard_concept"].isna()
+        & _local_name(rows["concept"]).str.startswith("Depreciation")
+        & rows["concept"].isin(into_cfo)
+    )
+    return pd.concat(
+        [rows[rows["standard_concept"].eq(DEPRECIATION_EXPENSE)], rows[extension]]
+    )
+
+
+def _parts_or_line(
+    line: tuple[str, float] | None, parts: dict[str, float]
+) -> dict[str, float]:
+    if line is None:
+        return parts
+    line_id, total = line
+    if parts and abs(sum(parts.values()) - total) <= DA_REMAINDER_TOLERANCE:
+        return parts
+    return {line_id: total}
+
+
+def da_items(cashflow: Statement) -> pd.DataFrame:
+    """D&A items, one row each: ``row_id, label`` + periods (raw values, NaN
+    where the slot does not apply that period).
+
+    Slots: each note component, the D&A line (periods the components do not
+    explain), then every ``da``-tagged adjustment row. Slots blank in every
+    period are dropped.
     """
     frame = cashflow.frame
     axis = frame.get("dimension_axis", pd.Series(None, index=frame.index))
-    components = frame[axis.eq(DA_COMPONENT_AXIS)]
-    if components.empty:
-        components = frame[
-            frame["standard_concept"].eq(DEPRECIATION_EXPENSE)
-            & ~bool_flag(frame, "dimension")
-        ].head(1)
-    tagged = frame[frame["tags"].map(lambda t: "da" in tuple(t or ()))]
-    items = pd.concat([components, tagged])
-    out = items[["row_id", "label"]].copy()
+    parts = frame[axis.eq(DA_COMPONENT_AXIS)]
+    lines = _da_lines(cashflow)
+    slots = pd.concat(
+        [parts[["row_id", "label"]], lines[["row_id", "label"]].head(1)],
+        ignore_index=True,
+    )
+    line_id = lines["row_id"].iloc[0] if len(lines) else None
     for period in cashflow.periods:
-        out[period] = pd.to_numeric(items[period], errors="coerce")
-    return out.reset_index(drop=True)
+        line = pd.to_numeric(lines[period], errors="coerce").dropna()
+        reported = pd.to_numeric(parts[period], errors="coerce")
+        values = _parts_or_line(
+            (line_id, float(line.iloc[0])) if len(line) else None,
+            {
+                str(r): float(v)
+                for r, v in zip(parts["row_id"], reported, strict=True)
+                if pd.notna(v)
+            },
+        )
+        slots[period] = slots["row_id"].map(values).astype(float)
+    slots = slots[slots[cashflow.periods].notna().any(axis=1)].copy()
+    if line_id in set(slots["row_id"]) and len(slots) > 1:
+        slots.loc[slots["row_id"] == line_id, "label"] += LINE_SLOT_SUFFIX
+    tagged = frame[frame["tags"].map(lambda t: "da" in tuple(t or ()))]
+    adjustments = tagged[["row_id", "label"]].copy()
+    for period in cashflow.periods:
+        adjustments[period] = pd.to_numeric(tagged[period], errors="coerce")
+    return pd.concat([slots, adjustments]).reset_index(drop=True)
 
 
 def components(ss: StatementSet) -> pd.DataFrame:
