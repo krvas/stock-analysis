@@ -87,6 +87,38 @@ FORM_BY_PERIOD: dict[PeriodType, str] = {
 _EDGARTOOLS_EXTRA_COLUMNS = frozenset({"unit", "point_in_time"})
 _NON_PERIOD_COLUMNS = STATEMENT_METADATA_COLUMNS | _EDGARTOOLS_EXTRA_COLUMNS
 
+# Metadata columns carried per row into the stored frame.
+_STORED_METADATA_COLUMNS: tuple[str, ...] = (
+    *EDGARTOOLS_METADATA_COLUMNS,
+    "dimension_key",
+    "in_standard",
+)
+
+# Columns identifying one ``to_dataframe`` row across views of one filing.
+_ROW_MATCH_COLUMNS: tuple[str, ...] = (
+    "concept",
+    "label",
+    "dimension",
+    "dimension_axis",
+    "dimension_member",
+    "dimension_label",
+)
+
+# Fact duration (days) accepted as one period of each type.
+_PERIOD_DAYS: dict[PeriodType, tuple[int, int]] = {
+    "annual": (330, 400),
+    "quarterly": (80, 100),
+}
+
+_DA_COMPONENT_LABELS: dict[str, str] = {
+    "us-gaap_Depreciation": "Depreciation",
+    "us-gaap_AmortizationOfIntangibleAssets": "Amortization of intangible assets",
+    "us-gaap_FinanceLeaseRightOfUseAssetAmortization": (
+        "Amortization of finance lease right-of-use assets"
+    ),
+    OTHER_DA_MEMBER: "Other depreciation and amortization",
+}
+
 
 def _clear_http_cache_if_over(max_bytes: int) -> None:
     """Clear the HTTP cache directories completely once they exceed ``max_bytes``.
@@ -149,14 +181,6 @@ def _column_for_period_date(df: pd.DataFrame, period_date) -> str | None:
         if str(column).startswith(date_str):
             return column
     return None
-
-
-# Metadata columns carried per row into the stored frame.
-_STORED_METADATA_COLUMNS: tuple[str, ...] = (
-    *EDGARTOOLS_METADATA_COLUMNS,
-    "dimension_key",
-    "in_standard",
-)
 
 
 def _empty_statement_frame() -> pd.DataFrame:
@@ -278,17 +302,6 @@ def _role_weights(frame: pd.DataFrame, items: Sequence[dict]) -> pd.Series:
         by_concept.setdefault(item.get("concept"), weight)
     role = pd.to_numeric(frame["concept"].map(by_concept), errors="coerce")
     return role.where(role.notna(), frame["weight"])
-
-
-# Columns identifying one ``to_dataframe`` row across views of one filing.
-_ROW_MATCH_COLUMNS: tuple[str, ...] = (
-    "concept",
-    "label",
-    "dimension",
-    "dimension_axis",
-    "dimension_member",
-    "dimension_label",
-)
 
 
 def _rows_match(left: dict, right: dict) -> bool:
@@ -525,22 +538,6 @@ def _build_statement(
     # Statement adds tags/origin/is_total and validates row_id uniqueness
     # and the calc edges.
     return Statement(pd.DataFrame(data), statement_type, calc_edges)
-
-
-# Fact duration (days) accepted as one period of each type.
-_PERIOD_DAYS: dict[PeriodType, tuple[int, int]] = {
-    "annual": (330, 400),
-    "quarterly": (80, 100),
-}
-
-_DA_COMPONENT_LABELS: dict[str, str] = {
-    "us-gaap_Depreciation": "Depreciation",
-    "us-gaap_AmortizationOfIntangibleAssets": "Amortization of intangible assets",
-    "us-gaap_FinanceLeaseRightOfUseAssetAmortization": (
-        "Amortization of finance lease right-of-use assets"
-    ),
-    OTHER_DA_MEMBER: "Other depreciation and amortization",
-}
 
 
 def _note_da_facts(xbrl, period: PeriodType) -> pd.DataFrame:
