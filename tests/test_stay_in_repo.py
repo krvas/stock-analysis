@@ -24,6 +24,18 @@ PAST_LAUNCH = (
 SERVE = ".claude/skills/verify/scripts/serve.py"
 # A commit message that mentions the launcher, refused as a launch until 2026-10-13.
 PAST_COMMIT = f"git commit -F - <<'EOF'\nchore: add {SERVE} launcher / helper\nEOF"
+# Parallel agents ran these in their worktrees on 2026-10-13 and popped each
+# other's entries from the shared refs/stash, dropping the operator's stash.
+# A fixed path: the suite itself may run from an agent worktree.
+MAIN = Path("/Users/agent/Stock Analysis")
+WORKTREE = MAIN / ".claude" / "worktrees" / "fu-6"
+PAST_STASHES = [
+    "git stash",
+    "git stash push -m 'wip before rebase'",
+    "git stash pop",
+    "git stash drop",
+    f'git -C "{WORKTREE}" stash apply',
+]
 PAST_LAUNCH_ENTRY = {
     "name": "web-settings-wt",
     "runtimeExecutable": "bash",
@@ -66,6 +78,34 @@ def test_commands_that_leave_the_repo_are_refused(command: str) -> None:
 )
 def test_commands_inside_the_repo_are_allowed(command: str) -> None:
     assert command_violation(command, REPO, REPO) is None
+
+
+@pytest.mark.parametrize("command", PAST_STASHES)
+def test_stash_in_an_agent_worktree_is_refused(command: str) -> None:
+    reason = command_violation(command, WORKTREE, MAIN)
+    assert reason is not None
+    assert "git diff" in reason and "WIP commit" in reason
+
+
+def test_stash_into_a_worktree_with_dash_c_is_refused() -> None:
+    command = "git -C .claude/worktrees/fu-6 stash clear"
+    assert command_violation(command, MAIN, MAIN) is not None
+    assert command_violation(f"cd '{WORKTREE}' && git stash", MAIN, MAIN) is not None
+
+
+@pytest.mark.parametrize(
+    ("command", "cwd"),
+    [
+        ("git stash list", WORKTREE),
+        ("git stash show -p stash@{0}", WORKTREE),
+        ("git status", WORKTREE),
+        ("git stash", MAIN),
+    ],
+)
+def test_read_only_stash_and_main_checkout_stash_are_allowed(
+    command: str, cwd: Path
+) -> None:
+    assert command_violation(command, cwd, MAIN) is None
 
 
 def test_refusal_names_the_supported_path() -> None:

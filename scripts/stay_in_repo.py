@@ -4,7 +4,9 @@ Two checks share one notion of "inside the repo":
 
 - ``command_violation``: a Claude Code ``PreToolUse`` hook on Bash (wired in
   ``.claude/settings.json``) refuses a command that adds a git worktree
-  outside the repo or starts the web app from outside it.
+  outside the repo or starts the web app from outside it. It also refuses
+  ``git stash`` inside an agent worktree: ``refs/stash`` is shared by every
+  worktree, so parallel agents pop and drop each other's entries.
 - ``launch_config_violations``: ``tests/test_stay_in_repo.py`` fails when a
   ``.claude/launch.json`` entry would start the browser pane's server outside
   the repo.
@@ -35,12 +37,22 @@ LAUNCH_FIX = (
     ".venv/bin/python .claude/skills/verify/scripts/serve.py <run dir> <port> "
     "(see .claude/skills/verify/SKILL.md), or the `web` entry in .claude/launch.json"
 )
+STASH_FIX = (
+    "refs/stash is shared by every worktree, so another agent can pop or drop "
+    "this entry; save the change as a patch instead "
+    "(git diff > <scratchpad>/wip.patch, later git apply <scratchpad>/wip.patch) "
+    "or make a WIP commit (git commit -m wip, later git reset HEAD~)"
+)
 _SEPARATOR_CHARS = frozenset("&|;()\n")
 _SHELLS = frozenset({"bash", "sh", "zsh"})
 _APP_PROGRAMS = frozenset({"uvicorn", "serve.py"})
 _COMMAND_PREFIXES = frozenset({"exec", "nohup", "env", "time", "command"})
 _HEREDOC = re.compile(r"(?<!<)<<(-?)\s*(['\"]?)(\w+)\2")
 _WORKTREE_OPTIONS_WITH_VALUE = frozenset({"-b", "-B", "--reason"})
+_GIT_OPTIONS_WITH_VALUE = frozenset(
+    {"-C", "-c", "--git-dir", "--work-tree", "--namespace", "--config-env"}
+)
+_READ_ONLY_STASH = frozenset({"list", "show"})
 
 
 def _inside(path: Path, repo: Path) -> bool:
@@ -92,6 +104,31 @@ def _worktree_target(segment: list[str]) -> str | None:
     return None
 
 
+def _in_agent_worktree(path: Path) -> bool:
+    parts = Path(os.path.normpath(path.absolute())).parts
+    return any(
+        parts[i : i + 2] == (".claude", "worktrees") for i in range(len(parts) - 2)
+    )
+
+
+def _git_stash_cwd(segment: list[str], cwd: Path) -> Path | None:
+    """The directory a ``git stash`` that writes refs/stash runs in; or None."""
+    if Path(segment[0]).name != "git":
+        return None
+    args = iter(segment[1:])
+    for arg in args:
+        if arg == "-C":
+            cwd = cwd / next(args, "")
+        elif arg in _GIT_OPTIONS_WITH_VALUE:
+            next(args, None)
+        elif not arg.startswith("-"):
+            if arg != "stash":
+                return None
+            action = next(args, "push")
+            return None if action in _READ_ONLY_STASH else cwd
+    return None
+
+
 def _launches_app(segment: list[str]) -> bool:
     words = list(segment)
     while words and (words[0] in _COMMAND_PREFIXES or "=" in words[0]):
@@ -102,7 +139,8 @@ def _launches_app(segment: list[str]) -> bool:
 
 
 def command_violation(command: str, cwd: Path, repo: Path) -> str | None:
-    """Why ``command``, run in ``cwd``, takes the app outside ``repo``; or None."""
+    """Why ``command``, run in ``cwd``, is refused (leaves ``repo`` or stashes
+    in an agent worktree); or None."""
     try:
         segments = list(_segments(command))
     except ValueError:
@@ -116,6 +154,9 @@ def command_violation(command: str, cwd: Path, repo: Path) -> str | None:
             if reason := command_violation(script, cwd, repo):
                 return reason
             continue
+        stash_cwd = _git_stash_cwd(segment, cwd)
+        if stash_cwd is not None and _in_agent_worktree(stash_cwd):
+            return f"git stash in worktree {os.path.normpath(stash_cwd)}; {STASH_FIX}"
         target = _worktree_target(segment)
         if target is not None and not _inside(cwd / target, repo):
             return f"worktree {target!r} is outside {repo}; {WORKTREE_FIX}"

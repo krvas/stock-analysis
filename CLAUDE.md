@@ -112,3 +112,12 @@ implementation of the same job sitting next to the real one.
 check whether it's still true — a doc note can describe a real deferral or it
 can be quietly documenting a shortcut nobody corrected. If you're not sure
 which, ask rather than assuming the doc's framing is still accurate.
+
+## Rules from operator corrections
+
+Each rule a correction produced, and what enforces it. A rule with nothing
+enforcing it is a repeat waiting to happen: encode it before adding another.
+
+| Rule | Enforced by |
+| --- | --- |
+| Never `git stash` in an agent worktree: `refs/stash` is shared by every worktree, so parallel agents pop and drop each other's entries. Save a patch (`git diff > <scratchpad>/wip.patch`, then `git apply`) or make a WIP commit. | `scripts/stay_in_repo.py` (the Bash `PreToolUse` hook) refuses a `git stash` that writes `refs/stash` when it runs in `.claude/worktrees/` (cwd, `cd` or `git -C`); `tests/test_stay_in_repo.py` replays the stashes agents ran. |
