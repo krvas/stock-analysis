@@ -1,10 +1,10 @@
-"""Settings: the registry of display choices and the pure rules around it.
+"""Settings: the pure rules around the registry in ``settings_registry.py``.
 
-Defines every Setting once (``SETTINGS``), the per-page declaration type
-(``SettingsDecl``), the resolved ``Settings`` builders read, and the pure
-entry points the HTTP shell in ``src/web/routes/settings.py`` calls:
-``resolve`` (cookie + declaration -> Settings), ``apply_submission`` (form +
-cookie -> new cookie value or a refusal) and ``build_drawer``. Nothing here
+Defines the per-page declaration type (``SettingsDecl``), the resolved
+``Settings`` builders read, and the pure entry points the HTTP shell in
+``src/web/routes/settings.py`` calls: ``resolve`` (cookie + declaration ->
+Settings), ``apply_submission`` (form + cookie -> new cookie value or a
+refusal) and ``build_drawer``. Nothing here
 knows the cookie's name, HTTP, or any specific page.
 """
 
@@ -23,7 +23,8 @@ from src.web.settings_registry import (
     GLOBAL_SETTING_IDS,
     RULES,
     SETTINGS,
-    SUBPAGE_SETTING_IDS,
+    GlobalSetting,
+    SubpageSetting,
 )
 
 OffsetSettingId = Literal["current_period", "previous_period"]
@@ -37,28 +38,26 @@ class SettingsDecl:
     The default instance uses none and honours every Global Setting.
     """
 
-    uses: tuple[str, ...] = ()
-    cannot_honour: Mapping[str, str] = field(default_factory=dict)
+    uses: tuple[SubpageSetting, ...] = ()
+    cannot_honour: Mapping[GlobalSetting, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        for setting_id in self.uses:
-            if setting_id not in SUBPAGE_SETTING_IDS:
-                raise ValueError(f"{setting_id!r} in uses is not a Sub-page Setting")
+        for setting in self.uses:
+            if not isinstance(setting, SubpageSetting):
+                raise TypeError(f"{setting!r} in uses is not a SubpageSetting")
         if len(set(self.uses)) != len(self.uses):
-            raise ValueError(f"duplicate id in uses: {self.uses}")
-        for setting_id, reason in self.cannot_honour.items():
-            if setting_id not in GLOBAL_SETTING_IDS:
-                raise ValueError(
-                    f"{setting_id!r} in cannot_honour is not a Global Setting"
-                )
+            raise ValueError(f"duplicate Setting in uses: {self.uses}")
+        for setting, reason in self.cannot_honour.items():
+            if not isinstance(setting, GlobalSetting):
+                raise TypeError(f"{setting!r} in cannot_honour is not a GlobalSetting")
             if not reason.strip():
-                raise ValueError(f"greyed {setting_id!r} needs a reason")
+                raise ValueError(f"greyed {setting!r} needs a reason")
 
     def applies(self, setting_id: str) -> bool:
         """True when the page honours (Global) or declares (Sub-page) it."""
         if setting_id in GLOBAL_SETTING_IDS:
-            return setting_id not in self.cannot_honour
-        return setting_id in self.uses
+            return all(s.value.id != setting_id for s in self.cannot_honour)
+        return any(s.value.id == setting_id for s in self.uses)
 
 
 NO_SETTINGS: Final = SettingsDecl()
@@ -151,9 +150,8 @@ def resolve(raw_cookie: str | None, decl: SettingsDecl) -> Settings:
     """
     stored = _stored_values(raw_cookie)
     values: dict[str, SettingValue] = {
-        s.id: stored.get(s.id, s.default)
-        for s in SETTINGS
-        if s.id in GLOBAL_SETTING_IDS or s.id in decl.uses
+        s.value.id: stored.get(s.value.id, s.value.default)
+        for s in (*GlobalSetting, *decl.uses)
     }
     for rule in RULES:
         if all(decl.applies(i) for i in rule.ids) and not rule.holds(values):
@@ -218,15 +216,30 @@ def apply_submission(form: Mapping[str, str], raw_cookie: str | None) -> SaveOut
 
 @dataclass(frozen=True)
 class DrawerField:
-    id: str
-    label: str
-    widget: Literal["select", "number"]
-    options: tuple[tuple[str, str], ...]
-    min: int | None
-    max: int | None
+    """One drawer input: its Setting, the value to show, and why it is greyed."""
+
+    setting: SettingDef
     value: str
-    instant: bool
     disabled_reason: str | None
+
+    @property
+    def widget(self) -> Literal["select", "number"]:
+        if isinstance(self.setting, ChoiceSetting) or self.setting.widget == "offset":
+            return "select"
+        return "number"
+
+    @property
+    def options(self) -> tuple[tuple[str, str], ...]:
+        """(value, display label) pairs of a select, in order; () for a number."""
+        setting = self.setting
+        if isinstance(setting, ChoiceSetting):
+            return setting.options
+        if setting.widget == "offset":
+            return tuple(
+                (str(i), "Latest" if i == 0 else f"{i} back")
+                for i in range(setting.min, setting.max + 1)
+            )
+        return ()
 
 
 @dataclass(frozen=True)
@@ -239,47 +252,19 @@ class Drawer:
     error: str | None
 
 
-def _offset_label(offset: int) -> str:
-    return "Latest" if offset == 0 else f"{offset} back"
-
-
-def _drawer_field(
-    setting: SettingDef, value: SettingValue, reason: str | None
-) -> DrawerField:
-    if isinstance(setting, ChoiceSetting):
-        widget, options, low, high = "select", setting.options, None, None
-    elif setting.widget == "offset":
-        widget, low, high = "select", None, None
-        options = tuple(
-            (str(i), _offset_label(i)) for i in range(setting.min, setting.max + 1)
-        )
-    else:
-        widget, options, low, high = "number", (), setting.min, setting.max
-    return DrawerField(
-        id=setting.id,
-        label=setting.label,
-        widget=widget,
-        options=options,
-        min=low,
-        max=high,
-        value=str(value),
-        instant=setting.instant,
-        disabled_reason=reason,
-    )
-
-
 def build_drawer(settings: Settings, *, next_path: str, error: str | None) -> Drawer:
     """The drawer for a page, in registry order: every Global Setting (greyed
     ones carry their reason) and the page's declared Sub-page Settings."""
     decl = settings.decl
     global_fields = tuple(
-        _drawer_field(s, settings.values[s.id], decl.cannot_honour.get(s.id))
-        for s in SETTINGS
-        if s.id in GLOBAL_SETTING_IDS
+        DrawerField(
+            s.value, str(settings.values[s.value.id]), decl.cannot_honour.get(s)
+        )
+        for s in GlobalSetting
     )
     page_fields = tuple(
-        _drawer_field(s, settings.values[s.id], None)
-        for s in SETTINGS
-        if s.id in decl.uses
+        DrawerField(s.value, str(settings.values[s.value.id]), None)
+        for s in SubpageSetting
+        if s in decl.uses
     )
     return Drawer(global_fields, page_fields, next_path, error)

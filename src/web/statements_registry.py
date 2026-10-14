@@ -7,6 +7,7 @@ from typing import Final
 
 from src.models.statement import StatementType
 from src.web.settings import SettingsDecl
+from src.web.settings_registry import SubpageSetting
 
 
 @dataclass(frozen=True)
@@ -21,7 +22,7 @@ class StatementPage:
     subpages: tuple[()] = ()
 
 
-_STATEMENT_DECL: Final = SettingsDecl(uses=("basis",))
+_STATEMENT_DECL: Final = SettingsDecl(uses=(SubpageSetting.BASIS,))
 
 STATEMENT_PAGES: Final[tuple[StatementPage, ...]] = (
     StatementPage("income", "Income", "Income Statement", 1, _STATEMENT_DECL),

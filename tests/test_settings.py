@@ -8,10 +8,8 @@ import pytest
 
 from src.config import MAX_CACHE_QUARTERS, MAX_CACHE_YEARS
 from src.web.settings import (
-    GLOBAL_SETTING_IDS,
     NO_SETTINGS,
     SETTINGS,
-    SUBPAGE_SETTING_IDS,
     Refused,
     Saved,
     SettingNotApplicable,
@@ -21,12 +19,17 @@ from src.web.settings import (
     resolve,
     safe_next,
 )
+from src.web.settings_registry import GlobalSetting, SubpageSetting
 from src.web.statements_registry import STATEMENT_PAGES
 from src.web.wizard_registry import WIZARD_PAGES
 
 FUND_FLOW_LIKE = SettingsDecl(
-    uses=("basis", "current_period", "previous_period"),
-    cannot_honour={"num_periods": "Two periods"},
+    uses=(
+        SubpageSetting.BASIS,
+        SubpageSetting.CURRENT_PERIOD,
+        SubpageSetting.PREVIOUS_PERIOD,
+    ),
+    cannot_honour={GlobalSetting.NUM_PERIODS: "Two periods"},
 )
 PERIODS = [f"20{y:02d}-12-31" for y in range(24, 0, -1)]  # newest first, 24
 
@@ -40,7 +43,7 @@ def test_defaults_on_a_fresh_browser() -> None:
     assert (s.period, s.view, s.basis) == ("annual", "standard", "reported")
     assert s.period_at("current_period", PERIODS) == PERIODS[0]
     assert s.period_at("previous_period", PERIODS) == PERIODS[1]
-    bss = resolve(None, SettingsDecl(uses=("items_per_side",)))
+    bss = resolve(None, SettingsDecl(uses=(SubpageSetting.ITEMS_PER_SIDE,)))
     assert bss.items_per_side == 5
     assert resolve(None, NO_SETTINGS).num_periods == 10
 
@@ -48,7 +51,7 @@ def test_defaults_on_a_fresh_browser() -> None:
 def test_invalid_values_fall_back_per_field() -> None:
     s = resolve(
         _cookie(period="weekly", num_periods=3, view=7, basis="adjusted", junk=1),
-        SettingsDecl(uses=("basis",)),
+        SettingsDecl(uses=(SubpageSetting.BASIS,)),
     )
     assert (s.period, s.num_periods, s.view, s.basis) == (
         "annual",
@@ -106,7 +109,7 @@ def test_failing_rule_keeps_current_and_repairs_previous() -> None:
     s = resolve(raw, FUND_FLOW_LIKE)
     assert s.period_at("current_period", PERIODS) == PERIODS[3]
     assert s.period_at("previous_period", PERIODS) == PERIODS[4]
-    only_current = resolve(raw, SettingsDecl(uses=("current_period",)))
+    only_current = resolve(raw, SettingsDecl(uses=(SubpageSetting.CURRENT_PERIOD,)))
     assert only_current.period_at("current_period", PERIODS) == PERIODS[3]
 
 
@@ -173,38 +176,47 @@ def test_safe_next(raw: str | None, expected: str) -> None:
 
 
 @pytest.mark.parametrize(
-    "decl",
+    ("decl", "error"),
     [
-        {"uses": ("basiss",)},
-        {"uses": ("period",)},
-        {"uses": ("basis", "basis")},
-        {"cannot_honour": {"basis": "No"}},
-        {"cannot_honour": {"view": "  "}},
+        ({"uses": ("basis",)}, TypeError),
+        ({"uses": (GlobalSetting.PERIOD,)}, TypeError),
+        ({"uses": (SubpageSetting.BASIS, SubpageSetting.BASIS)}, ValueError),
+        ({"cannot_honour": {SubpageSetting.BASIS: "No"}}, TypeError),
+        ({"cannot_honour": {"view": "Summary only"}}, TypeError),
+        ({"cannot_honour": {GlobalSetting.VIEW: "  "}}, ValueError),
     ],
 )
-def test_bad_declaration_raises(decl: dict) -> None:
-    with pytest.raises(ValueError):
+def test_bad_declaration_raises(decl: dict, error: type[Exception]) -> None:
+    with pytest.raises(error):
         SettingsDecl(**decl)
 
 
 def test_drawer_greys_globals_and_lists_declared_subpage_fields() -> None:
     decl = SettingsDecl(
-        uses=("current_period", "items_per_side"),
-        cannot_honour={"view": "Summary only"},
+        uses=(SubpageSetting.CURRENT_PERIOD, SubpageSetting.ITEMS_PER_SIDE),
+        cannot_honour={GlobalSetting.VIEW: "Summary only"},
     )
     drawer = build_drawer(
         resolve(_cookie(view="detailed"), decl), next_path="/p", error="bad"
     )
-    assert [f.id for f in drawer.global_fields] == ["period", "num_periods", "view"]
+    assert [f.setting for f in drawer.global_fields] == [s.value for s in GlobalSetting]
     view = drawer.global_fields[2]
-    assert (view.disabled_reason, view.instant, view.value) == (
+    assert (view.disabled_reason, view.widget, view.value) == (
         "Summary only",
-        True,
+        "select",
         "detailed",
     )
-    assert [f.id for f in drawer.page_fields] == ["current_period", "items_per_side"]
-    current = drawer.page_fields[0]
-    assert current.options[:2] == (("0", "Latest"), ("1", "1 back"))
+    assert view.setting is GlobalSetting.VIEW.value
+    assert [f.setting for f in drawer.page_fields] == [
+        SubpageSetting.CURRENT_PERIOD.value,
+        SubpageSetting.ITEMS_PER_SIDE.value,
+    ]
+    current, items = drawer.page_fields
+    assert (current.widget, current.options[:2]) == (
+        "select",
+        (("0", "Latest"), ("1", "1 back")),
+    )
+    assert (items.widget, items.options, items.value) == ("number", (), "5")
     assert (drawer.next_path, drawer.error) == ("/p", "bad")
     assert (
         build_drawer(resolve(None, NO_SETTINGS), next_path="/", error=None).page_fields
@@ -236,7 +248,6 @@ def test_every_page_declaration_names_registry_settings_with_reasons() -> None:
     }
     for name, decl in declarations:
         assert isinstance(decl, SettingsDecl), name
-        for setting_id in decl.uses:
-            assert setting_id in SUBPAGE_SETTING_IDS, (name, setting_id)
-        for setting_id, reason in decl.cannot_honour.items():
-            assert setting_id in GLOBAL_SETTING_IDS and reason.strip(), name
+        assert all(isinstance(s, SubpageSetting) for s in decl.uses), name
+        for setting, reason in decl.cannot_honour.items():
+            assert isinstance(setting, GlobalSetting) and reason.strip(), name
