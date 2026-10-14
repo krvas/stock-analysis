@@ -18,10 +18,12 @@ from src.api.edgartools.standard_terms import (
     CFO,
     DA_COMPONENT_AXIS,
     EQUITY_PARENTS,
+    NET_INCOME_CONCEPTS,
     PRETAX_INCOME,
 )
 from src.models.statement import bool_flag
 
+OPERATING_CASH_TOTALS = (CFO, f"{CFO}ContinuingOperations")
 CASH_CHANGE = (
     "us-gaap_CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents"
     "PeriodIncreaseDecreaseIncludingExchangeRateEffect"
@@ -77,6 +79,12 @@ def test_from_prefs_groups_by_type() -> None:
     assert specs[1].params == {"maintenance_da": 60.0, "maintenance_nwc": 50.0}
 
 
+def _computed_periods(statement, concept: str) -> set[str]:
+    """Periods where ``concept`` has calc children, so the engine recomputes it."""
+    edges = statement.calc_edges
+    return set(edges.loc[edges["parent_concept"] == concept, "period"])
+
+
 def _row_values(ss, statement: str, concept: str) -> pd.Series | None:
     frame = ss.get(statement).frame
     rows = frame[(frame["concept"] == concept) & ~frame["dimension"].eq(True)]
@@ -126,12 +134,21 @@ def test_capitalized_opex_moves_every_period_by_its_schedule(data_ticker: str) -
     _, net = schedule(spend, life)
     balance_concepts = set(base.balance.frame["concept"])
     equity = next(c for c in EQUITY_PARENTS if c in balance_concepts)
+    cash_concepts = set(base.cashflow.frame["concept"])
+    operating_spend = {
+        c: {p: v for p, v in spend.items() if p in _computed_periods(base.cashflow, c)}
+        for c in OPERATING_CASH_TOTALS
+        if c in cash_concepts
+    }
+    operating = {c for c, moved in operating_spend.items() if moved}
+    assert operating, (data_ticker, "no computed operating cash total")
+    investing = _computed_periods(base.cashflow, CFI)
     expected = {
         ("balance", "us-gaap_Assets"): net,
         ("balance", equity): net,
         ("balance", "us-gaap_LiabilitiesAndStockholdersEquity"): net,
-        ("cashflow", CFO): spend,
-        ("cashflow", CFI): {p: -v for p, v in spend.items()},
+        **{("cashflow", c): operating_spend[c] for c in operating},
+        ("cashflow", CFI): {p: -v for p, v in spend.items() if p in investing},
     }
     for (st, concept), change in expected.items():
         before = _row_values(base, st, concept)
@@ -155,7 +172,7 @@ def test_capitalized_opex_moves_every_period_by_its_schedule(data_ticker: str) -
         ("income", f"adj_Amortization{local}"): expense_parent,
         ("balance", f"adj_Capitalized{local}"): set(ASSET_PARENTS),
         ("balance", f"adj_EquityCapitalized{local}"): set(EQUITY_PARENTS),
-        ("cashflow", f"adj_Amortization{local}"): {CFO},
+        ("cashflow", f"adj_Amortization{local}"): operating,
         ("cashflow", f"adj_Capitalized{local}"): {CFI},
     }
     for (st, concept), parents in inserted.items():
@@ -179,14 +196,19 @@ def test_capitalized_opex_moves_every_period_by_its_schedule(data_ticker: str) -
         )[period]
         if pd.notna(assets) and pd.notna(total):
             assert assets == pytest.approx(total), (data_ticker, period)
-    income_ni = _row_values(adjusted, "income", "us-gaap_NetIncomeLoss")
-    cash_ni = _row_values(adjusted, "cashflow", "us-gaap_NetIncomeLoss")
-    for period in cash_ni.index:
-        if period in income_ni.index and pd.notna(income_ni[period]):
-            assert cash_ni[period] == pytest.approx(income_ni[period]), (
-                data_ticker,
-                period,
-            )
+    income_concepts = set(base.income.frame["concept"])
+    synced = [c for c in NET_INCOME_CONCEPTS if c in cash_concepts & income_concepts]
+    assert synced, (data_ticker, "no net income row on both IS and CF")
+    for concept in synced:
+        income_ni = _row_values(adjusted, "income", concept)
+        cash_ni = _row_values(adjusted, "cashflow", concept)
+        for period in cash_ni.index:
+            if period in income_ni.index and pd.notna(income_ni[period]):
+                assert cash_ni[period] == pytest.approx(income_ni[period]), (
+                    data_ticker,
+                    concept,
+                    period,
+                )
     if CASH_CHANGE in set(base.cashflow.frame["concept"]):
         assert np.allclose(
             _row_values(adjusted, "cashflow", CASH_CHANGE).fillna(0),

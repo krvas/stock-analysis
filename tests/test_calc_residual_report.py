@@ -12,6 +12,7 @@ import pytest
 
 from src.api.edgartools import cache as cache_mod
 from src.api.edgartools.cache import save_cache_entry, touch_company_cache
+from src.models.calc_residuals import tagged_residuals
 from src.models.statement import Statement
 from src.pipelines import calc_residual_report as report
 from src.pipelines.calc_residual_report import (
@@ -110,12 +111,39 @@ def test_non_zero_sorted_by_abs_relative(tmp_path: Path) -> None:
             "n_children": [1, 1, 1],
             "n_nan_children": [0, 0, 0],
             "n_missing_children": [0, 1, 0],
+            "rounding": [0.0, 0.0, 0.0],
         }
     )
     details = non_zero_residuals(residuals, tolerance=0.5)
 
     assert details["row_id"].tolist() == ["b", "a"]
     assert details["n_missing_children"].tolist() == [1, 0]
+
+
+def test_non_zero_ignores_residuals_within_reporting_rounding() -> None:
+    frame = pd.DataFrame(
+        {
+            "concept": ["Total", "A", "B", "C", "D"],
+            "label": ["Total", "A", "B", "C", "D"],
+            "dimension": [False] * 5,
+            "weight": [None, 1.0, 1.0, 1.0, 1.0],
+            "parent_concept": [None, "Total", "Total", "Total", "Total"],
+            P1: [1_002e6, 250e6, 250e6, 250e6, 250e6],
+            P2: [1_900e6, 250e6, 250e6, 250e6, 250e6],
+        }
+    )
+    residuals = tagged_residuals(
+        {"balance": make_statement(frame, "balance")}, ticker="T", period_type="annual"
+    )
+
+    details = non_zero_residuals(residuals, tolerance=0.5)
+    assert details[["period", "residual"]].values.tolist() == [[P2, 900e6]]
+    summary = summarize(residuals, tolerance=0.5).iloc[0]
+    assert (summary["parent_periods"], summary["non_zero"]) == (2, 1)
+    compared, _ = compare_with_viewer(
+        residuals, pd.DataFrame(columns=list(report.VIEWER_COLUMNS)), tolerance=0.5
+    )
+    assert flagged_residuals(compared, tolerance=0.5)["period"].tolist() == [P2]
 
 
 INCOME_ROLE = "CONSOLIDATED STATEMENTS OF OPERATIONS"

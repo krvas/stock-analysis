@@ -7,7 +7,8 @@ cache (stale ones are rebuilt from SEC), so a later request for one of them is
 already cached.
 
 The check is the calc-residual report's residuals over those statement sets:
-every calc parent must equal ``Σ weight·child`` in every period. Residuals are
+every calc parent must equal ``Σ weight·child`` in every period, up to the
+rounding of each value to the filing's reporting precision. Residuals are
 computed from what ``load_statement_set`` returns rather than with
 ``collect_residuals``, which re-reads the cache and skips bundles that are
 already stale by their latest filing date (e.g. a company between a 10-K and
@@ -56,9 +57,11 @@ def test_test_tickers_have_no_calc_residuals(data_ticker: str) -> None:
         "reported",
         "computed",
         "residual",
+        "rounding",
     ]
     assert non_zero.empty, (
         f"{len(non_zero)} of {len(residuals)} parent × period calc residuals "
-        f"exceed {DEFAULT_TOLERANCE} (largest relative first):\n"
+        "exceed rounding to the filing's reporting precision "
+        "(largest relative first):\n"
         + non_zero[columns].head(_MAX_REPORTED).to_string(index=False)
     )

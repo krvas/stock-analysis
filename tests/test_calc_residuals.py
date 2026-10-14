@@ -146,7 +146,42 @@ def test_calc_residuals_empty_without_calc_tree() -> None:
         "n_children",
         "n_nan_children",
         "n_missing_children",
+        "rounding",
     ]
+
+
+def _in_millions_and_thousands() -> pd.DataFrame:
+    return pd.DataFrame(
+        [
+            _row("Total", "Total", **{P1: 1_002e6, P2: 1_002e3}),
+            *(
+                _row(c, c, parent_concept="Total", **{P1: 250e6, P2: 250e3})
+                for c in "ABCD"
+            ),
+        ]
+    )
+
+
+def test_calc_residuals_rounding_is_half_a_reporting_unit_per_summed_value() -> None:
+    residuals = calc_residuals(
+        make_statement(_in_millions_and_thousands(), "income")
+    ).set_index("period")
+
+    assert residuals["residual"].to_dict() == {P1: 2e6, P2: 2e3}
+    assert residuals["rounding"].to_dict() == {P1: 2.5e6, P2: 2.5e3}
+
+
+def test_calc_residuals_rounding_skips_unreported_children_and_caps_unit() -> None:
+    frame = pd.DataFrame(
+        [
+            _row("Total", "Total", **{P1: 1_000e6}),
+            _row("A", "A", parent_concept="Total", **{P1: 1_000e6}),
+            _row("B", "B", parent_concept="Total", **{P1: None}),
+        ]
+    )
+    residuals = calc_residuals(make_statement(frame, "income"))
+
+    assert residuals["rounding"].tolist() == [1e6]
 
 
 def test_calc_residuals_counts_missing_children() -> None:

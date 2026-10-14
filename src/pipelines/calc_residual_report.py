@@ -300,12 +300,17 @@ def summarize_comparison(
     return summary[[*_GROUP_KEYS, *counts]]
 
 
+def _non_zero(residuals: pd.DataFrame, tolerance: float) -> pd.Series:
+    limit = residuals["rounding"].clip(lower=tolerance)
+    return residuals["residual"].abs() > limit
+
+
 def summarize(residuals: pd.DataFrame, tolerance: float) -> pd.DataFrame:
     """Per ticker × period type × statement: parents checked, parent-periods,
-    share with ``|residual| <= tolerance``, and the non-zero count."""
+    share with ``|residual| <= max(tolerance, rounding)``, and the non-zero count."""
     if residuals.empty:
         return pd.DataFrame(columns=list(SUMMARY_COLUMNS))
-    flagged = residuals.assign(zero=residuals["residual"].abs() <= tolerance)
+    flagged = residuals.assign(zero=~_non_zero(residuals, tolerance))
     grouped = flagged.groupby(["ticker", "period_type", "statement"], sort=True)
     summary = grouped.agg(
         parents=("row_id", "nunique"),
@@ -328,8 +333,9 @@ def _flagged(
 
 
 def non_zero_residuals(residuals: pd.DataFrame, tolerance: float) -> pd.DataFrame:
-    """Rows with ``|residual| > tolerance``, largest ``|relative|`` first."""
-    mask = None if residuals.empty else residuals["residual"].abs() > tolerance
+    """Rows with ``|residual| > max(tolerance, rounding)``, largest
+    ``|relative|`` first."""
+    mask = None if residuals.empty else _non_zero(residuals, tolerance)
     return _flagged(residuals, mask, list(DETAIL_COLUMNS))
 
 
@@ -339,7 +345,7 @@ def flagged_residuals(compared: pd.DataFrame, tolerance: float) -> pd.DataFrame:
     mask = (
         None
         if compared.empty
-        else (compared["residual"].abs() > tolerance) | compared["agrees"].eq(False)
+        else _non_zero(compared, tolerance) | compared["agrees"].eq(False)
     )
     return _flagged(compared, mask, [*DETAIL_COLUMNS, *COMPARE_COLUMNS])
 
@@ -381,6 +387,7 @@ def _format_report(summary: pd.DataFrame, details: pd.DataFrame) -> str:
                         "reported": "{:,.0f}".format,
                         "computed": "{:,.0f}".format,
                         "residual": "{:,.0f}".format,
+                        "rounding": "{:,.0f}".format,
                         "relative": "{:.4f}".format,
                         "viewer_expected": "{:,.0f}".format,
                         "viewer_computed": "{:,.0f}".format,
@@ -447,7 +454,8 @@ def main() -> None:
         type=float,
         default=DEFAULT_TOLERANCE,
         help=(
-            "Absolute residual (reported units) counted as zero "
+            "Absolute residual (reported units) counted as zero, on top of "
+            "rounding to the filing's reporting precision "
             f"(default: {DEFAULT_TOLERANCE})."
         ),
     )
