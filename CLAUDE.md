@@ -121,3 +121,4 @@ enforcing it is a repeat waiting to happen: encode it before adding another.
 | Rule | Enforced by |
 | --- | --- |
 | Never `git stash` in an agent worktree: `refs/stash` is shared by every worktree, so parallel agents pop and drop each other's entries. Save a patch (`git diff > <scratchpad>/wip.patch`, then `git apply`) or make a WIP commit. | `scripts/stay_in_repo.py` (the Bash `PreToolUse` hook) refuses a `git stash` that writes `refs/stash` when it runs in `.claude/worktrees/` (cwd, `cd` or `git -C`); `tests/test_stay_in_repo.py` replays the stashes agents ran. |
+| Jev's decision log outlives the worktree that wrote it: every run appends to the main checkout's `logs/jev/decisions.jsonl`. | `scripts/jev_decide.py` resolves `LOG_PATH` from `git rev-parse --git-common-dir`; `test_a_run_from_a_worktree_logs_to_the_main_checkout` in `tests/test_jev_decide.py` runs from a real worktree. |
