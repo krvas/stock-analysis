@@ -11,8 +11,8 @@ choice. Use it for the decisions below, where one Jev call costs far fewer
 tokens than reasoning through the choice yourself.
 
 Each runs as `make jev KIND=<kind> INPUT=<path.json>`. It writes
-`<input stem>.jev.json` beside the input and logs every result to
-`logs/jev/decisions.jsonl`. `scripts/jev_decide.py --help` lists each kind's
+`<input stem>.jev.json` beside the input and logs every result to the main
+checkout's `logs/jev/decisions.jsonl`, also when run from a worktree. `scripts/jev_decide.py --help` lists each kind's
 input format. The thresholds and API settings sit at the top of that script;
 override any of them from `.env` with its `JEV_` variable.
 
