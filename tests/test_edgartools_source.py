@@ -141,6 +141,7 @@ def _mock_xbrl(
     standard_by_statement: dict[str, pd.DataFrame | Exception] | None = None,
     calc_trees: dict[str, dict[str, tuple[str | None, float]]] | None = None,
     facts: pd.DataFrame | None = None,
+    presented: dict[str, list[str]] | None = None,
 ) -> MagicMock:
     """A filing whose statements return the given frames.
 
@@ -148,9 +149,16 @@ def _mock_xbrl(
     (or raises it, if an exception), defaulting to :func:`_default_standard`.
     ``calc_trees`` maps a statement type to its role's calc nodes
     (``{element_id: (parent, weight)}``, default empty); ``find_statement``
-    resolves each statement's canonical type to that role.
+    resolves each statement's canonical type to that role. ``presented`` maps
+    a statement type to the element ids of its role's presentation tree.
     """
     xbrl = MagicMock()
+    xbrl.presentation_trees = {
+        _role(statement_type): SimpleNamespace(
+            all_nodes=dict.fromkeys((presented or {}).get(statement_type, []))
+        )
+        for statement_type in _GETTERS
+    }
     if facts is not None:
         xbrl.facts.to_dataframe.return_value = facts
     standard_by_statement = standard_by_statement or {}
@@ -618,6 +626,81 @@ def test_build_blanks_total_cells_without_a_non_dimensional_fact(
     assert np.isnan(values[cfo])
     assert values[f"{cfo}|LeaseArrangementTypeAxis={lease[1]}"] == -159.0
     assert values["us-gaap_ProfitLoss"] == 3592.0
+
+
+_PARTY = "us-gaap_RelatedPartyTransactionsByRelatedPartyAxis"
+
+
+@pytest.mark.parametrize(
+    ("members", "presented", "kept"),
+    [
+        (
+            {
+                "us-gaap_NonrelatedPartyMember": 366.0,
+                "us-gaap_RelatedPartyMember": 400.0,
+            },
+            [_PARTY, "us-gaap_NonrelatedPartyMember", "us-gaap_RelatedPartyMember"],
+            True,
+        ),
+        (
+            {"us-gaap_RelatedPartyMember": 766.0},
+            [_PARTY, "us-gaap_RelatedPartyMember"],
+            True,
+        ),
+        (
+            {
+                "us-gaap_NonrelatedPartyMember": 366.0,
+                "us-gaap_RelatedPartyMember": 400.0,
+            },
+            [_PARTY, "us-gaap_RelatedPartyMember"],
+            False,
+        ),
+        ({"us-gaap_RelatedPartyMember": 766.0}, [], False),
+    ],
+    ids=["full-breakdown", "one-presented-member", "member-not-presented", "note-only"],
+)
+@patch("src.api.edgartools.source.determine_optimal_periods")
+def test_build_keeps_total_cells_only_from_presented_breakdowns(
+    mock_periods: MagicMock,
+    members: dict[str, float],
+    presented: list[str],
+    kept: bool,
+) -> None:
+    payable = "us-gaap_AccountsPayableCurrent"
+    rows = [{"concept": payable, "value": 766.0}]
+    rows += [
+        {"concept": payable, "axes": [(_PARTY, member)], "value": value}
+        for member, value in members.items()
+    ]
+    rows.append(
+        {
+            "concept": payable,
+            "axes": [
+                ("us-gaap_CounterpartyTypeAxis", "us-gaap_EquityMethodInvesteeMember"),
+                (_PARTY, "us-gaap_RelatedPartyMember"),
+            ],
+            "value": 279.0,
+        }
+    )
+    facts = _facts(
+        [("us-gaap:AccountsPayableCurrent", True, value) for value in members.values()]
+    )
+    xbrls = MagicMock()
+    xbrls.xbrl_list = [
+        _mock_xbrl(
+            {"balance": _filing_df("2025-06-27", rows)},
+            facts=facts,
+            presented={"balance": [payable, *presented]},
+        )
+    ]
+    mock_periods.return_value = [
+        {"xbrl_index": 0, "date": "2025-06-27", "period_type": "instant"}
+    ]
+
+    built = _build_statement(xbrls, "balance", max_periods=8).frame
+
+    total = built.set_index("row_id").loc[payable, "2025-06-27"]
+    assert (total == 766.0) if kept else np.isnan(total)
 
 
 # Old tree: ProfitLoss under NetIncomeLoss; new tree: pretax income directly.

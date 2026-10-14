@@ -151,10 +151,15 @@ be another role's calc tree, the raw item's is this role's (same node as
 `parent_concept`); dimensional rows take their concept's role weight. If
 alignment fails, edgartools' weight is kept. A non-dimensional (total) cell
 keeps its value only when the filing has a non-dimensional fact of that
-concept with that value (`_without_dimensional_fills`): with no such fact,
-edgartools fills the total from dimensional facts (e.g. ET's FY2019 CFO was
-the operating-lease axis value), and we leave the cell empty. If the facts
-cannot be read, edgartools' values are kept. Rows
+concept with that value, or the value is the sum of a single-axis breakdown
+whose axis and members are all in the statement's presentation tree
+(`_without_dimensional_fills`). With no non-dimensional fact, edgartools
+fills the total from any dimensional facts: a note-only member is not the
+total (ET's FY2019 CFO was the operating-lease axis value) and that cell is
+left empty; a breakdown on the statement's face is (SNDK's accounts payable
+by related party). Known gap: a presented "of which" member still fills the
+total (JPM's quarterly `OtherLiabilities` from the VIE section). If the
+facts cannot be read, edgartools' values are kept. Rows
 matched across filings by `get_row_id`; metadata from the newest filing a
 row appears in, except `weight` = newest non-NaN across filings. Values
 stored with **raw** XBRL signs. Because filers restructure calc trees, those
