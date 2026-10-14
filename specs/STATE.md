@@ -194,7 +194,10 @@ counted in `n_missing_children`. `rounding` bounds what rounding each value to
 the summation's reporting unit (largest power of ten up to 1e6 dividing that
 parent's and its children's values in the period, so per-share values in the
 same tree don't set the dollars' unit) can add: `unit / 2 · (1 + Σ|w|)`. The residual report and data
-test count a residual within it as zero.
+test count a residual within it as zero. They also skip a parent × period with
+no child value (`n_children == n_nan_children`): per XBRL Calculations 1.1
+§5.1 such a summation does not bind. The engine still gets that row's residual
+so the reported total reproduces.
 Expected 0 on real filings (data test: AAPL/MU/SNDK all 0); the old diluted
 shares residual is gone (edges come from the statement role only, not the
 EPS-note role).

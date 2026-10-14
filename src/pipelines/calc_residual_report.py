@@ -301,13 +301,17 @@ def summarize_comparison(
 
 
 def _non_zero(residuals: pd.DataFrame, tolerance: float) -> pd.Series:
+    # XBRL Calculations 1.1 §5.1: a summation binds only when at least one
+    # contributing fact is reported, so a total with no child value asserts nothing.
+    has_child_value = residuals["n_children"] > residuals["n_nan_children"]
     limit = residuals["rounding"].clip(lower=tolerance)
-    return residuals["residual"].abs() > limit
+    return has_child_value & (residuals["residual"].abs() > limit)
 
 
 def summarize(residuals: pd.DataFrame, tolerance: float) -> pd.DataFrame:
     """Per ticker × period type × statement: parents checked, parent-periods,
-    share with ``|residual| <= max(tolerance, rounding)``, and the non-zero count."""
+    share not non-zero, and the non-zero count. Non-zero means
+    ``|residual| > max(tolerance, rounding)`` with at least one child value."""
     if residuals.empty:
         return pd.DataFrame(columns=list(SUMMARY_COLUMNS))
     flagged = residuals.assign(zero=~_non_zero(residuals, tolerance))
@@ -333,8 +337,8 @@ def _flagged(
 
 
 def non_zero_residuals(residuals: pd.DataFrame, tolerance: float) -> pd.DataFrame:
-    """Rows with ``|residual| > max(tolerance, rounding)``, largest
-    ``|relative|`` first."""
+    """Rows with ``|residual| > max(tolerance, rounding)`` and at least one
+    child value, largest ``|relative|`` first."""
     mask = None if residuals.empty else _non_zero(residuals, tolerance)
     return _flagged(residuals, mask, list(DETAIL_COLUMNS))
 
