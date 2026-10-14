@@ -378,19 +378,11 @@ def _role_calc_edges(xbrl, statement) -> list[tuple[str, str, float]]:
 
 
 def _non_dimensional_facts(xbrl) -> set[tuple[str, float]] | None:
-    """``(concept, value)`` of every numeric non-dimensional fact in a filing.
-
-    ``None`` if the filing's facts cannot be read.
-    """
     try:
         facts = xbrl.facts.to_dataframe()
     except Exception:  # noqa: BLE001 - edgartools raises assorted errors
         facts = None
-    if not isinstance(facts, pd.DataFrame) or not {
-        "concept",
-        "is_dimensioned",
-        "numeric_value",
-    }.issubset(facts.columns):
+    if not isinstance(facts, pd.DataFrame) or facts.empty:
         logger.warning("Could not read XBRL facts; total rows keep edgartools' fills")
         return None
     facts = facts[
@@ -409,13 +401,10 @@ def _non_dimensional_facts(xbrl) -> set[tuple[str, float]] | None:
 def _without_dimensional_fills(
     frame: pd.DataFrame, facts: set[tuple[str, float]]
 ) -> pd.DataFrame:
-    """Blank each non-dimensional cell that no non-dimensional fact backs.
-
-    When a filing has no non-dimensional fact for a concept and period,
-    edgartools fills the total row from its dimensional facts (one member's
-    value, or the members' sum): ET's FY2019 operating cash flow came out as
-    the operating-lease axis value. A cell is kept when the filing has a
-    non-dimensional fact of the row's concept with that value.
+    """edgartools fills a total row from one axis's dimensional members (a
+    member's value or their sum) when the filing has no non-dimensional fact
+    for that concept and period (edgartools issue #646,
+    ``XBRL._compute_synthetic_total``).
     """
     total_rows = ~frame["dimension"].fillna(False).astype(bool)
     for column in _period_columns(frame):
@@ -442,8 +431,7 @@ def _filing_frame(
     :func:`_in_standard`), and replaces ``weight`` with this statement role's
     calc weight (:func:`_role_weights`). Raw data is fetched and aligned once
     (:func:`_raw_items`); if that fails, ``dimension_key`` falls back to the
-    primary pair and ``weight`` stays edgartools'. Non-dimensional cells hold
-    only filed non-dimensional facts (:func:`_without_dimensional_fills`).
+    primary pair and ``weight`` stays edgartools'.
     """
     getter = getattr(xbrl.statements, _STATEMENT_METHODS[statement_type])
     statement = getter(view="detailed")

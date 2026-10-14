@@ -148,9 +148,7 @@ def _mock_xbrl(
     (or raises it, if an exception), defaulting to :func:`_default_standard`.
     ``calc_trees`` maps a statement type to its role's calc nodes
     (``{element_id: (parent, weight)}``, default empty); ``find_statement``
-    resolves each statement's canonical type to that role. ``facts`` is the
-    filing's ``xbrl.facts.to_dataframe()`` (default: a MagicMock, which the
-    source treats as unreadable facts).
+    resolves each statement's canonical type to that role.
     """
     xbrl = MagicMock()
     if facts is not None:
@@ -571,8 +569,6 @@ def test_build_warns_when_filing_has_no_column_for_its_period(
 
 
 def _facts(rows: list[tuple[str, bool, float]]) -> pd.DataFrame:
-    """An ``xbrl.facts.to_dataframe()`` frame of ``(concept, is_dimensioned,
-    numeric_value)`` facts."""
     concepts, dimensioned, values = zip(*rows, strict=True)
     return pd.DataFrame(
         {
@@ -587,9 +583,6 @@ def _facts(rows: list[tuple[str, bool, float]]) -> pd.DataFrame:
 def test_build_blanks_total_cells_without_a_non_dimensional_fact(
     mock_periods: MagicMock,
 ) -> None:
-    """edgartools fills a total row from dimensional facts when the filing has
-    no non-dimensional fact (ET's FY2019 CFO came out as the operating-lease
-    axis value). Only a filed non-dimensional fact may fill a total row."""
     lease = ("us-gaap_LeaseArrangementTypeAxis", "us-gaap_OperatingLeasesMember")
     frame = _filing_df(
         "2019-12-31 (FY)",

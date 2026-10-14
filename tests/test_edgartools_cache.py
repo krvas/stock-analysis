@@ -180,7 +180,6 @@ def test_save_and_load_round_trips_empty_calc_edges(tmp_path: Path) -> None:
 
 
 def test_schema_version_is_9() -> None:
-    """Bumped when total rows stopped taking dimensional facts' values."""
     assert CACHE_SCHEMA_VERSION == 9
 
 
