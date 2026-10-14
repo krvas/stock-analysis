@@ -11,7 +11,19 @@ from typing import Final, cast
 
 from src.config import MAX_CACHE_QUARTERS, MAX_ITEMS_PER_SIDE
 from src.models.statement import PERIOD_TYPES, STATEMENT_VIEWS
-from src.web.setting_types import ChoiceSetting, CrossRule, IntSetting, SettingDef
+from src.web.setting_types import ChoiceSetting, CrossRule, IntSetting
+
+RULES: Final[tuple[CrossRule, ...]] = (
+    CrossRule(
+        ids=("current_period", "previous_period"),
+        holds=lambda v: (
+            cast(int, v["previous_period"]) > cast(int, v["current_period"])
+        ),
+        # Keep the current period: pages share it, so it must not move.
+        repair=lambda v: {"previous_period": cast(int, v["current_period"]) + 1},
+        message="Previous period must be older than the current period",
+    ),
+)
 
 
 class GlobalSetting(Enum):
@@ -65,24 +77,3 @@ class SubpageSetting(Enum):
     ITEMS_PER_SIDE = IntSetting(
         "items_per_side", "Items per side", 1, MAX_ITEMS_PER_SIDE, 5
     )
-
-
-SETTINGS: Final[tuple[SettingDef, ...]] = tuple(
-    s.value for s in (*GlobalSetting, *SubpageSetting)
-)
-GLOBAL_SETTING_IDS: Final[frozenset[str]] = frozenset(s.value.id for s in GlobalSetting)
-
-RULES: Final[tuple[CrossRule, ...]] = (
-    CrossRule(
-        ids=("current_period", "previous_period"),
-        holds=lambda v: (
-            cast(int, v["previous_period"]) > cast(int, v["current_period"])
-        ),
-        # Keep the current period: pages share it, so it must not move.
-        repair=lambda v: {"previous_period": cast(int, v["current_period"]) + 1},
-        message="Previous period must be older than the current period",
-    ),
-)
-
-if len({s.id for s in SETTINGS}) != len(SETTINGS):
-    raise RuntimeError("Setting ids must be unique")

@@ -10,13 +10,12 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from jinja2 import TemplateNotFound
 from starlette.responses import Response
 
+from src.web.page_types import Page, SubPage
 from src.web.routes.settings import settings_for
 from src.web.templating import templates
 from src.web.wizard_registry import (
     GROUP_LABELS,
     WIZARD_PAGES,
-    Page,
-    SubPage,
     first_subpage,
     get_page,
     get_subpage,

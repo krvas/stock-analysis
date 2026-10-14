@@ -8,20 +8,17 @@ accept user saves declare a ``post_handler``; requests go to
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from dataclasses import dataclass
-from typing import Any, Final, Literal
+from typing import Final
 
+from src.web.page_types import Page, PageGroup, SubPage
 from src.web.routes.wizard_pages import (
     adjustments_context,
     adjustments_post,
     business_understanding,
     owner_earnings,
 )
-from src.web.settings import NO_SETTINGS, Settings, SettingsDecl
+from src.web.settings import SettingsDecl
 from src.web.settings_registry import GlobalSetting, SubpageSetting
-
-PageGroup = Literal["business", "people", "price", "red_flags"]
 
 GROUP_LABELS: Final[dict[PageGroup, str]] = {
     "business": "Business",
@@ -36,32 +33,6 @@ GROUP_ORDER: Final[tuple[PageGroup, ...]] = (
     "price",
     "red_flags",
 )
-
-SubPageContextBuilder = Callable[[str, Settings], dict[str, Any]]
-default_context_builder: Final[SubPageContextBuilder] = lambda ticker, settings: {}
-
-SubPagePostHandler = Callable[[str, dict[str, Any]], dict[str, Any]]
-default_post_handler: Final[SubPagePostHandler | None] = None
-
-
-@dataclass(frozen=True)
-class SubPage:
-    slug: str
-    title: str
-    order: int
-    context_builder: SubPageContextBuilder = default_context_builder
-    post_handler: SubPagePostHandler | None = default_post_handler
-    settings: SettingsDecl = NO_SETTINGS
-
-
-@dataclass(frozen=True)
-class Page:
-    slug: str
-    title: str
-    order: int
-    group: PageGroup
-    subpages: list[SubPage]
-
 
 WIZARD_PAGES: list[Page] = [
     Page(

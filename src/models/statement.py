@@ -110,6 +110,8 @@ CALC_EDGE_COLUMNS: tuple[str, ...] = ("period", "concept", "parent_concept", "we
 
 _TOTAL_LABEL_RE = re.compile(r"\btotal\b", re.IGNORECASE)
 
+_DIMENSION_PAIR_SEPARATOR = "|"
+
 
 class DuplicateRowIdError(ValueError):
     """A statement frame produced the same ``row_id`` for more than one row."""
@@ -120,9 +122,6 @@ def is_total_label(label: object) -> bool:
     if is_missing(label):
         return False
     return bool(_TOTAL_LABEL_RE.search(str(label)))
-
-
-_DIMENSION_PAIR_SEPARATOR = "|"
 
 
 def format_dimension_key(pairs: Sequence[tuple[str, str]]) -> str | None:

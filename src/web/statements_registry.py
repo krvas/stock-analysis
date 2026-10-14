@@ -2,25 +2,11 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Final
 
-from src.models.statement import StatementType
+from src.web.page_types import StatementPage
 from src.web.settings import SettingsDecl
 from src.web.settings_registry import SubpageSetting
-
-
-@dataclass(frozen=True)
-class StatementPage:
-    slug: StatementType
-    title: str
-    heading: str
-    order: int
-    settings: SettingsDecl
-    # Statement pages have no sub-pages; the shared nav reads this attribute
-    # on wizard and statement pages alike.
-    subpages: tuple[()] = ()
-
 
 _STATEMENT_DECL: Final = SettingsDecl(uses=(SubpageSetting.BASIS,))
 

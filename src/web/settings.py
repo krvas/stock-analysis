@@ -19,13 +19,15 @@ from typing import Final, Literal, cast
 from src.config import MAX_PERIODS_BY_PERIOD
 from src.models.statement import PeriodType, StatementView
 from src.web.setting_types import ChoiceSetting, SettingDef, SettingValue
-from src.web.settings_registry import (
-    GLOBAL_SETTING_IDS,
-    RULES,
-    SETTINGS,
-    GlobalSetting,
-    SubpageSetting,
+from src.web.settings_registry import RULES, GlobalSetting, SubpageSetting
+
+SETTINGS: Final[tuple[SettingDef, ...]] = tuple(
+    s.value for s in (*GlobalSetting, *SubpageSetting)
 )
+GLOBAL_SETTING_IDS: Final[frozenset[str]] = frozenset(s.value.id for s in GlobalSetting)
+
+if len({s.id for s in SETTINGS}) != len(SETTINGS):
+    raise RuntimeError("Setting ids must be unique")
 
 OffsetSettingId = Literal["current_period", "previous_period"]
 Basis = Literal["reported", "adjusted"]
