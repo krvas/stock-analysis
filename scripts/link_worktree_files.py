@@ -35,6 +35,11 @@ def _git_path(cwd: Path, *args: str) -> Path:
     return Path(out.strip())
 
 
+def main_checkout(cwd: Path) -> Path:
+    """The root of the main checkout that ``cwd`` (maybe a worktree) belongs to."""
+    return _git_path(cwd, "--git-common-dir").parent
+
+
 def link_worktree_files(cwd: Path) -> list[str]:
     """Link each of ``LINKED_PATHS`` that the main checkout has; return notes."""
     common_dir = _git_path(cwd, "--git-common-dir")

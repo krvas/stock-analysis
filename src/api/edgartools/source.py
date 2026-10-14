@@ -21,6 +21,7 @@ from edgar.xbrl import XBRLS
 from edgar.xbrl.stitching.periods import determine_optimal_periods
 
 from src.api.edgartools.cache import (
+    BUNDLE_CACHE_DIR,
     CachedStatementSet,
     find_cached_cik,
     read_cache_entry,
@@ -719,10 +720,10 @@ def load_statement_set(ticker: str, period: PeriodType) -> StatementSet:
     setup_edgartools()
 
     cached = None
-    cached_cik = find_cached_cik(EDGARTOOLS_CACHE_DIR, ticker)
+    cached_cik = find_cached_cik(BUNDLE_CACHE_DIR, ticker)
     if cached_cik is not None:
         cached = read_cache_entry(
-            cik=cached_cik, period=period, cache_dir=EDGARTOOLS_CACHE_DIR
+            cik=cached_cik, period=period, cache_dir=BUNDLE_CACHE_DIR
         )
         if cached is not None and not cached.stale:
             return _serve_cached(cached, cik=cached_cik, ticker=ticker)
@@ -730,7 +731,7 @@ def load_statement_set(ticker: str, period: PeriodType) -> StatementSet:
     company = Company(ticker)
     if cached_cik is None or int(cached_cik) != int(company.cik):
         cached = read_cache_entry(
-            cik=company.cik, period=period, cache_dir=EDGARTOOLS_CACHE_DIR
+            cik=company.cik, period=period, cache_dir=BUNDLE_CACHE_DIR
         )
         if cached is not None and not cached.stale:
             return _serve_cached(cached, cik=company.cik, ticker=ticker)
@@ -764,7 +765,7 @@ def load_statement_set(ticker: str, period: PeriodType) -> StatementSet:
         period=period,
         latest_filing_date=latest_filing_date,
         statement_set=statement_set,
-        cache_dir=EDGARTOOLS_CACHE_DIR,
+        cache_dir=BUNDLE_CACHE_DIR,
     )
     touch_company_cache(cik=company.cik, ticker=ticker)
     return statement_set

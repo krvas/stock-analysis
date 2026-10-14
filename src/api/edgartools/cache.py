@@ -4,12 +4,21 @@ One bundle per ``(cik, period)``: per statement type (income, balance,
 cashflow) a raw detailed frame covering up to ``MAX_CACHE_YEARS`` of filings,
 so any ``num_periods`` / view request is served by slicing and projecting the
 same bundle, plus its per-period calc edges (``Statement.calc_edges``: each
-period's calc tree from the filing its values came from). Layout::
+period's calc tree from the filing its values came from). Layout under
+:data:`BUNDLE_CACHE_DIR` (``v{CACHE_SCHEMA_VERSION}/`` in the edgartools
+cache)::
 
+    company_lru.json
     companies/{cik}/{period}/{statement_type}.parquet       # frame
     companies/{cik}/{period}/{statement_type}_calc.parquet  # calc edges
     companies/{cik}/{period}/meta.json   # schema_version, period,
                                          # latest_filing_date
+
+Every worktree shares ``data/edgartools_cache`` through a symlink, so each
+schema version keeps its own directory: a branch that bumps the version builds
+its own bundles instead of discarding the ones other branches read. A new
+version directory starts with a copy of the unversioned layout's index and
+same-version bundles (see :func:`bundle_cache_dir`).
 
 Bundles are discarded when ``meta.json`` carries a different
 :data:`CACHE_SCHEMA_VERSION` and when files are missing or unreadable. A
@@ -30,6 +39,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import shutil
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -59,6 +69,14 @@ logger = logging.getLogger(__name__)
 CACHE_SCHEMA_VERSION = 8
 
 _INDEX_FILENAME = "company_lru.json"
+
+
+def bundle_cache_dir(root: Path) -> Path:
+    """This schema version's bundle directory under the edgartools cache ``root``."""
+    return root / f"v{CACHE_SCHEMA_VERSION}"
+
+
+BUNDLE_CACHE_DIR = bundle_cache_dir(EDGARTOOLS_CACHE_DIR)
 
 
 @dataclass(frozen=True)
@@ -108,12 +126,47 @@ def _normalize_tickers(tickers: Iterable[object]) -> list[str]:
     return sorted({str(t).strip().upper() for t in tickers if str(t).strip()})
 
 
+def _copy_unversioned_bundles(cache_dir: Path) -> None:
+    """Seed a new version directory from the unversioned layout under its root.
+
+    Branches without version directories keep their bundles straight under the
+    root. Copies the index and each bundle of this schema version, so they need
+    no refetch, and leaves the originals for those branches.
+    """
+    root = cache_dir.parent
+    if (
+        cache_dir != bundle_cache_dir(root)
+        or cache_dir.exists()
+        or not _index_path(root).exists()
+    ):
+        return
+    staging = root / f".{cache_dir.name}.{os.getpid()}.tmp"
+    for meta_path in root.glob("companies/*/*/meta.json"):
+        try:
+            version = json.loads(meta_path.read_text(encoding="utf-8"))[
+                "schema_version"
+            ]
+        except (OSError, ValueError, KeyError, TypeError):
+            continue
+        if version == CACHE_SCHEMA_VERSION:
+            bundle = meta_path.parent
+            shutil.copytree(bundle, staging / bundle.relative_to(root))
+    staging.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(_index_path(root), _index_path(staging))
+    try:
+        staging.rename(cache_dir)
+    except OSError:  # another process seeded it first
+        shutil.rmtree(staging, ignore_errors=True)
+
+
 def _load_index(cache_dir: Path) -> dict[str, Any]:
     """The LRU index: ``companies`` (``{cik: entry}``) and ``pinned_tickers``.
 
     A missing/corrupt file yields an empty index; a missing or invalid
-    ``pinned_tickers`` is treated as empty.
+    ``pinned_tickers`` is treated as empty. Every cache lookup starts here, so
+    this seeds a new version directory first.
     """
+    _copy_unversioned_bundles(cache_dir)
     path = _index_path(cache_dir)
     if not path.exists():
         return {"companies": {}, "pinned_tickers": []}
@@ -146,7 +199,7 @@ def _save_index(cache_dir: Path, index: dict[str, Any]) -> None:
 
 def get_pinned_tickers(cache_dir: Path | None = None) -> frozenset[str]:
     """Tickers exempt from company LRU eviction (uppercased)."""
-    cache_dir = Path(cache_dir) if cache_dir is not None else EDGARTOOLS_CACHE_DIR
+    cache_dir = Path(cache_dir) if cache_dir is not None else BUNDLE_CACHE_DIR
     return frozenset(_load_index(cache_dir)["pinned_tickers"])
 
 
@@ -156,7 +209,7 @@ def set_pinned_tickers(tickers: Iterable[str], cache_dir: Path | None = None) ->
     A ticker may be pinned before its company has an index entry; the pin
     takes effect once the company is touched. Pinning evicts nothing.
     """
-    cache_dir = Path(cache_dir) if cache_dir is not None else EDGARTOOLS_CACHE_DIR
+    cache_dir = Path(cache_dir) if cache_dir is not None else BUNDLE_CACHE_DIR
     index = _load_index(cache_dir)
     index["pinned_tickers"] = _normalize_tickers(tickers)
     _save_index(cache_dir, index)
@@ -164,7 +217,7 @@ def set_pinned_tickers(tickers: Iterable[str], cache_dir: Path | None = None) ->
 
 def add_pinned_tickers(tickers: Iterable[str], cache_dir: Path | None = None) -> None:
     """Pin ``tickers`` alongside the existing pins (see :func:`set_pinned_tickers`)."""
-    cache_dir = Path(cache_dir) if cache_dir is not None else EDGARTOOLS_CACHE_DIR
+    cache_dir = Path(cache_dir) if cache_dir is not None else BUNDLE_CACHE_DIR
     index = _load_index(cache_dir)
     index["pinned_tickers"] = _normalize_tickers([*index["pinned_tickers"], *tickers])
     _save_index(cache_dir, index)
@@ -381,13 +434,13 @@ def touch_company_cache(
     """Record a company fetch and evict older companies beyond
     ``EDGARTOOLS_COMPANY_CACHE_SIZE``.
 
-    Always uses ``EDGARTOOLS_CACHE_DIR`` and ``EDGARTOOLS_COMPANY_CACHE_SIZE``
+    Always uses ``BUNDLE_CACHE_DIR`` and ``EDGARTOOLS_COMPANY_CACHE_SIZE``
     (tests override them with ``monkeypatch.setattr`` on this module).
     Pinned companies (see :func:`set_pinned_tickers`) are never evicted and
     do not count toward the size; the limit applies to the rest.
     Returns the evicted CIKs.
     """
-    cache_dir = EDGARTOOLS_CACHE_DIR
+    cache_dir = BUNDLE_CACHE_DIR
     limit = EDGARTOOLS_COMPANY_CACHE_SIZE
 
     cik_key = _cik_key(cik)
