@@ -146,6 +146,46 @@ def test_non_zero_ignores_residuals_within_reporting_rounding() -> None:
     assert flagged_residuals(compared, tolerance=0.5)["period"].tolist() == [P2]
 
 
+def test_non_zero_skips_totals_without_any_child_value() -> None:
+    # Total has no child value in P1 (B is NaN, C is not presented) and only
+    # A in P2; Note's one child is never presented.
+    frame = pd.DataFrame(
+        {
+            "concept": ["Total", "A", "B", "Note"],
+            "label": ["Total", "A", "B", "Note"],
+            "dimension": [False] * 4,
+            "weight": [None, 1.0, 1.0, None],
+            "parent_concept": [None, "Total", "Total", None],
+            P1: [500.0, None, None, 70.0],
+            P2: [500.0, 200.0, None, 70.0],
+        }
+    )
+    statement = make_statement(frame, "balance")
+    extra_edges = pd.DataFrame(
+        [
+            {"period": p, "parent_concept": parent, "concept": child, "weight": 1.0}
+            for p in (P1, P2)
+            for parent, child in (("Total", "C"), ("Note", "D"))
+        ]
+    )
+    statement = Statement(
+        statement.frame,
+        "balance",
+        pd.concat([statement.calc_edges, extra_edges], ignore_index=True),
+    )
+    residuals = tagged_residuals(
+        {"balance": statement}, ticker="T", period_type="annual"
+    )
+    assert len(residuals) == 4
+
+    details = non_zero_residuals(residuals, tolerance=0.5)
+    assert details[["row_id", "period", "residual"]].values.tolist() == [
+        ["Total", P2, 300.0]
+    ]
+    summary = summarize(residuals, tolerance=0.5).iloc[0]
+    assert summary["non_zero"] == 1
+
+
 INCOME_ROLE = "CONSOLIDATED STATEMENTS OF OPERATIONS"
 
 
