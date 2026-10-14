@@ -3,8 +3,8 @@
 For each capitalized income row R with life N (raw signs, same-year
 amortization start, no tax effect — ``specs/adjustments_architecture.md`` §7, §9):
 
-- IS: R → 0; insert ``Amortization of capitalized R`` (tag ``da``) under R's
-  calc parent with R's weight.
+- IS: R → 0; insert ``Amortization of capitalized R`` (tag ``da``) under
+  every calc parent of R, with R's weight under each.
 - BS: insert ``Capitalized R (net)`` under ``AssetsNoncurrent`` (else
   ``Assets``) and an equal equity offset under the equity total.
 - CF: insert the amortization add-back under CFO and the capitalized spend
@@ -32,6 +32,7 @@ from src.api.edgartools.standard_terms import (
     EQUITY_PARENTS,
     NET_INCOME_CONCEPTS,
 )
+from src.models.calc_graph import CalcGraph
 from src.models.statement import Statement, StatementSet
 
 TYPE_ID = "opex_to_capex"
@@ -66,59 +67,54 @@ def schedule(spend: Mapping[str, float], life: int) -> tuple[dict, dict]:
 
 @dataclass(frozen=True)
 class _Parents:
-    """Calc parents of the inserted rows in one period."""
+    """Calc parents of the inserted rows in one period. ``expense`` is every
+    total the capitalized row sums into, with its weight there."""
 
-    expense: str
-    expense_weight: float
+    expense: dict[str, float]
     asset: str
     equity: str
     cfo: str
     cfi: str
 
 
-def _period_tree(statement: Statement, period: str) -> pd.DataFrame:
-    edges = statement.calc_edges
-    return edges[edges["period"] == period]
-
-
-def _first_total(tree: pd.DataFrame, candidates: tuple[str, ...]) -> str | None:
-    """First candidate with children in ``tree``: a total the engine can recompute."""
-    totals = set(tree["parent_concept"])
-    return next((c for c in candidates if c in totals), None)
+def _first_total(graph: CalcGraph, candidates: tuple[str, ...]) -> str | None:
+    """First candidate with children in ``graph``: a total the engine can recompute."""
+    return next((c for c in candidates if c in graph.totals), None)
 
 
 def _parents(ss: StatementSet, concept: str, period: str) -> _Parents | str:
     """Where ``concept``'s rows hang in ``period``, or why they can't."""
-    income = _period_tree(ss.income, period)
-    parent_of = dict(zip(income["concept"], income["parent_concept"], strict=True))
-    weight_of = dict(zip(income["concept"], income["weight"], strict=True))
-    ancestors, node = [], concept
-    while node in parent_of and parent_of[node] not in ancestors:
-        node = parent_of[node]
-        ancestors.append(node)
-    if not ancestors:
+    income = ss.income.calc_graph(period)
+    expense = income.parents(concept)
+    if not expense:
         return "the income statement does not total it"
-    balance = _period_tree(ss.balance, period)
+    balance = ss.balance.calc_graph(period)
     asset = _first_total(balance, ASSET_PARENTS)
     equity = _first_total(balance, EQUITY_PARENTS)
     if asset is None or equity is None:
         return "the balance sheet does not total its assets and equity"
-    cashflow = _period_tree(ss.cashflow, period)
+    cashflow = ss.cashflow.calc_graph(period)
     cfo = _first_total(cashflow, CFO_PARENTS)
     cfi = _first_total(cashflow, CFI_PARENTS)
     if cfo is None or cfi is None:
         return "the cash flow statement does not total operating and investing cash"
-    starts = set(cashflow.loc[cashflow["parent_concept"] == cfo, "concept"])
-    starts &= set(ancestors) & set(NET_INCOME_CONCEPTS)
+    starts = {
+        c
+        for c in income.ancestors(concept) & set(NET_INCOME_CONCEPTS)
+        if cfo in cashflow.parents(c)
+    }
     if not starts:
         return "the cash flow statement does not start from net income"
     if len(starts) > 1:
         return "the cash flow statement adds net income in more than once"
-    return _Parents(ancestors[0], float(weight_of[concept]), asset, equity, cfo, cfi)
+    return _Parents(expense, asset, equity, cfo, cfi)
 
 
-def _slot(parents: dict[str, _Parents], slot: str) -> dict[str, Any]:
-    return {period: getattr(found, slot) for period, found in parents.items()}
+def _edges(
+    parents: dict[str, _Parents], slot: str, weight: float = 1.0
+) -> dict[str, dict[str, float]]:
+    """Per period, the one ``slot`` total an inserted row sums into."""
+    return {period: {getattr(found, slot): weight} for period, found in parents.items()}
 
 
 def _before(statement: Statement, concepts: tuple[str, ...]) -> str | None:
@@ -183,8 +179,7 @@ def apply(ss: StatementSet, spec: AdjustmentSpec) -> AdjustmentResult:
                 f"adj_Amortization{local}",
                 f"Amortization of capitalized {name.lower()}",
                 amort,
-                parent_concept=_slot(parents, "expense"),
-                weight=_slot(parents, "expense_weight"),
+                parents={period: found.expense for period, found in parents.items()},
                 tags=("da",),
                 after=row_id,
             )
@@ -196,7 +191,7 @@ def apply(ss: StatementSet, spec: AdjustmentSpec) -> AdjustmentResult:
                 f"adj_Capitalized{local}",
                 f"Capitalized {name.lower()} (net)",
                 net,
-                parent_concept=_slot(parents, "asset"),
+                parents=_edges(parents, "asset"),
                 after=_before(balance, ASSET_PARENTS),
             )
         )
@@ -206,7 +201,7 @@ def apply(ss: StatementSet, spec: AdjustmentSpec) -> AdjustmentResult:
                 f"adj_EquityCapitalized{local}",
                 f"Equity effect of capitalized {name.lower()}",
                 net,
-                parent_concept=_slot(parents, "equity"),
+                parents=_edges(parents, "equity"),
                 after=_before(balance, EQUITY_PARENTS),
             )
         )
@@ -217,7 +212,7 @@ def apply(ss: StatementSet, spec: AdjustmentSpec) -> AdjustmentResult:
                 f"adj_Amortization{local}",
                 f"Amortization of capitalized {name.lower()}",
                 amort,
-                parent_concept=_slot(parents, "cfo"),
+                parents=_edges(parents, "cfo"),
                 tags=("da",),
                 after=_dna_row(cashflow) or _before(cashflow, CFO_PARENTS),
             )
@@ -228,8 +223,7 @@ def apply(ss: StatementSet, spec: AdjustmentSpec) -> AdjustmentResult:
                 f"adj_Capitalized{local}",
                 f"Capitalized {name.lower()}",
                 spend,
-                parent_concept=_slot(parents, "cfi"),
-                weight=-1.0,
+                parents=_edges(parents, "cfi", weight=-1.0),
                 after=_before(cashflow, CFI_PARENTS),
             )
         )

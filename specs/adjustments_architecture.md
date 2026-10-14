@@ -54,7 +54,7 @@ edgartools ──(cache build, once)──► parquet: 3 Statement frames per (c
 - One module per type (`src/adjustments/types/opex_to_capex.py`), implementing:
   - `from_prefs(rows) -> Spec`
   - `apply(ss, spec) -> AdjustmentResult`, where the result is:
-    - `new_rows`: each with `parent_concept` + `weight` + `tags`
+    - `new_rows`: each with `parents` (`{period: {parent: weight}}`) + `tags`
     - `overrides`: `(statement, row_id) → per-period values`
     - provenance
   - Types never touch totals; the engine recomputes.
@@ -114,7 +114,8 @@ edgartools ──(cache build, once)──► parquet: 3 Statement frames per (c
   - `children(row_id, period)` (via that period's `calc_edges`; `weight` = the
     edge weight)
 - `calc_edges`: long frame `period, concept, parent_concept, weight`, one calc
-  tree per period (§3)
+  network per period (§3), one row per arc (a concept may have several
+  parents); `calc_graph(period)` walks it
   - `insert(row, after=)`
   - `with_values(row_id, values)`
   - `project(view, periods) -> DataFrame`, which applies `preferred_sign` for

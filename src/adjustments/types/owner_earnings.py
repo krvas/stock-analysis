@@ -19,6 +19,7 @@ import pandas as pd
 from src.adjustments.base import MEMO_TAG, AdjustmentResult, AdjustmentSpec, NewRow
 from src.api.edgartools.standard_terms import (
     CFO,
+    CFO_PARENTS,
     DA_COMPONENT_AXIS,
     DEPRECIATION_EXPENSE,
     NWC_ABSTRACT,
@@ -39,12 +40,14 @@ def from_prefs(rows: pd.DataFrame) -> AdjustmentSpec:
     )
 
 
-def _edge_weights(cashflow: Statement) -> dict[tuple[str, str], float]:
-    edges = cashflow.calc_edges
-    return {
-        (row.period, row.concept): float(row.weight)
-        for row in edges.itertuples(index=False)
-    }
+def _cfo_weight(parents: dict[str, float]) -> float:
+    """A row's weight on the CFO sign: its edge into CFO when it sums into
+    CFO, else its only weight, else 1."""
+    for total in CFO_PARENTS:
+        if total in parents:
+            return parents[total]
+    weights = set(parents.values())
+    return weights.pop() if len(weights) == 1 else 1.0
 
 
 def nwc_rows(cashflow: Statement) -> pd.DataFrame:
@@ -52,7 +55,7 @@ def nwc_rows(cashflow: Statement) -> pd.DataFrame:
 
     Rows presented under the "changes in operating assets and liabilities"
     header, else any ``IncreaseDecreaseIn*`` concept summed into CFO. Value =
-    that period's calc weight × raw value. Columns: ``row_id, label`` +
+    that period's weight on the CFO sign × raw value. Columns: ``row_id, label`` +
     periods.
     """
     frame = cashflow.frame
@@ -61,12 +64,12 @@ def nwc_rows(cashflow: Statement) -> pd.DataFrame:
     if not under_header.any():
         under_header = rows["concept"].str.split("_").str[-1].str.startswith(NWC_PREFIX)
     rows = rows[under_header]
-    weights = _edge_weights(cashflow)
     out = rows[["row_id", "label"]].copy()
     for period in cashflow.periods:
+        graph = cashflow.calc_graph(period)
         raw = pd.to_numeric(rows[period], errors="coerce")
         out[period] = [
-            v * weights.get((period, c), 1.0) if pd.notna(v) else None
+            v * _cfo_weight(graph.parents(c)) if pd.notna(v) else None
             for v, c in zip(raw, rows["concept"], strict=True)
         ]
     return out[out[cashflow.periods].notna().any(axis=1)].reset_index(drop=True)

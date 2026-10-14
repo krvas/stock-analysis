@@ -56,7 +56,7 @@ logger = logging.getLogger(__name__)
 
 # Bump when the on-disk bundle shape (or how a stored column is computed)
 # changes; mismatched bundles are rebuilt.
-CACHE_SCHEMA_VERSION = 8
+CACHE_SCHEMA_VERSION = 9
 
 _INDEX_FILENAME = "company_lru.json"
 
