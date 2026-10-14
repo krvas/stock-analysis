@@ -71,6 +71,20 @@ WIZARD_PAGES: list[Page] = [
                     },
                 ),
             ),
+            SubPage(
+                slug="fund-flow",
+                title="Fund Flow",
+                order=3,
+                context_builder=business_understanding.fund_flow_context,
+                settings=SettingsDecl(
+                    uses=(
+                        SubpageSetting.BASIS,
+                        SubpageSetting.CURRENT_PERIOD,
+                        SubpageSetting.PREVIOUS_PERIOD,
+                    ),
+                    cannot_honour={GlobalSetting.NUM_PERIODS: "Two periods"},
+                ),
+            ),
         ],
     ),
     Page(
