@@ -333,3 +333,21 @@ def test_a_run_from_a_worktree_logs_to_the_main_checkout(
     logged = main / "logs" / "jev" / "decisions.jsonl"
     assert json.loads(logged.read_text())["decision"] == "human"
     assert not (worktree / "logs").exists()
+
+
+# the jev skill's triggers
+
+
+def test_skill_description_leads_with_the_missed_triggers() -> None:
+    """The orchestrator never loaded the skill: about 20 playbook picks for
+    delegates went unlogged. The triggers it missed open the description."""
+    skill = Path(jd.__file__).parents[1] / ".claude" / "skills" / "jev" / "SKILL.md"
+    frontmatter, body = skill.read_text(encoding="utf-8").split("---\n")[1:3]
+    description = frontmatter.split("description:", 1)[1].strip()
+    assert description.startswith(
+        "Use after picking a pstack playbook (for yourself or a delegate)"
+    )
+    first_sentence = description.split(". ")[0]
+    assert "when briefing a delegate that triages review findings" in first_sentence
+    body = " ".join(body.split())
+    assert "Jev is unavailable" in body and "scripts/jev_decide.py" in body
