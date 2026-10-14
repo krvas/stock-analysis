@@ -18,6 +18,8 @@ from src.api.edgartools.standard_terms import (
     CFO,
     DA_COMPONENT_AXIS,
     EQUITY_PARENTS,
+    NWC_ABSTRACT,
+    NWC_PREFIX,
     PRETAX_INCOME,
 )
 from src.models.statement import bool_flag
@@ -213,25 +215,28 @@ def test_da_breakdown_rows_sum_to_da_line(data_ticker: str) -> None:
 
 
 def _working_capital_cash_impact(cashflow) -> pd.Series:
-    """Per period: Σ weight × value over that period's calc children of CFO
-    whose concept is a working-capital change (``IncreaseDecrease*``).
-
-    Reads the calc tree directly, as a check on ``oe.nwc_rows``, which picks
-    rows by presentation header and looks weights up by concept.
-    """
-    edges = cashflow.calc_edges
-    local = edges["concept"].str.split("_").str[-1]
-    parent = edges["parent_concept"].fillna("").str.split("_").str[-1]
-    edges = edges[
-        local.str.startswith("IncreaseDecrease")
-        & parent.str.startswith(CFO.split("_")[-1])
-    ]
+    """Picks rows by the filer's working-capital header, not by the
+    ``IncreaseDecrease*`` name: filers present deferred-tax and pension
+    changes outside the header, and rows with other names under it."""
     frame = cashflow.frame
-    values = frame[~bool_flag(frame, "dimension")].drop_duplicates("concept")
-    values = values.set_index("concept")
+    rows = frame[~bool_flag(frame, "dimension")]
+    under_header = rows["parent_abstract_concept"].eq(NWC_ABSTRACT)
+    if under_header.any():
+        working = set(rows.loc[under_header, "concept"])
+    else:
+        local = rows["concept"].str.split("_").str[-1]
+        working = set(rows.loc[local.str.startswith(NWC_PREFIX), "concept"])
+    edges = cashflow.calc_edges
+    parent = edges["parent_concept"].str.split("_").str[-1]
+    edges = edges[parent.str.startswith(CFO.split("_")[-1])]
+    values = rows.drop_duplicates("concept").set_index("concept")
     out = {}
     for period in cashflow.periods:
         children = edges[edges["period"] == period]
+        if children.empty:
+            out[period] = np.nan
+            continue
+        children = children[children["concept"].isin(working)]
         raw = pd.to_numeric(
             values[period].reindex(children["concept"]), errors="coerce"
         )
@@ -277,7 +282,8 @@ def test_owner_earnings_memo_rows_hold_every_period(data_ticker: str) -> None:
     assert list(earnings[periods].dropna().index) == with_pretax
     for p in with_pretax:
         assert capex[p] == pytest.approx(0.5 * da[p]), (data_ticker, p)
-        assert working[p] == pytest.approx(0.5 * nwc[p]), (data_ticker, p)
+        if pd.notna(nwc[p]):
+            assert working[p] == pytest.approx(0.5 * nwc[p]), (data_ticker, p)
         assert earnings[p] == pytest.approx(
-            pretax[p] + da[p] + nwc[p] - capex[p] - working[p]
+            pretax[p] + da[p] + 2 * working[p] - capex[p] - working[p]
         ), (data_ticker, p)

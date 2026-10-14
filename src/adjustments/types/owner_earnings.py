@@ -12,6 +12,7 @@ amortization). Each item's maintenance % is saved under its row id.
 
 from __future__ import annotations
 
+from collections.abc import Collection
 from typing import Any
 
 import pandas as pd
@@ -39,11 +40,48 @@ def from_prefs(rows: pd.DataFrame) -> AdjustmentSpec:
     )
 
 
-def _edge_weights(cashflow: Statement) -> dict[tuple[str, str], float]:
-    edges = cashflow.calc_edges
+def _is_cfo(concept: str) -> bool:
+    return concept.split("_")[-1].startswith(CFO.split("_")[-1])
+
+
+def _cfo_weights(cashflow: Statement) -> dict[str, dict[str, float]]:
+    """Some filings carry no operating calc tree at all, so a period whose
+    tree lacks the concept takes the nearest period's CFO weight."""
+    periods = cashflow.periods
+    placed: dict[str, dict[str, float | None]] = {}
+    for edge in cashflow.calc_edges.itertuples(index=False):
+        weight = float(edge.weight) if _is_cfo(edge.parent_concept) else None
+        placed.setdefault(edge.concept, {})[edge.period] = weight
+    out = {}
+    for concept, by_period in placed.items():
+        known = [i for i, p in enumerate(periods) if by_period.get(p) is not None]
+        if not known:
+            continue
+        nearest = {
+            p: by_period.get(
+                p, by_period[periods[min(known, key=lambda k: abs(k - i))]]
+            )
+            for i, p in enumerate(periods)
+        }
+        out[concept] = {p: w for p, w in nearest.items() if w is not None}
+    return out | _balance_weights(cashflow, exclude=placed.keys())
+
+
+def _balance_weights(
+    cashflow: Statement, exclude: Collection[str]
+) -> dict[str, dict[str, float]]:
+    """XBRL requires a positive calc weight between concepts of the same
+    balance type and a negative one between opposite ones, which signs a row
+    the calc tree never places."""
+    frame = cashflow.frame
+    typed = frame[frame["balance"].notna()]
+    cfo = typed.loc[typed["concept"].map(_is_cfo), "balance"]
+    if cfo.empty:
+        return {}
+    typed = typed[~typed["concept"].isin(exclude)]
     return {
-        (row.period, row.concept): float(row.weight)
-        for row in edges.itertuples(index=False)
+        concept: dict.fromkeys(cashflow.periods, 1.0 if bal == cfo.iloc[0] else -1.0)
+        for concept, bal in zip(typed["concept"], typed["balance"], strict=True)
     }
 
 
@@ -51,24 +89,22 @@ def nwc_rows(cashflow: Statement) -> pd.DataFrame:
     """Working-capital change rows with values on the CFO sign (cash impact).
 
     Rows presented under the "changes in operating assets and liabilities"
-    header, else any ``IncreaseDecreaseIn*`` concept summed into CFO. Value =
-    that period's calc weight × raw value. Columns: ``row_id, label`` +
-    periods.
+    header, else any ``IncreaseDecreaseIn*`` concept, that sum into CFO.
+    Value = calc weight into CFO (:func:`_cfo_weights`) × raw value.
+    Columns: ``row_id, label`` + periods.
     """
     frame = cashflow.frame
     rows = frame[~bool_flag(frame, "dimension") & ~bool_flag(frame, "abstract")]
     under_header = rows["parent_abstract_concept"].eq(NWC_ABSTRACT)
     if not under_header.any():
         under_header = rows["concept"].str.split("_").str[-1].str.startswith(NWC_PREFIX)
-    rows = rows[under_header]
-    weights = _edge_weights(cashflow)
+    weights = _cfo_weights(cashflow)
+    rows = rows[under_header & rows["concept"].isin(weights)]
     out = rows[["row_id", "label"]].copy()
     for period in cashflow.periods:
         raw = pd.to_numeric(rows[period], errors="coerce")
-        out[period] = [
-            v * weights.get((period, c), 1.0) if pd.notna(v) else None
-            for v, c in zip(raw, rows["concept"], strict=True)
-        ]
+        weight = rows["concept"].map({c: w.get(period) for c, w in weights.items()})
+        out[period] = raw * weight.astype(float)
     return out[out[cashflow.periods].notna().any(axis=1)].reset_index(drop=True)
 
 
