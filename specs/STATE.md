@@ -56,8 +56,15 @@ src/models/statement.py    Statement / StatementSet / get_row_id
 src/models/calc_residuals.py  calc_residuals (calc-linkbase residuals; pure)
 src/models/table.py        Table / ColumnSpec / LinkedGroupSpec  (FE↔BE contract)
 src/web/app.py             FastAPI; / → {statements, wizard, screener, docs}
-src/web/settings.py        Settings registry + pure rules (resolve,
-                           apply_submission, build_drawer); no HTTP
+src/web/setting_types.py   Setting shapes (ChoiceSetting, IntSetting,
+                           Option, CrossRule); no registry knowledge
+src/web/settings_registry.py  GlobalSetting / SubpageSetting enums + RULES
+                           (data only)
+src/web/settings.py        SETTINGS, GLOBAL_SETTING_IDS, SettingsDecl +
+                           pure rules (resolve, apply_submission,
+                           build_drawer); no HTTP
+src/web/page_types.py      Page / SubPage / StatementPage, PageGroup,
+                           builder/handler aliases (shapes only)
 src/web/wizard_registry.py wizard page/sub-page identity (only place)
 src/web/statements_registry.py  statement page identity (income, balance,
                            cashflow)
@@ -200,7 +207,7 @@ EPS-note role).
 - `/wizard/{t}/{page}` → first sub-page by `order`
 - `/wizard/{t}/{page}/{subpage}` — unknown slug → 404; no query params
 
-Identity: frozen `Page` / `SubPage` in `WIZARD_PAGES`. Groups: `business`,
+Identity: frozen `Page` / `SubPage` (`page_types.py`) in `WIZARD_PAGES`. Groups: `business`,
 `people`, `price`, `red_flags`. `context_builder(ticker, settings) -> dict`
 (default `{}`), `settings` = the resolved `Settings`. Template
 `wizard/{page}/{subpage}.html` or `not_implemented.html`. Extend
@@ -208,8 +215,9 @@ Identity: frozen `Page` / `SubPage` in `WIZARD_PAGES`. Groups: `business`,
 `computed_values` / `human_input` / `source_trace`).
 
 **Add a sub-page:** (1) `SubPage` on the right `Page` in the registry, with
-its `settings=SettingsDecl(...)` if it uses Sub-page Settings or greys out a
-Global one, (2) template under `templates/wizard/<page>/<subpage>.html`, (3)
+its `settings=SettingsDecl(uses=(SubpageSetting.X, ...),
+cannot_honour={GlobalSetting.Y: reason})` if it uses Sub-page Settings or
+greys out a Global one (enum members, not id strings), (2) template under `templates/wizard/<page>/<subpage>.html`, (3)
 optional builder in `wizard_pages/` — registry = identity, builders = data.
 Do not add per-sub-page routes.
 
@@ -241,18 +249,21 @@ The adjustment engine (`src/adjustments`) restates statements from saved
 prefs; pages read it through `src/web/adjusted_statements.py`.
 
 **Settings** (`src/web/settings.py`, `src/web/routes/settings.py`). A Setting
-is a display choice (CONTEXT.md). `SETTINGS` defines each once (id, label,
-`Option(value, label)` choices or int range, default; `instant` = View only,
-submits on change).
+is a display choice (CONTEXT.md). The `GlobalSetting` / `SubpageSetting`
+enums (`settings_registry.py`) define each once as a `ChoiceSetting`
+(`Option(value, label)` choices) or `IntSetting` (int range) with id, label,
+default (`instant` = View only, submits on change); `SETTINGS` flattens them.
 Global: `period`, `num_periods`, `view`. Sub-page: `basis`,
 `current_period`, `previous_period` (offsets from the latest period),
 `items_per_side`. Every `SubPage` and `StatementPage` carries a
-`SettingsDecl(uses=..., cannot_honour={global_id: reason})` (identity, in the
-registries; validated at import). `resolve(cookie, decl)` falls back per
+`SettingsDecl(uses=(SubpageSetting...), cannot_honour={GlobalSetting: reason})`
+(identity, in the registries; validated at import). `resolve(cookie, decl)` falls back per
 field to defaults and never rewrites the cookie; reading a greyed or
 undeclared Setting raises `SettingNotApplicable`. `recent_periods` /
 `period_at` are the only data-dependent clamp (stored values stay as chosen).
-`RULES`: `previous_period > current_period`; on read a failing pair renders
+`build_drawer` yields `DrawerField(setting, value, disabled_reason)`; widget
+and options derive from the `SettingDef`.
+`RULES` (`settings_registry.py`): `previous_period > current_period`; on read a failing pair renders
 previous = current + 1, on save it is refused (only when both are
 submitted). Storage: one JSON cookie `settings` (HttpOnly, SameSite=Lax,
 path /, one year), written only by `POST /settings` (urlencoded form, parsed
@@ -367,7 +378,9 @@ Tests cover clients, DBs, edgartools, Table, wizard DB, Settings
 `test_settings_routes.py` is the only HTTP suite: TestClient over fixture
 statements for the statements redirect and 404, `POST /settings` (redirect
 guard, cookie attributes, refused saves), cookie round-trips and the drawer
-per page. Cache miss hits live SEC. `pytest -m data` (deselected by default)
+per page. `test_module_layout.py` fails on an UPPER_CASE module constant
+below the module's first def/class under `src/`; exceptions go in its
+`ALLOWED_BELOW_DEFINITIONS`. Cache miss hits live SEC. `pytest -m data` (deselected by default)
 runs the calc-residual check on real filings for the tickers in the gitignored
 `tests/data_test_tickers.txt` (pinned in the company LRU, loaded through the
 app cache).
