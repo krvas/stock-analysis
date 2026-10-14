@@ -43,6 +43,16 @@ def _table(html: str, table_id: str = "statement-table") -> dict:
     return json.loads(match.group(1))
 
 
+def _drawer(html: str) -> dict:
+    match = re.search(
+        r'<script type="application/json" id="settings-drawer-data"[^>]*>(.*?)</script>',
+        html,
+        re.DOTALL,
+    )
+    assert match, "settings drawer JSON missing"
+    return json.loads(match.group(1))
+
+
 def _columns(html: str, table_id: str = "statement-table") -> list[str]:
     return [c["id"] for c in _table(html, table_id)["columns"]]
 
@@ -129,13 +139,8 @@ def test_refused_save_keeps_settings_and_reports_once(client: TestClient) -> Non
     assert not any(c.startswith("settings=") for c in set_cookies)
     assert client.cookies.get("settings") == stored
 
-    first = client.get(FUND_FLOW).text
-    assert OFFSET_ERROR in first
-    assert "data-open-on-load" in first
-
-    second = client.get(FUND_FLOW).text
-    assert OFFSET_ERROR not in second
-    assert "data-open-on-load" not in second
+    assert _drawer(client.get(FUND_FLOW).text)["error"] == OFFSET_ERROR
+    assert _drawer(client.get(FUND_FLOW).text)["error"] is None
 
 
 def test_query_params_do_not_override_settings(client: TestClient) -> None:
@@ -148,15 +153,21 @@ def test_query_params_do_not_override_settings(client: TestClient) -> None:
 
 
 def test_landing_drawer_has_global_settings_only(client: TestClient) -> None:
-    html = client.get("/wizard/AAPL").text
-    assert "Global" in html
-    assert "This page" not in html
+    drawer = _drawer(client.get("/wizard/AAPL").text)
+    assert [f["id"] for f in drawer["global_fields"]] == [
+        "period",
+        "num_periods",
+        "view",
+    ]
+    assert drawer["page_fields"] == []
 
 
 def test_statement_drawer_offers_basis_for_this_page(client: TestClient) -> None:
-    html = client.get("/statements/AAPL/income").text
-    assert html.index("This page") < html.index('name="basis"')
-    assert "settings-reason" not in html
+    drawer = _drawer(client.get("/statements/AAPL/income").text)
+    assert [f["id"] for f in drawer["page_fields"]] == ["basis"]
+    assert drawer["next_path"] == "/statements/AAPL/income"
+    fields = drawer["global_fields"] + drawer["page_fields"]
+    assert [f["disabled_reason"] for f in fields] == [None] * 4
 
 
 @pytest.mark.parametrize(
@@ -169,9 +180,19 @@ def test_statement_drawer_offers_basis_for_this_page(client: TestClient) -> None
 def test_greyed_global_settings_show_their_reason(
     client: TestClient, url: str, reasons: tuple[str, ...]
 ) -> None:
-    html = client.get(url).text
-    for reason in reasons:
-        assert re.search(rf'class="settings-reason"[^>]*>{reason}<', html)
+    drawer = _drawer(client.get(url).text)
+    greyed = tuple(
+        f["disabled_reason"] for f in drawer["global_fields"] if f["disabled_reason"]
+    )
+    assert greyed == reasons
+
+
+def test_gear_controls_the_drawer_dialog(client: TestClient) -> None:
+    html = client.get("/statements/AAPL/income").text
+    assert re.search(
+        r'<button[^>]*data-settings-open[^>]*aria-controls="settings-drawer"', html
+    )
+    assert re.search(r'<dialog[^>]*id="settings-drawer"[^>]*>\s*</dialog>', html)
 
 
 def _subtabs(html: str) -> list[str]:

@@ -7,7 +7,7 @@ with a reason.
 
 ## Sub-features
 
-- `set-open` the gear opens the drawer.
+- `set-open` the gear opens the drawer; Esc and × close it, and the gear reopens it after either.
 - `set-apply` changing a field and pressing Apply reloads the page with the new setting.
 - `set-instant` View applies on change without Apply.
 - `set-greyed` greyed fields are disabled with a visible reason (e.g. `Annual only`).
@@ -27,6 +27,9 @@ Preconditions: baseline.
 - **Refused.** On `/wizard/AAPL/business-understanding/fund-flow`, set current and previous period to the same offset, Apply; the drawer reopens with `Previous period must be older than the current period`.
 
 ## Gotchas
+
+- The drawer is painted by JS from `#settings-drawer-data` (`Drawer.serialize()`); `curl` sees an empty `<dialog>`. Read field state from that JSON, or drive the browser.
+- `document.getElementById('settings-drawer').open` reports open state for an Esc/close check.
 
 - Settings are a cookie in the browser pane, shared by every page in it; restore defaults when done.
 - `form_input` on a select sets the option value (`adjusted`), not the label.
