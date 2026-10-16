@@ -9,8 +9,8 @@ import pytest
 from src.adjustments.base import AdjustmentSpec
 from src.adjustments.engine import apply_adjustments, ordered_specs
 from src.adjustments.specs import from_prefs
+from src.adjustments.types import owner_earnings as oe
 from src.adjustments.types.opex_to_capex import schedule
-from src.adjustments.types.owner_earnings import maintenance_da, owner_earnings
 from src.api.edgartools.source import load_statement_set
 from src.api.edgartools.standard_terms import (
     ASSET_PARENTS,
@@ -18,7 +18,9 @@ from src.api.edgartools.standard_terms import (
     CFO,
     DA_COMPONENT_AXIS,
     EQUITY_PARENTS,
+    PRETAX_INCOME,
 )
+from src.models.statement import bool_flag
 
 CASH_CHANGE = (
     "us-gaap_CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents"
@@ -36,12 +38,12 @@ def test_owner_earnings_formula_with_per_item_maintenance() -> None:
     items = pd.DataFrame(
         {"row_id": ["dep", "amort"], "label": ["Dep", "Amort"], "2024": [15.0, 5.0]}
     )
-    maintenance = maintenance_da(items, {"dep": 60, "amort": 20})
+    maintenance = oe.maintenance_da(items, {"dep": 60, "amort": 20})
     assert maintenance["2024"] == pytest.approx(10.0)
     parts = pd.DataFrame(
         {"pretax": [100.0], "da": [20.0], "nwc": [-10.0]}, index=["2024"]
     )
-    out = owner_earnings(parts, maintenance, nwc_pct=100)
+    out = oe.owner_earnings(parts, maintenance, nwc_pct=100)
     # 100 + 20 - 10 - 10 - (-10)
     assert out["owner_earnings"].iloc[0] == pytest.approx(110.0)
 
@@ -208,3 +210,74 @@ def test_da_breakdown_rows_sum_to_da_line(data_ticker: str) -> None:
         values = pd.to_numeric(parts[period], errors="coerce")
         if values.notna().any() and pd.notna(line[period]):
             assert values.sum() == pytest.approx(line[period]), (data_ticker, period)
+
+
+def _working_capital_cash_impact(cashflow) -> pd.Series:
+    """Per period: Σ weight × value over that period's calc children of CFO
+    whose concept is a working-capital change (``IncreaseDecrease*``).
+
+    Reads the calc tree directly, as a check on ``oe.nwc_rows``, which picks
+    rows by presentation header and looks weights up by concept.
+    """
+    edges = cashflow.calc_edges
+    local = edges["concept"].str.split("_").str[-1]
+    parent = edges["parent_concept"].fillna("").str.split("_").str[-1]
+    edges = edges[
+        local.str.startswith("IncreaseDecrease")
+        & parent.str.startswith(CFO.split("_")[-1])
+    ]
+    frame = cashflow.frame
+    values = frame[~bool_flag(frame, "dimension")].drop_duplicates("concept")
+    values = values.set_index("concept")
+    out = {}
+    for period in cashflow.periods:
+        children = edges[edges["period"] == period]
+        raw = pd.to_numeric(
+            values[period].reindex(children["concept"]), errors="coerce"
+        )
+        out[period] = (raw.to_numpy() * children["weight"].astype(float)).sum()
+    return pd.Series(out)
+
+
+@pytest.mark.data
+def test_owner_earnings_memo_rows_hold_every_period(data_ticker: str) -> None:
+    """Every period's memo rows match the formula on independently read inputs.
+
+    Pretax income comes from the income statement and ΔNWC from the calc
+    tree (:func:`_working_capital_cash_impact`), not from owner-earnings
+    code. D&A comes from ``oe.da_items``, the same selection ``apply`` uses,
+    so this test checks only the D&A arithmetic; D&A row selection is covered
+    by ``tests/test_owner_earnings_adjustment.py`` and the tracked bug that
+    D&A components are used in every period with no per-period fallback.
+    """
+    base = load_statement_set(data_ticker, "annual")
+    income = base.income.frame
+    pretax_rows = income[
+        income["standard_concept"].eq(PRETAX_INCOME) & ~bool_flag(income, "dimension")
+    ]
+    assert not pretax_rows.empty, (data_ticker, "no pretax income row")
+    items = oe.da_items(base.cashflow)
+    assert not items.empty, (data_ticker, "no D&A item to set maintenance on")
+    spec = AdjustmentSpec(
+        oe.TYPE_ID, {**dict.fromkeys(items["row_id"], 50.0), oe.MAINTENANCE_NWC: 50.0}
+    )
+    run = apply_adjustments(base, [spec])
+    assert run.applied == (spec,) and run.skipped == (), data_ticker
+
+    periods = base.cashflow.periods
+    pretax = pd.to_numeric(pretax_rows.iloc[0].reindex(periods), errors="coerce")
+    da = items[periods].fillna(0).sum()
+    nwc = _working_capital_cash_impact(base.cashflow)
+    with_pretax = [p for p in periods if pd.notna(pretax[p])]
+    assert with_pretax, (data_ticker, "no period with pretax income")
+    memo = run.statements.cashflow.frame.set_index("row_id")
+    capex = memo.loc["adj_MaintenanceCapex"]
+    working = memo.loc["adj_MaintenanceWorkingCapital"]
+    earnings = memo.loc["adj_OwnerEarnings"]
+    assert list(earnings[periods].dropna().index) == with_pretax
+    for p in with_pretax:
+        assert capex[p] == pytest.approx(0.5 * da[p]), (data_ticker, p)
+        assert working[p] == pytest.approx(0.5 * nwc[p]), (data_ticker, p)
+        assert earnings[p] == pytest.approx(
+            pretax[p] + da[p] + nwc[p] - capex[p] - working[p]
+        ), (data_ticker, p)

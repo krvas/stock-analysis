@@ -6,23 +6,34 @@ import { evaluate } from "../../src/static/js/components/calculated_cell.js";
 import { TableModel } from "../../src/static/js/components/table_model.js";
 import { loadFixture } from "./load_fixture.js";
 
-test("Assets in Use gross and net evaluate to the adjustment engine's values", () => {
-  const { table, expected } = loadFixture("assets_in_use_table.json");
-  const model = TableModel.fromSerialized(table);
-  const getCell = (rowId, colId) => model.getCell(rowId, colId);
-  const specs = new Map(
-    table.calculated_cells.map((spec) => [
-      `${spec.row_id}/${spec.col_id}`,
-      spec,
-    ]),
-  );
-  assert.equal(expected.length, 4);
-  for (const { row_id, col_id, value } of expected) {
-    const spec = specs.get(`${row_id}/${col_id}`);
-    assert.ok(spec, `no calculated cell for ${row_id}/${col_id}`);
-    assert.equal(evaluate(spec.expr, getCell), value, `${row_id}/${col_id}`);
-  }
-});
+const PAGE_FIXTURES = [
+  ["Assets in Use", "assets_in_use_table.json", 4],
+  ["Owner Earnings", "owner_earnings_table.json", 3],
+];
+
+for (const [page, name, count] of PAGE_FIXTURES) {
+  test(`${page} calculated cells evaluate to the adjustment engine's values`, () => {
+    const { table, expected } = loadFixture(name);
+    const model = TableModel.fromSerialized(table);
+    const getCell = (rowId, colId) => model.getCell(rowId, colId);
+    const specs = new Map(
+      table.calculated_cells.map((spec) => [
+        `${spec.row_id}/${spec.col_id}`,
+        spec,
+      ]),
+    );
+    assert.equal(expected.length, count, `${name} expected values`);
+    for (const { row_id, col_id, value } of expected) {
+      const spec = specs.get(`${row_id}/${col_id}`);
+      assert.ok(spec, `no calculated cell for ${row_id}/${col_id}`);
+      const actual = evaluate(spec.expr, getCell);
+      assert.ok(
+        Math.abs(actual - value) <= 1e-9 * Math.max(1, Math.abs(value)),
+        `${row_id}/${col_id}: ${actual} != ${value}`,
+      );
+    }
+  });
+}
 
 const cells = { a: { x: 2, blank: null, empty: "", text: "3.5", bad: "n/a" } };
 const getCell = (rowId, colId) => cells[rowId]?.[colId];

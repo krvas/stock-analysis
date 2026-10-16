@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
-from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
@@ -16,6 +14,7 @@ from src.web import adjusted_statements
 from src.web.routes.wizard_pages import assets_in_use as page
 from src.web.settings import resolve
 from src.web.wizard_registry import get_subpage
+from tests.js_fixtures import check_calculated_cells_fixture
 from tests.statement_fixtures import P1, P2, P3
 from tests.test_assets_in_use import _statements
 
@@ -30,7 +29,6 @@ ASSETS = [
     "SplitB",
 ]
 LIABILITIES = ["Payables", "Advances", "Debt"]
-JS_FIXTURE = Path(__file__).parent / "js" / "fixtures" / "assets_in_use_table.json"
 
 
 @pytest.fixture
@@ -157,19 +155,7 @@ def test_js_calculated_cells_fixture_matches_builder_and_engine(loads) -> None:
     }
     assert expected[(page.GROSS_ROW, P1)] == 175.0 - 50.0 + 2.5
     assert expected[(page.NET_ROW, P1)] == 175.0 - 50.0 + 2.5 - 30.0
-    fixture = {
-        "table": _context(),
-        "expected": [
-            {"row_id": row, "col_id": period, "value": value}
-            for (row, period), value in expected.items()
-        ],
-    }
-    text = json.dumps(fixture, indent=2, sort_keys=True) + "\n"
-    if os.environ.get("UPDATE_JS_FIXTURES"):
-        JS_FIXTURE.write_text(text)
-    assert JS_FIXTURE.read_text() == text, (
-        f"{JS_FIXTURE} is stale: rerun with UPDATE_JS_FIXTURES=1"
-    )
+    check_calculated_cells_fixture("assets_in_use_table.json", _context(), expected)
 
 
 def _post(rows: list[dict]) -> dict:
