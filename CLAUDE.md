@@ -38,17 +38,24 @@ same "no subpage-specific logic" rule applies there.
 
 ## Before adding code to a shared/generic file
 
-Shared files: `src/static/js/components/table_model.js`,
-`src/static/js/components/linked_groups.js`,
-`src/static/js/components/table_view.js`,
-`src/static/js/components/generic_input.js`,
-`src/static/js/components/table_wiring.js`, `src/models/table.py`,
-`src/web/wizard_registry.py`, `src/web/routes/wizard.py`,
-`src/web/settings.py`, `src/web/routes/settings.py`,
-`src/web/statements_registry.py`, `src/templates/shared/_page_nav.html`,
-`src/templates/shared/_settings_drawer.html`,
-`src/templates/shared/_adjustments_note.html`,
-`src/static/js/settings_drawer.js`.
+Shared files (one path per bullet; `tests/test_shared_files_stay_generic.py`
+reads this list, so add a new shared file here):
+
+- `src/static/js/components/table_model.js`
+- `src/static/js/components/linked_groups.js`
+- `src/static/js/components/table_view.js`
+- `src/static/js/components/generic_input.js`
+- `src/static/js/components/table_wiring.js`
+- `src/models/table.py`
+- `src/web/wizard_registry.py`
+- `src/web/routes/wizard.py`
+- `src/web/settings.py`
+- `src/web/routes/settings.py`
+- `src/web/statements_registry.py`
+- `src/templates/shared/_page_nav.html`
+- `src/templates/shared/_settings_drawer.html`
+- `src/templates/shared/_adjustments_note.html`
+- `src/static/js/settings_drawer.js`
 
 Before adding a line to one of these, ask: **would this exact line make sense
 unchanged for a different subpage, a different statement view, or a table
@@ -123,3 +130,4 @@ enforcing it is a repeat waiting to happen: encode it before adding another.
 | The app, its browser-pane server and agent worktrees run from this repo folder, never from a sibling folder (e.g. `../<name>` under `~/Documents`). Worktrees go in `.claude/worktrees/<name>` (gitignored); the app starts through `.claude/skills/verify/scripts/serve.py` or the `web` entry in `.claude/launch.json`. | `scripts/stay_in_repo.py`: a Bash `PreToolUse` hook in `.claude/settings.json` blocks out-of-repo `git worktree add` and app launches; `tests/test_stay_in_repo.py` fails on a `.claude/launch.json` entry that leaves the repo. |
 | A threshold pair that mirrors itself (execute at `1 - x`, drop at `x`) is one constant, not two. Jev's tunables sit at the top of `scripts/jev_decide.py` and each reads a `JEV_` override from `.env`. | `FINDINGS_MARGIN` is the only findings threshold. In `tests/test_jev_decide.py`, `test_every_tunable_reads_the_environment` fails on a module-level number not read through `_setting`, and `test_one_margin_sets_both_finding_thresholds` fails when the pair drifts apart. |
 | A worktree sees the main checkout's gitignored local files (`.env`, the data-test ticker lists, `.venv`, `node_modules`, the edgartools cache, test fixtures under `data/raw`) as symlinks, so tests behave the same there. Add a newly needed local file to the one tuple, never copy it. | `scripts/link_worktree_files.py` (`LINKED_PATHS`), run first by `make test`; `tests/test_link_worktree_files.py` checks it against a real `git worktree add`. |
+| Shared files name no sub-page: no sub-page slug, adjustment type id or builder column id in a file on the shared-file list above (the registry itself excepted). Only `generic_input.js` attaches table-input listeners; other components listen only to a literal non-edit event such as `"submit"`. `table_wiring.js` and `table_view.js` never touch `.value` / `.checked`; `table_view.js` attaches no listeners. | `tests/test_shared_files_stay_generic.py` reads the shared-file list from this file (failing if it cannot parse it or a path is missing), derives the forbidden names from `src/web/wizard_registry.py`, `src/adjustments/registry.py` and the `ColumnSpec` ids under `src/web/routes/wizard_pages/`, and scans each shared file; `make test` fails with the rule and the right home for the code. Single-word names (`value`, `moats`) are not scanned. |
