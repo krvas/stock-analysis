@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "lint": "eslint src/static/js"
+    "lint": "eslint src/static/js",
+    "test": "node --test 'tests/js/*.test.js'"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

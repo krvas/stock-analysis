@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
@@ -28,6 +30,7 @@ ASSETS = [
     "SplitB",
 ]
 LIABILITIES = ["Payables", "Advances", "Debt"]
+JS_FIXTURE = Path(__file__).parent / "js" / "fixtures" / "assets_in_use_table.json"
 
 
 @pytest.fixture
@@ -80,22 +83,6 @@ def _context(**values: object) -> dict:
 
 def _rows(table: dict) -> dict[str, dict]:
     return {row["id"]: row for row in table["rows"]}
-
-
-def _evaluate(expr: dict, cells: dict[str, dict]) -> float:
-    if "cell" in expr:
-        row, col = expr["cell"]
-        value = cells[row].get(col)
-        return 0.0 if value is None else float(value)
-    if "const" in expr:
-        return expr["const"]
-    values = [_evaluate(arg, cells) for arg in expr["args"]]
-    if expr["op"] == "add":
-        return sum(values)
-    product = 1.0
-    for value in values:
-        product *= value
-    return product
 
 
 def test_rows_are_total_assets_leaves_gross_liability_leaves_net(loads) -> None:
@@ -158,20 +145,31 @@ def test_inputs_only_where_they_apply_and_prefilled_from_saved(loads) -> None:
     }
 
 
-def test_live_gross_and_net_match_the_adjustment_on_saved_choices(loads) -> None:
-    table = _context()
-    cells = {row["id"]: row["cells"] for row in table["rows"]}
-    live = {
-        (spec["row_id"], spec["col_id"]): _evaluate(spec["expr"], cells)
-        for spec in table["calculated_cells"]
+def test_js_calculated_cells_fixture_matches_builder_and_engine(loads) -> None:
+    frame = apply_adjustments(
+        _statements(), [AdjustmentSpec(TYPE_ID, SAVED)]
+    ).balance.frame.set_index("concept")
+    concepts = {page.GROSS_ROW: GROSS_CONCEPT, page.NET_ROW: NET_CONCEPT}
+    expected = {
+        (row, period): float(frame.at[concept, period])
+        for row, concept in concepts.items()
+        for period in (P1, P2)
     }
-    adjusted = apply_adjustments(_statements(), [AdjustmentSpec(TYPE_ID, SAVED)])
-    frame = adjusted.balance.frame.set_index("concept")
-    for period in (P1, P2):
-        assert live[(page.GROSS_ROW, period)] == frame.at[GROSS_CONCEPT, period]
-        assert live[(page.NET_ROW, period)] == frame.at[NET_CONCEPT, period]
-    assert live[(page.GROSS_ROW, P1)] == 175.0 - 50.0 + 2.5
-    assert live[(page.NET_ROW, P1)] == 175.0 - 50.0 + 2.5 - 30.0
+    assert expected[(page.GROSS_ROW, P1)] == 175.0 - 50.0 + 2.5
+    assert expected[(page.NET_ROW, P1)] == 175.0 - 50.0 + 2.5 - 30.0
+    fixture = {
+        "table": _context(),
+        "expected": [
+            {"row_id": row, "col_id": period, "value": value}
+            for (row, period), value in expected.items()
+        ],
+    }
+    text = json.dumps(fixture, indent=2, sort_keys=True) + "\n"
+    if os.environ.get("UPDATE_JS_FIXTURES"):
+        JS_FIXTURE.write_text(text)
+    assert JS_FIXTURE.read_text() == text, (
+        f"{JS_FIXTURE} is stale: rerun with UPDATE_JS_FIXTURES=1"
+    )
 
 
 def _post(rows: list[dict]) -> dict:

@@ -7,6 +7,8 @@ test:
 	.venv/bin/ruff format --check .
 	.venv/bin/python -m pytest -q
 	REQUIRE_DATA_TESTS=1 .venv/bin/python -m pytest -m data -q
+	npm run lint
+	npm test
 
 # Data tests only, over tests/data_test_tickers_long.txt.
 test-data-long:

@@ -1,0 +1,2019 @@
+{
+  "expected": [
+    {
+      "col_id": "2024-12-31",
+      "row_id": "gross_assets_in_use",
+      "value": 127.5
+    },
+    {
+      "col_id": "2023-12-31",
+      "row_id": "gross_assets_in_use",
+      "value": 98.0
+    },
+    {
+      "col_id": "2024-12-31",
+      "row_id": "net_assets_in_use",
+      "value": 97.5
+    },
+    {
+      "col_id": "2023-12-31",
+      "row_id": "net_assets_in_use",
+      "value": 73.0
+    }
+  ],
+  "table": {
+    "calculated_cells": [
+      {
+        "col_id": "2024-12-31",
+        "expr": {
+          "args": [
+            {
+              "cell": [
+                "total_assets",
+                "2024-12-31"
+              ]
+            },
+            {
+              "args": [
+                {
+                  "const": 0.01
+                },
+                {
+                  "cell": [
+                    "Cash",
+                    "pct_in_use"
+                  ]
+                },
+                {
+                  "cell": [
+                    "Cash",
+                    "2024-12-31"
+                  ]
+                }
+              ],
+              "op": "mul"
+            },
+            {
+              "args": [
+                {
+                  "const": -1
+                },
+                {
+                  "cell": [
+                    "Cash",
+                    "2024-12-31"
+                  ]
+                }
+              ],
+              "op": "mul"
+            },
+            {
+              "args": [
+                {
+                  "const": 0.01
+                },
+                {
+                  "cell": [
+                    "Receivables",
+                    "pct_in_use"
+                  ]
+                },
+                {
+                  "cell": [
+                    "Receivables",
+                    "2024-12-31"
+                  ]
+                }
+              ],
+              "op": "mul"
+            },
+            {
+              "args": [
+                {
+                  "const": -1
+                },
+                {
+                  "cell": [
+                    "Receivables",
+                    "2024-12-31"
+                  ]
+                }
+              ],
+              "op": "mul"
+            },
+            {
+              "args": [
+                {
+                  "const": 0.01
+                },
+                {
+                  "cell": [
+                    "Allowance",
+                    "pct_in_use"
+                  ]
+                },
+                {
+                  "cell": [
+                    "Allowance",
+                    "2024-12-31"
+                  ]
+                }
+              ],
+              "op": "mul"
+            },
+            {
+              "args": [
+                {
+                  "const": -1
+                },
+                {
+                  "cell": [
+                    "Allowance",
+                    "2024-12-31"
+                  ]
+                }
+              ],
+              "op": "mul"
+            },
+            {
+              "args": [
+                {
+                  "const": 0.01
+                },
+                {
+                  "cell": [
+                    "Construction",
+                    "pct_in_use"
+                  ]
+                },
+                {
+                  "cell": [
+                    "Construction",
+                    "2024-12-31"
+                  ]
+                }
+              ],
+              "op": "mul"
+            },
+            {
+              "args": [
+                {
+                  "const": -1
+                },
+                {
+                  "cell": [
+                    "Construction",
+                    "2024-12-31"
+                  ]
+                }
+              ],
+              "op": "mul"
+            },
+            {
+              "args": [
+                {
+                  "const": 0.01
+                },
+                {
+                  "cell": [
+                    "Split",
+                    "pct_in_use"
+                  ]
+                },
+                {
+                  "cell": [
+                    "Split",
+                    "2024-12-31"
+                  ]
+                }
+              ],
+              "op": "mul"
+            },
+            {
+              "args": [
+                {
+                  "const": -1
+                },
+                {
+                  "cell": [
+                    "Split",
+                    "2024-12-31"
+                  ]
+                }
+              ],
+              "op": "mul"
+            },
+            {
+              "args": [
+                {
+                  "const": 0.01
+                },
+                {
+                  "cell": [
+                    "SplitA",
+                    "pct_in_use"
+                  ]
+                },
+                {
+                  "cell": [
+                    "SplitA",
+                    "2024-12-31"
+                  ]
+                }
+              ],
+              "op": "mul"
+            },
+            {
+              "args": [
+                {
+                  "const": -1
+                },
+                {
+                  "cell": [
+                    "SplitA",
+                    "2024-12-31"
+                  ]
+                }
+              ],
+              "op": "mul"
+            },
+            {
+              "args": [
+                {
+                  "const": 0.01
+                },
+                {
+                  "cell": [
+                    "SplitB",
+                    "pct_in_use"
+                  ]
+                },
+                {
+                  "cell": [
+                    "SplitB",
+                    "2024-12-31"
+                  ]
+                }
+              ],
+              "op": "mul"
+            },
+            {
+              "args": [
+                {
+                  "const": -1
+                },
+                {
+                  "cell": [
+                    "SplitB",
+                    "2024-12-31"
+                  ]
+                }
+              ],
+              "op": "mul"
+            }
+          ],
+          "op": "add"
+        },
+        "row_id": "gross_assets_in_use"
+      },
+      {
+        "col_id": "2024-12-31",
+        "expr": {
+          "args": [
+            {
+              "cell": [
+                "total_assets",
+                "2024-12-31"
+              ]
+            },
+            {
+              "args": [
+                {
+                  "const": 0.01
+                },
+                {
+                  "cell": [
+                    "Cash",
+                    "pct_in_use"
+                  ]
+                },
+                {
+                  "cell": [
+                    "Cash",
+                    "2024-12-31"
+                  ]
+                }
+              ],
+              "op": "mul"
+            },
+            {
+              "args": [
+                {
+                  "const": -1
+                },
+                {
+                  "cell": [
+                    "Cash",
+                    "2024-12-31"
+                  ]
+                }
+              ],
+              "op": "mul"
+            },
+            {
+              "args": [
+                {
+                  "const": 0.01
+                },
+                {
+                  "cell": [
+                    "Receivables",
+                    "pct_in_use"
+                  ]
+                },
+                {
+                  "cell": [
+                    "Receivables",
+                    "2024-12-31"
+                  ]
+                }
+              ],
+              "op": "mul"
+            },
+            {
+              "args": [
+                {
+                  "const": -1
+                },
+                {
+                  "cell": [
+                    "Receivables",
+                    "2024-12-31"
+                  ]
+                }
+              ],
+              "op": "mul"
+            },
+            {
+              "args": [
+                {
+                  "const": 0.01
+                },
+                {
+                  "cell": [
+                    "Allowance",
+                    "pct_in_use"
+                  ]
+                },
+                {
+                  "cell": [
+                    "Allowance",
+                    "2024-12-31"
+                  ]
+                }
+              ],
+              "op": "mul"
+            },
+            {
+              "args": [
+                {
+                  "const": -1
+                },
+                {
+                  "cell": [
+                    "Allowance",
+                    "2024-12-31"
+                  ]
+                }
+              ],
+              "op": "mul"
+            },
+            {
+              "args": [
+                {
+                  "const": 0.01
+                },
+                {
+                  "cell": [
+                    "Construction",
+                    "pct_in_use"
+                  ]
+                },
+                {
+                  "cell": [
+                    "Construction",
+                    "2024-12-31"
+                  ]
+                }
+              ],
+              "op": "mul"
+            },
+            {
+              "args": [
+                {
+                  "const": -1
+                },
+                {
+                  "cell": [
+                    "Construction",
+                    "2024-12-31"
+                  ]
+                }
+              ],
+              "op": "mul"
+            },
+            {
+              "args": [
+                {
+                  "const": 0.01
+                },
+                {
+                  "cell": [
+                    "Split",
+                    "pct_in_use"
+                  ]
+                },
+                {
+                  "cell": [
+                    "Split",
+                    "2024-12-31"
+                  ]
+                }
+              ],
+              "op": "mul"
+            },
+            {
+              "args": [
+                {
+                  "const": -1
+                },
+                {
+                  "cell": [
+                    "Split",
+                    "2024-12-31"
+                  ]
+                }
+              ],
+              "op": "mul"
+            },
+            {
+              "args": [
+                {
+                  "const": 0.01
+                },
+                {
+                  "cell": [
+                    "SplitA",
+                    "pct_in_use"
+                  ]
+                },
+                {
+                  "cell": [
+                    "SplitA",
+                    "2024-12-31"
+                  ]
+                }
+              ],
+              "op": "mul"
+            },
+            {
+              "args": [
+                {
+                  "const": -1
+                },
+                {
+                  "cell": [
+                    "SplitA",
+                    "2024-12-31"
+                  ]
+                }
+              ],
+              "op": "mul"
+            },
+            {
+              "args": [
+                {
+                  "const": 0.01
+                },
+                {
+                  "cell": [
+                    "SplitB",
+                    "pct_in_use"
+                  ]
+                },
+                {
+                  "cell": [
+                    "SplitB",
+                    "2024-12-31"
+                  ]
+                }
+              ],
+              "op": "mul"
+            },
+            {
+              "args": [
+                {
+                  "const": -1
+                },
+                {
+                  "cell": [
+                    "SplitB",
+                    "2024-12-31"
+                  ]
+                }
+              ],
+              "op": "mul"
+            },
+            {
+              "args": [
+                {
+                  "const": -1
+                },
+                {
+                  "cell": [
+                    "Payables",
+                    "net_out"
+                  ]
+                },
+                {
+                  "cell": [
+                    "Payables",
+                    "2024-12-31"
+                  ]
+                }
+              ],
+              "op": "mul"
+            },
+            {
+              "args": [
+                {
+                  "const": -1
+                },
+                {
+                  "cell": [
+                    "Advances",
+                    "net_out"
+                  ]
+                },
+                {
+                  "cell": [
+                    "Advances",
+                    "2024-12-31"
+                  ]
+                }
+              ],
+              "op": "mul"
+            },
+            {
+              "args": [
+                {
+                  "const": -1
+                },
+                {
+                  "cell": [
+                    "Debt",
+                    "net_out"
+                  ]
+                },
+                {
+                  "cell": [
+                    "Debt",
+                    "2024-12-31"
+                  ]
+                }
+              ],
+              "op": "mul"
+            }
+          ],
+          "op": "add"
+        },
+        "row_id": "net_assets_in_use"
+      },
+      {
+        "col_id": "2023-12-31",
+        "expr": {
+          "args": [
+            {
+              "cell": [
+                "total_assets",
+                "2023-12-31"
+              ]
+            },
+            {
+              "args": [
+                {
+                  "const": 0.01
+                },
+                {
+                  "cell": [
+                    "Cash",
+                    "pct_in_use"
+                  ]
+                },
+                {
+                  "cell": [
+                    "Cash",
+                    "2023-12-31"
+                  ]
+                }
+              ],
+              "op": "mul"
+            },
+            {
+              "args": [
+                {
+                  "const": -1
+                },
+                {
+                  "cell": [
+                    "Cash",
+                    "2023-12-31"
+                  ]
+                }
+              ],
+              "op": "mul"
+            },
+            {
+              "args": [
+                {
+                  "const": 0.01
+                },
+                {
+                  "cell": [
+                    "Receivables",
+                    "pct_in_use"
+                  ]
+                },
+                {
+                  "cell": [
+                    "Receivables",
+                    "2023-12-31"
+                  ]
+                }
+              ],
+              "op": "mul"
+            },
+            {
+              "args": [
+                {
+                  "const": -1
+                },
+                {
+                  "cell": [
+                    "Receivables",
+                    "2023-12-31"
+                  ]
+                }
+              ],
+              "op": "mul"
+            },
+            {
+              "args": [
+                {
+                  "const": 0.01
+                },
+                {
+                  "cell": [
+                    "Allowance",
+                    "pct_in_use"
+                  ]
+                },
+                {
+                  "cell": [
+                    "Allowance",
+                    "2023-12-31"
+                  ]
+                }
+              ],
+              "op": "mul"
+            },
+            {
+              "args": [
+                {
+                  "const": -1
+                },
+                {
+                  "cell": [
+                    "Allowance",
+                    "2023-12-31"
+                  ]
+                }
+              ],
+              "op": "mul"
+            },
+            {
+              "args": [
+                {
+                  "const": 0.01
+                },
+                {
+                  "cell": [
+                    "Construction",
+                    "pct_in_use"
+                  ]
+                },
+                {
+                  "cell": [
+                    "Construction",
+                    "2023-12-31"
+                  ]
+                }
+              ],
+              "op": "mul"
+            },
+            {
+              "args": [
+                {
+                  "const": -1
+                },
+                {
+                  "cell": [
+                    "Construction",
+                    "2023-12-31"
+                  ]
+                }
+              ],
+              "op": "mul"
+            },
+            {
+              "args": [
+                {
+                  "const": 0.01
+                },
+                {
+                  "cell": [
+                    "Split",
+                    "pct_in_use"
+                  ]
+                },
+                {
+                  "cell": [
+                    "Split",
+                    "2023-12-31"
+                  ]
+                }
+              ],
+              "op": "mul"
+            },
+            {
+              "args": [
+                {
+                  "const": -1
+                },
+                {
+                  "cell": [
+                    "Split",
+                    "2023-12-31"
+                  ]
+                }
+              ],
+              "op": "mul"
+            },
+            {
+              "args": [
+                {
+                  "const": 0.01
+                },
+                {
+                  "cell": [
+                    "SplitA",
+                    "pct_in_use"
+                  ]
+                },
+                {
+                  "cell": [
+                    "SplitA",
+                    "2023-12-31"
+                  ]
+                }
+              ],
+              "op": "mul"
+            },
+            {
+              "args": [
+                {
+                  "const": -1
+                },
+                {
+                  "cell": [
+                    "SplitA",
+                    "2023-12-31"
+                  ]
+                }
+              ],
+              "op": "mul"
+            },
+            {
+              "args": [
+                {
+                  "const": 0.01
+                },
+                {
+                  "cell": [
+                    "SplitB",
+                    "pct_in_use"
+                  ]
+                },
+                {
+                  "cell": [
+                    "SplitB",
+                    "2023-12-31"
+                  ]
+                }
+              ],
+              "op": "mul"
+            },
+            {
+              "args": [
+                {
+                  "const": -1
+                },
+                {
+                  "cell": [
+                    "SplitB",
+                    "2023-12-31"
+                  ]
+                }
+              ],
+              "op": "mul"
+            }
+          ],
+          "op": "add"
+        },
+        "row_id": "gross_assets_in_use"
+      },
+      {
+        "col_id": "2023-12-31",
+        "expr": {
+          "args": [
+            {
+              "cell": [
+                "total_assets",
+                "2023-12-31"
+              ]
+            },
+            {
+              "args": [
+                {
+                  "const": 0.01
+                },
+                {
+                  "cell": [
+                    "Cash",
+                    "pct_in_use"
+                  ]
+                },
+                {
+                  "cell": [
+                    "Cash",
+                    "2023-12-31"
+                  ]
+                }
+              ],
+              "op": "mul"
+            },
+            {
+              "args": [
+                {
+                  "const": -1
+                },
+                {
+                  "cell": [
+                    "Cash",
+                    "2023-12-31"
+                  ]
+                }
+              ],
+              "op": "mul"
+            },
+            {
+              "args": [
+                {
+                  "const": 0.01
+                },
+                {
+                  "cell": [
+                    "Receivables",
+                    "pct_in_use"
+                  ]
+                },
+                {
+                  "cell": [
+                    "Receivables",
+                    "2023-12-31"
+                  ]
+                }
+              ],
+              "op": "mul"
+            },
+            {
+              "args": [
+                {
+                  "const": -1
+                },
+                {
+                  "cell": [
+                    "Receivables",
+                    "2023-12-31"
+                  ]
+                }
+              ],
+              "op": "mul"
+            },
+            {
+              "args": [
+                {
+                  "const": 0.01
+                },
+                {
+                  "cell": [
+                    "Allowance",
+                    "pct_in_use"
+                  ]
+                },
+                {
+                  "cell": [
+                    "Allowance",
+                    "2023-12-31"
+                  ]
+                }
+              ],
+              "op": "mul"
+            },
+            {
+              "args": [
+                {
+                  "const": -1
+                },
+                {
+                  "cell": [
+                    "Allowance",
+                    "2023-12-31"
+                  ]
+                }
+              ],
+              "op": "mul"
+            },
+            {
+              "args": [
+                {
+                  "const": 0.01
+                },
+                {
+                  "cell": [
+                    "Construction",
+                    "pct_in_use"
+                  ]
+                },
+                {
+                  "cell": [
+                    "Construction",
+                    "2023-12-31"
+                  ]
+                }
+              ],
+              "op": "mul"
+            },
+            {
+              "args": [
+                {
+                  "const": -1
+                },
+                {
+                  "cell": [
+                    "Construction",
+                    "2023-12-31"
+                  ]
+                }
+              ],
+              "op": "mul"
+            },
+            {
+              "args": [
+                {
+                  "const": 0.01
+                },
+                {
+                  "cell": [
+                    "Split",
+                    "pct_in_use"
+                  ]
+                },
+                {
+                  "cell": [
+                    "Split",
+                    "2023-12-31"
+                  ]
+                }
+              ],
+              "op": "mul"
+            },
+            {
+              "args": [
+                {
+                  "const": -1
+                },
+                {
+                  "cell": [
+                    "Split",
+                    "2023-12-31"
+                  ]
+                }
+              ],
+              "op": "mul"
+            },
+            {
+              "args": [
+                {
+                  "const": 0.01
+                },
+                {
+                  "cell": [
+                    "SplitA",
+                    "pct_in_use"
+                  ]
+                },
+                {
+                  "cell": [
+                    "SplitA",
+                    "2023-12-31"
+                  ]
+                }
+              ],
+              "op": "mul"
+            },
+            {
+              "args": [
+                {
+                  "const": -1
+                },
+                {
+                  "cell": [
+                    "SplitA",
+                    "2023-12-31"
+                  ]
+                }
+              ],
+              "op": "mul"
+            },
+            {
+              "args": [
+                {
+                  "const": 0.01
+                },
+                {
+                  "cell": [
+                    "SplitB",
+                    "pct_in_use"
+                  ]
+                },
+                {
+                  "cell": [
+                    "SplitB",
+                    "2023-12-31"
+                  ]
+                }
+              ],
+              "op": "mul"
+            },
+            {
+              "args": [
+                {
+                  "const": -1
+                },
+                {
+                  "cell": [
+                    "SplitB",
+                    "2023-12-31"
+                  ]
+                }
+              ],
+              "op": "mul"
+            },
+            {
+              "args": [
+                {
+                  "const": -1
+                },
+                {
+                  "cell": [
+                    "Payables",
+                    "net_out"
+                  ]
+                },
+                {
+                  "cell": [
+                    "Payables",
+                    "2023-12-31"
+                  ]
+                }
+              ],
+              "op": "mul"
+            },
+            {
+              "args": [
+                {
+                  "const": -1
+                },
+                {
+                  "cell": [
+                    "Advances",
+                    "net_out"
+                  ]
+                },
+                {
+                  "cell": [
+                    "Advances",
+                    "2023-12-31"
+                  ]
+                }
+              ],
+              "op": "mul"
+            },
+            {
+              "args": [
+                {
+                  "const": -1
+                },
+                {
+                  "cell": [
+                    "Debt",
+                    "net_out"
+                  ]
+                },
+                {
+                  "cell": [
+                    "Debt",
+                    "2023-12-31"
+                  ]
+                }
+              ],
+              "op": "mul"
+            }
+          ],
+          "op": "add"
+        },
+        "row_id": "net_assets_in_use"
+      },
+      {
+        "col_id": "2022-12-31",
+        "expr": {
+          "args": [
+            {
+              "cell": [
+                "total_assets",
+                "2022-12-31"
+              ]
+            },
+            {
+              "args": [
+                {
+                  "const": 0.01
+                },
+                {
+                  "cell": [
+                    "Cash",
+                    "pct_in_use"
+                  ]
+                },
+                {
+                  "cell": [
+                    "Cash",
+                    "2022-12-31"
+                  ]
+                }
+              ],
+              "op": "mul"
+            },
+            {
+              "args": [
+                {
+                  "const": -1
+                },
+                {
+                  "cell": [
+                    "Cash",
+                    "2022-12-31"
+                  ]
+                }
+              ],
+              "op": "mul"
+            },
+            {
+              "args": [
+                {
+                  "const": 0.01
+                },
+                {
+                  "cell": [
+                    "Receivables",
+                    "pct_in_use"
+                  ]
+                },
+                {
+                  "cell": [
+                    "Receivables",
+                    "2022-12-31"
+                  ]
+                }
+              ],
+              "op": "mul"
+            },
+            {
+              "args": [
+                {
+                  "const": -1
+                },
+                {
+                  "cell": [
+                    "Receivables",
+                    "2022-12-31"
+                  ]
+                }
+              ],
+              "op": "mul"
+            },
+            {
+              "args": [
+                {
+                  "const": 0.01
+                },
+                {
+                  "cell": [
+                    "Allowance",
+                    "pct_in_use"
+                  ]
+                },
+                {
+                  "cell": [
+                    "Allowance",
+                    "2022-12-31"
+                  ]
+                }
+              ],
+              "op": "mul"
+            },
+            {
+              "args": [
+                {
+                  "const": -1
+                },
+                {
+                  "cell": [
+                    "Allowance",
+                    "2022-12-31"
+                  ]
+                }
+              ],
+              "op": "mul"
+            },
+            {
+              "args": [
+                {
+                  "const": 0.01
+                },
+                {
+                  "cell": [
+                    "Construction",
+                    "pct_in_use"
+                  ]
+                },
+                {
+                  "cell": [
+                    "Construction",
+                    "2022-12-31"
+                  ]
+                }
+              ],
+              "op": "mul"
+            },
+            {
+              "args": [
+                {
+                  "const": -1
+                },
+                {
+                  "cell": [
+                    "Construction",
+                    "2022-12-31"
+                  ]
+                }
+              ],
+              "op": "mul"
+            },
+            {
+              "args": [
+                {
+                  "const": 0.01
+                },
+                {
+                  "cell": [
+                    "Split",
+                    "pct_in_use"
+                  ]
+                },
+                {
+                  "cell": [
+                    "Split",
+                    "2022-12-31"
+                  ]
+                }
+              ],
+              "op": "mul"
+            },
+            {
+              "args": [
+                {
+                  "const": -1
+                },
+                {
+                  "cell": [
+                    "Split",
+                    "2022-12-31"
+                  ]
+                }
+              ],
+              "op": "mul"
+            },
+            {
+              "args": [
+                {
+                  "const": 0.01
+                },
+                {
+                  "cell": [
+                    "SplitA",
+                    "pct_in_use"
+                  ]
+                },
+                {
+                  "cell": [
+                    "SplitA",
+                    "2022-12-31"
+                  ]
+                }
+              ],
+              "op": "mul"
+            },
+            {
+              "args": [
+                {
+                  "const": -1
+                },
+                {
+                  "cell": [
+                    "SplitA",
+                    "2022-12-31"
+                  ]
+                }
+              ],
+              "op": "mul"
+            },
+            {
+              "args": [
+                {
+                  "const": 0.01
+                },
+                {
+                  "cell": [
+                    "SplitB",
+                    "pct_in_use"
+                  ]
+                },
+                {
+                  "cell": [
+                    "SplitB",
+                    "2022-12-31"
+                  ]
+                }
+              ],
+              "op": "mul"
+            },
+            {
+              "args": [
+                {
+                  "const": -1
+                },
+                {
+                  "cell": [
+                    "SplitB",
+                    "2022-12-31"
+                  ]
+                }
+              ],
+              "op": "mul"
+            }
+          ],
+          "op": "add"
+        },
+        "row_id": "gross_assets_in_use"
+      },
+      {
+        "col_id": "2022-12-31",
+        "expr": {
+          "args": [
+            {
+              "cell": [
+                "total_assets",
+                "2022-12-31"
+              ]
+            },
+            {
+              "args": [
+                {
+                  "const": 0.01
+                },
+                {
+                  "cell": [
+                    "Cash",
+                    "pct_in_use"
+                  ]
+                },
+                {
+                  "cell": [
+                    "Cash",
+                    "2022-12-31"
+                  ]
+                }
+              ],
+              "op": "mul"
+            },
+            {
+              "args": [
+                {
+                  "const": -1
+                },
+                {
+                  "cell": [
+                    "Cash",
+                    "2022-12-31"
+                  ]
+                }
+              ],
+              "op": "mul"
+            },
+            {
+              "args": [
+                {
+                  "const": 0.01
+                },
+                {
+                  "cell": [
+                    "Receivables",
+                    "pct_in_use"
+                  ]
+                },
+                {
+                  "cell": [
+                    "Receivables",
+                    "2022-12-31"
+                  ]
+                }
+              ],
+              "op": "mul"
+            },
+            {
+              "args": [
+                {
+                  "const": -1
+                },
+                {
+                  "cell": [
+                    "Receivables",
+                    "2022-12-31"
+                  ]
+                }
+              ],
+              "op": "mul"
+            },
+            {
+              "args": [
+                {
+                  "const": 0.01
+                },
+                {
+                  "cell": [
+                    "Allowance",
+                    "pct_in_use"
+                  ]
+                },
+                {
+                  "cell": [
+                    "Allowance",
+                    "2022-12-31"
+                  ]
+                }
+              ],
+              "op": "mul"
+            },
+            {
+              "args": [
+                {
+                  "const": -1
+                },
+                {
+                  "cell": [
+                    "Allowance",
+                    "2022-12-31"
+                  ]
+                }
+              ],
+              "op": "mul"
+            },
+            {
+              "args": [
+                {
+                  "const": 0.01
+                },
+                {
+                  "cell": [
+                    "Construction",
+                    "pct_in_use"
+                  ]
+                },
+                {
+                  "cell": [
+                    "Construction",
+                    "2022-12-31"
+                  ]
+                }
+              ],
+              "op": "mul"
+            },
+            {
+              "args": [
+                {
+                  "const": -1
+                },
+                {
+                  "cell": [
+                    "Construction",
+                    "2022-12-31"
+                  ]
+                }
+              ],
+              "op": "mul"
+            },
+            {
+              "args": [
+                {
+                  "const": 0.01
+                },
+                {
+                  "cell": [
+                    "Split",
+                    "pct_in_use"
+                  ]
+                },
+                {
+                  "cell": [
+                    "Split",
+                    "2022-12-31"
+                  ]
+                }
+              ],
+              "op": "mul"
+            },
+            {
+              "args": [
+                {
+                  "const": -1
+                },
+                {
+                  "cell": [
+                    "Split",
+                    "2022-12-31"
+                  ]
+                }
+              ],
+              "op": "mul"
+            },
+            {
+              "args": [
+                {
+                  "const": 0.01
+                },
+                {
+                  "cell": [
+                    "SplitA",
+                    "pct_in_use"
+                  ]
+                },
+                {
+                  "cell": [
+                    "SplitA",
+                    "2022-12-31"
+                  ]
+                }
+              ],
+              "op": "mul"
+            },
+            {
+              "args": [
+                {
+                  "const": -1
+                },
+                {
+                  "cell": [
+                    "SplitA",
+                    "2022-12-31"
+                  ]
+                }
+              ],
+              "op": "mul"
+            },
+            {
+              "args": [
+                {
+                  "const": 0.01
+                },
+                {
+                  "cell": [
+                    "SplitB",
+                    "pct_in_use"
+                  ]
+                },
+                {
+                  "cell": [
+                    "SplitB",
+                    "2022-12-31"
+                  ]
+                }
+              ],
+              "op": "mul"
+            },
+            {
+              "args": [
+                {
+                  "const": -1
+                },
+                {
+                  "cell": [
+                    "SplitB",
+                    "2022-12-31"
+                  ]
+                }
+              ],
+              "op": "mul"
+            },
+            {
+              "args": [
+                {
+                  "const": -1
+                },
+                {
+                  "cell": [
+                    "Payables",
+                    "net_out"
+                  ]
+                },
+                {
+                  "cell": [
+                    "Payables",
+                    "2022-12-31"
+                  ]
+                }
+              ],
+              "op": "mul"
+            },
+            {
+              "args": [
+                {
+                  "const": -1
+                },
+                {
+                  "cell": [
+                    "Advances",
+                    "net_out"
+                  ]
+                },
+                {
+                  "cell": [
+                    "Advances",
+                    "2022-12-31"
+                  ]
+                }
+              ],
+              "op": "mul"
+            },
+            {
+              "args": [
+                {
+                  "const": -1
+                },
+                {
+                  "cell": [
+                    "Debt",
+                    "net_out"
+                  ]
+                },
+                {
+                  "cell": [
+                    "Debt",
+                    "2022-12-31"
+                  ]
+                }
+              ],
+              "op": "mul"
+            }
+          ],
+          "op": "add"
+        },
+        "row_id": "net_assets_in_use"
+      }
+    ],
+    "columns": [
+      {
+        "dtype": "number",
+        "format": "financial",
+        "id": "2024-12-31",
+        "kind": "static",
+        "label": "2024-12-31",
+        "linked_group": null
+      },
+      {
+        "dtype": "number",
+        "format": "financial",
+        "id": "2023-12-31",
+        "kind": "static",
+        "label": "2023-12-31",
+        "linked_group": null
+      },
+      {
+        "dtype": "number",
+        "format": "financial",
+        "id": "2022-12-31",
+        "kind": "static",
+        "label": "2022-12-31",
+        "linked_group": null
+      },
+      {
+        "dtype": "number",
+        "format": null,
+        "id": "pct_in_use",
+        "kind": "input",
+        "label": "% in use",
+        "linked_group": null
+      },
+      {
+        "dtype": "boolean",
+        "format": null,
+        "id": "net_out",
+        "kind": "input",
+        "label": "Net out",
+        "linked_group": null
+      }
+    ],
+    "linked_groups": {},
+    "no_input_cells": [
+      [
+        "Cash",
+        "net_out"
+      ],
+      [
+        "Receivables",
+        "net_out"
+      ],
+      [
+        "Allowance",
+        "net_out"
+      ],
+      [
+        "Construction",
+        "net_out"
+      ],
+      [
+        "Split",
+        "net_out"
+      ],
+      [
+        "SplitA",
+        "net_out"
+      ],
+      [
+        "SplitB",
+        "net_out"
+      ],
+      [
+        "Payables",
+        "pct_in_use"
+      ],
+      [
+        "Advances",
+        "pct_in_use"
+      ],
+      [
+        "Debt",
+        "pct_in_use"
+      ],
+      [
+        "total_assets",
+        "pct_in_use"
+      ],
+      [
+        "total_assets",
+        "net_out"
+      ],
+      [
+        "gross_assets_in_use",
+        "pct_in_use"
+      ],
+      [
+        "gross_assets_in_use",
+        "net_out"
+      ],
+      [
+        "net_assets_in_use",
+        "pct_in_use"
+      ],
+      [
+        "net_assets_in_use",
+        "net_out"
+      ]
+    ],
+    "rows": [
+      {
+        "cells": {
+          "2022-12-31": null,
+          "2023-12-31": 136.0,
+          "2024-12-31": 175.0,
+          "net_out": null,
+          "pct_in_use": null
+        },
+        "id": "total_assets",
+        "is_total": true,
+        "label": "Total assets",
+        "level": 0,
+        "parent_id": null
+      },
+      {
+        "cells": {
+          "2022-12-31": null,
+          "2023-12-31": 50.0,
+          "2024-12-31": 60.0,
+          "net_out": null,
+          "pct_in_use": 100.0
+        },
+        "id": "Cash",
+        "is_total": false,
+        "label": "Cash",
+        "level": 1,
+        "parent_id": null
+      },
+      {
+        "cells": {
+          "2022-12-31": null,
+          "2023-12-31": 30.0,
+          "2024-12-31": 40.0,
+          "net_out": null,
+          "pct_in_use": 100.0
+        },
+        "id": "Receivables",
+        "is_total": false,
+        "label": "Receivables",
+        "level": 1,
+        "parent_id": null
+      },
+      {
+        "cells": {
+          "2022-12-31": null,
+          "2023-12-31": -4.0,
+          "2024-12-31": -5.0,
+          "net_out": null,
+          "pct_in_use": 50.0
+        },
+        "id": "Allowance",
+        "is_total": false,
+        "label": "Allowance for doubtful accounts",
+        "level": 1,
+        "parent_id": null
+      },
+      {
+        "cells": {
+          "2022-12-31": null,
+          "2023-12-31": 40.0,
+          "2024-12-31": 50.0,
+          "net_out": null,
+          "pct_in_use": 0.0
+        },
+        "id": "Construction",
+        "is_total": false,
+        "label": "Construction in progress",
+        "level": 1,
+        "parent_id": null
+      },
+      {
+        "cells": {
+          "2022-12-31": null,
+          "2023-12-31": null,
+          "2024-12-31": 30.0,
+          "net_out": null,
+          "pct_in_use": 100.0
+        },
+        "id": "Split",
+        "is_total": false,
+        "label": "Leaf in P1, subtotal in P2",
+        "level": 1,
+        "parent_id": null
+      },
+      {
+        "cells": {
+          "2022-12-31": null,
+          "2023-12-31": 12.0,
+          "2024-12-31": null,
+          "net_out": null,
+          "pct_in_use": 100.0
+        },
+        "id": "SplitA",
+        "is_total": false,
+        "label": "Split part A",
+        "level": 1,
+        "parent_id": null
+      },
+      {
+        "cells": {
+          "2022-12-31": null,
+          "2023-12-31": 8.0,
+          "2024-12-31": null,
+          "net_out": null,
+          "pct_in_use": 100.0
+        },
+        "id": "SplitB",
+        "is_total": false,
+        "label": "Split part B",
+        "level": 1,
+        "parent_id": null
+      },
+      {
+        "cells": {
+          "2022-12-31": null,
+          "2023-12-31": null,
+          "2024-12-31": null,
+          "net_out": null,
+          "pct_in_use": null
+        },
+        "id": "gross_assets_in_use",
+        "is_total": true,
+        "label": "Gross assets in use",
+        "level": 0,
+        "parent_id": null
+      },
+      {
+        "cells": {
+          "2022-12-31": null,
+          "2023-12-31": 25.0,
+          "2024-12-31": 30.0,
+          "net_out": true,
+          "pct_in_use": null
+        },
+        "id": "Payables",
+        "is_total": false,
+        "label": "Accounts payable",
+        "level": 1,
+        "parent_id": null
+      },
+      {
+        "cells": {
+          "2022-12-31": null,
+          "2023-12-31": 15.0,
+          "2024-12-31": 20.0,
+          "net_out": false,
+          "pct_in_use": null
+        },
+        "id": "Advances",
+        "is_total": false,
+        "label": "Customer advances",
+        "level": 1,
+        "parent_id": null
+      },
+      {
+        "cells": {
+          "2022-12-31": null,
+          "2023-12-31": 40.0,
+          "2024-12-31": 50.0,
+          "net_out": false,
+          "pct_in_use": null
+        },
+        "id": "Debt",
+        "is_total": false,
+        "label": "Long-term debt",
+        "level": 1,
+        "parent_id": null
+      },
+      {
+        "cells": {
+          "2022-12-31": null,
+          "2023-12-31": null,
+          "2024-12-31": null,
+          "net_out": null,
+          "pct_in_use": null
+        },
+        "id": "net_assets_in_use",
+        "is_total": true,
+        "label": "Net assets in use",
+        "level": 0,
+        "parent_id": null
+      }
+    ]
+  }
+}
