@@ -6,7 +6,7 @@ from typing import Any
 
 import pandas as pd
 
-from src.adjustments.base import AdjustmentSpec
+from src.adjustments.base import AdjustmentRun, AdjustmentSpec
 from src.adjustments.registry import ADJUSTMENT_ORDER, get_adjustment_type
 
 
@@ -26,7 +26,28 @@ def from_prefs(prefs: pd.DataFrame) -> list[AdjustmentSpec]:
     return specs
 
 
-def describe(specs: list[AdjustmentSpec]) -> list[dict[str, Any]]:
-    """Note entries for ``specs``; a type's ``describe`` returns None to opt out."""
-    described = (get_adjustment_type(s.type_id).describe(s) for s in specs)
-    return [d for d in described if d is not None]
+def _describe(spec: AdjustmentSpec) -> dict[str, Any] | None:
+    return get_adjustment_type(spec.type_id).describe(spec)
+
+
+def describe(run: AdjustmentRun) -> dict[str, list[dict[str, Any]]]:
+    """The adjustments note: what applied and what was skipped, with reasons.
+
+    Applied entries describe only the part of each spec that applied. A skipped
+    entry names the type without a count, since its spec's count would include
+    the parts that applied. A type's ``describe`` returns None to leave a spec
+    out of both lists.
+    """
+    applied = [_describe(spec) for spec in run.applied]
+    return {
+        "applied": [entry for entry in applied if entry is not None],
+        "skipped": [
+            {
+                "type": skip.spec.type_id,
+                "label": get_adjustment_type(skip.spec.type_id).LABEL,
+                "reason": skip.reason,
+            }
+            for skip in run.skipped
+            if _describe(skip.spec) is not None
+        ],
+    }

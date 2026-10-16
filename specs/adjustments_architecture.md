@@ -33,7 +33,7 @@ edgartools ──(cache build, once)──► parquet: 3 Statement frames per (c
                                          │
  wizard.duckdb prefs ─► load_specs(ticker) ─► list[AdjustmentSpec]   (or draft specs from a POST body)
                                          │
-                  apply_adjustments(base, specs, until=None) → StatementSet (adjusted, new object)
+                  apply_adjustments(base, specs, until=None) → AdjustmentRun (adjusted StatementSet, applied specs, skipped specs + reasons)
                                          │   engine: insert rows / override values → recompute dirty ancestors
                   compute_metrics(ss)  → EBIT, EBITDA, (later) owner earnings, ROCE
                                          │

@@ -9,9 +9,10 @@ import pytest
 from fastapi.testclient import TestClient
 from httpx import Response
 
+from src.adjustments.base import AdjustmentSpec
 from src.web import adjusted_statements
 from src.web.app import app
-from tests.test_statement_pages import P1, P2, P3, _statement_set
+from tests.test_statement_pages import P1, P2, P3, RND, _statement_set
 
 FUND_FLOW = "/wizard/AAPL/business-understanding/fund-flow"
 BALANCE_SHEET_SIZE = "/wizard/AAPL/business-understanding/balance-sheet-size"
@@ -93,6 +94,33 @@ def test_saved_settings_shape_the_next_statement_page(client: TestClient) -> Non
     after = client.get("/statements/AAPL/income").text
     assert _columns(after) == [P1, P2]
     assert ADJUSTED_NOTE in after
+
+
+GONE = "us-gaap_Gone"
+GONE_NOTE = f"Opex capitalized: saved row {GONE} is not in this filing"
+
+
+@pytest.mark.parametrize(
+    ("rows", "expected"),
+    [
+        ({RND: 5.0}, ["Adjusted for: Opex capitalized (1)"]),
+        (
+            {RND: 5.0, GONE: 3.0},
+            ["Adjusted for: Opex capitalized (1)", f"Not applied: {GONE_NOTE}"],
+        ),
+        ({GONE: 3.0}, [ADJUSTED_NOTE, f"Not applied: {GONE_NOTE}"]),
+    ],
+    ids=["all-applied", "partly-applied", "none-applied"],
+)
+def test_statement_page_note_counts_only_what_applied(
+    client: TestClient, rows: dict[str, float], expected: list[str]
+) -> None:
+    specs = [AdjustmentSpec("opex_to_capex", {"rows": rows})]
+    _save(client, basis="adjusted", next="/statements/AAPL/income")
+    with patch.object(adjusted_statements, "load_specs", return_value=specs):
+        html = client.get("/statements/AAPL/income").text
+    notes = re.findall(r'class="adjustments-note[^"]*">(.*?)</p>', html, re.DOTALL)
+    assert [" ".join(note.split()) for note in notes] == expected
 
 
 def test_saved_offsets_shape_the_next_fund_flow(client: TestClient) -> None:

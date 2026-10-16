@@ -12,7 +12,13 @@ from src.adjustments.specs import from_prefs
 from src.adjustments.types.opex_to_capex import schedule
 from src.adjustments.types.owner_earnings import maintenance_da, owner_earnings
 from src.api.edgartools.source import load_statement_set
-from src.api.edgartools.standard_terms import DA_COMPONENT_AXIS
+from src.api.edgartools.standard_terms import (
+    ASSET_PARENTS,
+    CFI,
+    CFO,
+    DA_COMPONENT_AXIS,
+    EQUITY_PARENTS,
+)
 
 CASH_CHANGE = (
     "us-gaap_CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents"
@@ -69,37 +75,120 @@ def test_from_prefs_groups_by_type() -> None:
     assert specs[1].params == {"maintenance_da": 60.0, "maintenance_nwc": 50.0}
 
 
-def _value(ss, statement: str, concept: str, period: str) -> float:
+def _row_values(ss, statement: str, concept: str) -> pd.Series | None:
     frame = ss.get(statement).frame
     rows = frame[(frame["concept"] == concept) & ~frame["dimension"].eq(True)]
-    return float(rows[period].iloc[0])
+    if rows.empty:
+        return None
+    return pd.to_numeric(rows.iloc[0][ss.get(statement).periods], errors="coerce")
+
+
+# R&D first; SG&A stands in for a filer without R&D, so every ticker
+# exercises opex_to_capex.
+CAPITALIZABLE = ("ResearchAndDevelopmentExpenses", "SellingGeneralAndAdminExpenses")
+
+
+def _capitalizable_row(income) -> pd.Series:
+    for standard_concept in CAPITALIZABLE:
+        rows = income.find(standard_concept=standard_concept)
+        if not rows.empty:
+            return rows.iloc[0]
+    pytest.skip(f"no {' or '.join(CAPITALIZABLE)} row to capitalize")
 
 
 @pytest.mark.data
-def test_engine_invariants_on_test_tickers(data_ticker: str) -> None:
+def test_no_specs_reproduce_reported_statements(data_ticker: str) -> None:
     base = load_statement_set(data_ticker, "annual")
-    unchanged = apply_adjustments(base, [])
+    run = apply_adjustments(base, [])
+    assert run.applied == () and run.skipped == ()
     for st in ("income", "balance", "cashflow"):
         periods = base.get(st).periods
         a = base.get(st).frame[periods].apply(pd.to_numeric, errors="coerce")
-        b = unchanged.get(st).frame[periods].apply(pd.to_numeric, errors="coerce")
+        b = run.statements.get(st).frame[periods].apply(pd.to_numeric, errors="coerce")
         assert np.allclose(a.fillna(0), b.fillna(0)), (data_ticker, st)
 
-    opex = base.income.find(standard_concept="ResearchAndDevelopmentExpenses")
-    if opex.empty:
-        return
-    spec = AdjustmentSpec("opex_to_capex", {"rows": {opex["row_id"].iloc[0]: 5}})
-    adjusted = apply_adjustments(base, [spec])
-    period = base.income.periods[0]
-    assert _value(adjusted, "balance", "us-gaap_Assets", period) == pytest.approx(
-        _value(adjusted, "balance", "us-gaap_LiabilitiesAndStockholdersEquity", period)
-    ), data_ticker
-    assert _value(adjusted, "income", "us-gaap_NetIncomeLoss", period) == (
-        pytest.approx(_value(adjusted, "cashflow", "us-gaap_NetIncomeLoss", period))
-    ), data_ticker
+
+@pytest.mark.data
+def test_capitalized_opex_moves_every_period_by_its_schedule(data_ticker: str) -> None:
+    base = load_statement_set(data_ticker, "annual")
+    row = _capitalizable_row(base.income)
+    life = 5
+    spec = AdjustmentSpec("opex_to_capex", {"rows": {row["row_id"]: life}})
+    run = apply_adjustments(base, [spec])
+    assert run.applied == (spec,) and run.skipped == (), data_ticker
+    adjusted = run.statements
+
+    spend = {
+        p: float(row[p]) for p in base.income.periods if pd.notna(pd.to_numeric(row[p]))
+    }
+    _, net = schedule(spend, life)
+    balance_concepts = set(base.balance.frame["concept"])
+    equity = next(c for c in EQUITY_PARENTS if c in balance_concepts)
+    expected = {
+        ("balance", "us-gaap_Assets"): net,
+        ("balance", equity): net,
+        ("balance", "us-gaap_LiabilitiesAndStockholdersEquity"): net,
+        ("cashflow", CFO): spend,
+        ("cashflow", CFI): {p: -v for p, v in spend.items()},
+    }
+    for (st, concept), change in expected.items():
+        before = _row_values(base, st, concept)
+        after = _row_values(adjusted, st, concept)
+        assert before is not None, (data_ticker, concept)
+        checked = [p for p in change if p in before.index and pd.notna(before[p])]
+        assert checked, (data_ticker, concept, "no reported period to compare")
+        for period in checked:
+            assert after[period] - before[period] == pytest.approx(change[period]), (
+                data_ticker,
+                concept,
+                period,
+            )
+
+    local = str(row["concept"]).split("_", 1)[-1]
+    income_edges = base.income.calc_edges
+    expense_parent = set(
+        income_edges.loc[income_edges["concept"] == row["concept"], "parent_concept"]
+    )
+    inserted = {
+        ("income", f"adj_Amortization{local}"): expense_parent,
+        ("balance", f"adj_Capitalized{local}"): set(ASSET_PARENTS),
+        ("balance", f"adj_EquityCapitalized{local}"): set(EQUITY_PARENTS),
+        ("cashflow", f"adj_Amortization{local}"): {CFO},
+        ("cashflow", f"adj_Capitalized{local}"): {CFI},
+    }
+    for (st, concept), parents in inserted.items():
+        statement = adjusted.get(st)
+        assert concept in set(statement.frame["row_id"]), (data_ticker, concept)
+        reported = [_row_values(base, st, parent) for parent in parents]
+        expected_periods = {
+            p
+            for p in spend
+            if any(v is not None and pd.notna(v.get(p)) for v in reported)
+        }
+        assert expected_periods, (data_ticker, concept, "no period with a parent")
+        edges = statement.calc_edges
+        wired = set(edges.loc[edges["concept"] == concept, "period"])
+        assert expected_periods <= wired, (data_ticker, concept)
+
+    for period in base.balance.periods:
+        assets = _row_values(adjusted, "balance", "us-gaap_Assets")[period]
+        total = _row_values(
+            adjusted, "balance", "us-gaap_LiabilitiesAndStockholdersEquity"
+        )[period]
+        if pd.notna(assets) and pd.notna(total):
+            assert assets == pytest.approx(total), (data_ticker, period)
+    income_ni = _row_values(adjusted, "income", "us-gaap_NetIncomeLoss")
+    cash_ni = _row_values(adjusted, "cashflow", "us-gaap_NetIncomeLoss")
+    for period in cash_ni.index:
+        if period in income_ni.index and pd.notna(income_ni[period]):
+            assert cash_ni[period] == pytest.approx(income_ni[period]), (
+                data_ticker,
+                period,
+            )
     if CASH_CHANGE in set(base.cashflow.frame["concept"]):
-        assert _value(adjusted, "cashflow", CASH_CHANGE, period) == pytest.approx(
-            _value(base, "cashflow", CASH_CHANGE, period)
+        assert np.allclose(
+            _row_values(adjusted, "cashflow", CASH_CHANGE).fillna(0),
+            _row_values(base, "cashflow", CASH_CHANGE).fillna(0),
         ), data_ticker
 
 

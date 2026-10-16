@@ -8,6 +8,8 @@
   --header-bg: #eef2f7;
   --row-hover: #f3f6fa;
   --accent-soft: #eef4ff;
+  --warn: #92400e;
+  --warn-soft: #fef3c7;
 }
 
 [hidden] {
@@ -156,6 +158,11 @@ tbody tr:hover td:first-child {
   background: var(--accent-soft);
   color: var(--accent);
   font-size: 0.8125rem;
+}
+
+.adjustments-note-skipped {
+  background: var(--warn-soft);
+  color: var(--warn);
 }
 
 tbody tr.row-adjusted td {

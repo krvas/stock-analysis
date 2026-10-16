@@ -247,6 +247,18 @@ to `/wizard/{ticker}/{page_slug}/{subpage_slug}` →
 `wizard_pages/adjustments_context.py::_apply_saved_opex_to_capex_preferences`.
 The adjustment engine (`src/adjustments`) restates statements from saved
 prefs; pages read it through `src/web/adjusted_statements.py`.
+`apply_adjustments(base, specs, until=None)` returns an `AdjustmentRun`
+(`adjustments/base.py`): `statements`, the `applied` specs, and `skipped`
+(`SkippedSpec(spec, reason)`). A spec is skipped when its type raises
+`KeyError`/`ValueError` or its `AdjustmentResult` changes nothing; a type
+reports a part it could not apply in `AdjustmentResult.skipped` (opex-to-capex:
+a saved row id missing from the filing) and the part that did in
+`AdjustmentResult.applied_params`, so a partly applied spec is in `applied`
+narrowed to that part and in `skipped` once per missing part.
+`load_for_basis` returns the run; `specs.describe(run)` builds the
+`_adjustments_note` context, `{"applied": [...], "skipped": [...]}`, which
+says "Adjusted for" only for what applied (counts included) and names each
+skipped part by its type's `LABEL` and reason, with no count. A type's `describe` returning None leaves its spec out of both.
 
 **Settings** (`src/web/settings.py`, `src/web/routes/settings.py`). A Setting
 is a display choice (CONTEXT.md). `SETTINGS` defines each once (id, label,

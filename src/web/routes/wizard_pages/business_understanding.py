@@ -70,7 +70,7 @@ def balance_sheet_size_context(ticker: str, settings: Settings) -> dict[str, Any
     balance = loaded.statements.balance
     context: dict[str, Any] = {
         "basis": settings.basis,
-        "adjustments": describe(loaded.specs),
+        "adjustments": describe(loaded),
         "as_of": settings.period_at("current_period", balance.periods),
     }
     if context["as_of"] is None:
@@ -110,7 +110,7 @@ def fund_flow_context(ticker: str, settings: Settings) -> dict[str, Any]:
     previous = settings.period_at("previous_period", balance.periods)
     context: dict[str, Any] = {
         "basis": settings.basis,
-        "adjustments": describe(loaded.specs),
+        "adjustments": describe(loaded),
     }
     if current is None or previous is None or current == previous:
         return context | {"not_enough_periods": True}

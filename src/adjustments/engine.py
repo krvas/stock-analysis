@@ -1,7 +1,9 @@
 """Apply adjustment specs to a reported :class:`StatementSet`.
 
-``apply_adjustments(base, specs, until=None)`` returns a new, adjusted set;
-``base`` is never mutated. Each type returns inserted rows and value
+``apply_adjustments(base, specs, until=None)`` returns an
+:class:`AdjustmentRun`: the adjusted set plus which specs applied and which
+were skipped and why (a type raised, or its result changed nothing); ``base``
+is never mutated. Each type returns inserted rows and value
 overrides; the engine wires inserted rows into each period's calc tree and
 recomputes every dirty ancestor as ``Σ weight·child + residual`` (residual
 from the *reported* statement), so zero specs reproduce reported values
@@ -18,7 +20,13 @@ from collections.abc import Iterable, Sequence
 import numpy as np
 import pandas as pd
 
-from src.adjustments.base import AdjustmentResult, AdjustmentSpec, NewRow
+from src.adjustments.base import (
+    AdjustmentResult,
+    AdjustmentRun,
+    AdjustmentSpec,
+    NewRow,
+    SkippedSpec,
+)
 from src.adjustments.registry import ADJUSTMENT_ORDER, get_adjustment_type
 from src.api.edgartools.standard_terms import NET_INCOME_CONCEPTS
 from src.models.calc_residuals import calc_residuals
@@ -31,6 +39,8 @@ from src.models.statement import (
 )
 
 logger = logging.getLogger(__name__)
+
+NO_EFFECT = "it changed nothing in these statements"
 
 
 def ordered_specs(
@@ -47,20 +57,39 @@ def apply_adjustments(
     base: StatementSet,
     specs: Sequence[AdjustmentSpec],
     until: str | None = None,
-) -> StatementSet:
+) -> AdjustmentRun:
     residuals = {st: _residual_lookup(base.get(st)) for st in STATEMENT_TYPES}
     current = base
+    applied: list[AdjustmentSpec] = []
+    skipped: list[SkippedSpec] = []
     for spec in ordered_specs(specs, until):
         adjustment = get_adjustment_type(spec.type_id)
         try:
             result = adjustment.apply(current, spec)
         except (KeyError, ValueError) as exc:
-            logger.warning("Skipping %s adjustment: %s", spec.type_id, exc)
+            reason = _skip_reason(exc)
+            logger.warning("Skipping %s adjustment: %s", spec.type_id, reason)
+            skipped.append(SkippedSpec(spec, reason))
+            continue
+        skipped.extend(SkippedSpec(spec, reason) for reason in result.skipped)
+        if not result.has_effect():
+            if not result.skipped:
+                skipped.append(SkippedSpec(spec, NO_EFFECT))
             continue
         current = _apply_result(
             current, result, residuals, f"adjustment:{spec.type_id}"
         )
-    return current
+        if result.applied_params is not None:
+            spec = AdjustmentSpec(spec.type_id, result.applied_params)
+        applied.append(spec)
+    return AdjustmentRun(current, tuple(applied), tuple(skipped))
+
+
+def _skip_reason(exc: KeyError | ValueError) -> str:
+    detail = str(exc.args[0]) if exc.args else type(exc).__name__
+    if isinstance(exc, KeyError):
+        return f"could not find {detail} in these statements"
+    return detail
 
 
 def _residual_lookup(statement: Statement) -> dict[tuple[str, str], float]:

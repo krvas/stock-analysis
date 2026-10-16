@@ -70,13 +70,13 @@ def _memo(ss: StatementSet, concept: str) -> dict[str, float | None]:
 
 def _run(params: dict | None = None, *extra: AdjustmentSpec) -> StatementSet:
     specs = [*extra, AdjustmentSpec(TYPE_ID, params or {})]
-    return apply_adjustments(_statements(), specs)
+    return apply_adjustments(_statements(), specs).statements
 
 
 def test_saved_defaults_reproduce_total_assets_in_every_period() -> None:
     specs = from_prefs(pd.DataFrame())
     assert specs == [AdjustmentSpec(TYPE_ID, {})]
-    adjusted = apply_adjustments(_statements(), specs)
+    adjusted = apply_adjustments(_statements(), specs).statements
     expected = {P1: 175.0, P2: 136.0, P3: None}
     assert _memo(adjusted, GROSS_CONCEPT) == expected
     assert _memo(adjusted, NET_CONCEPT) == expected
@@ -138,7 +138,7 @@ def test_fund_flow_leaves_out_the_memo_rows() -> None:
 def test_stage_before_assets_in_use_has_no_memo_rows() -> None:
     staged = apply_adjustments(
         _statements(), [AdjustmentSpec(TYPE_ID, {})], until=TYPE_ID
-    )
+    ).statements
     concepts = set(staged.balance.frame["concept"])
     assert not concepts & {GROSS_CONCEPT, NET_CONCEPT}
 
@@ -159,19 +159,24 @@ def test_default_spec_joins_saved_specs_of_other_types() -> None:
 
 def test_describe_counts_choices_that_differ_from_the_defaults() -> None:
     params = {"Cash": 100.0, "Construction": 0.0, "Payables": 1.0}
-    [label] = describe([AdjustmentSpec(TYPE_ID, params)])
-    assert label["label"] == "Assets in use: 2 line(s) changed"
+    note = describe(apply_adjustments(_statements(), [AdjustmentSpec(TYPE_ID, params)]))
+    assert note == {
+        "applied": [{"type": TYPE_ID, "label": "Assets in use: 2 line(s) changed"}],
+        "skipped": [],
+    }
 
 
 @pytest.mark.parametrize("params", [{}, {"Cash": 100.0, "Payables": 100.0}])
 def test_spec_with_no_choice_off_the_defaults_is_left_out_of_the_note(
     params: dict,
 ) -> None:
-    assert describe([AdjustmentSpec(TYPE_ID, params)]) == []
+    run = apply_adjustments(_statements(), [AdjustmentSpec(TYPE_ID, params)])
+    assert describe(run) == {"applied": [], "skipped": []}
 
 
 def test_default_spec_with_no_saved_choices_is_left_out_of_the_note() -> None:
-    assert describe(from_prefs(pd.DataFrame())) == []
+    run = apply_adjustments(_statements(), from_prefs(pd.DataFrame()))
+    assert describe(run) == {"applied": [], "skipped": []}
 
 
 def test_balance_sheet_without_total_assets_gets_no_memo_rows() -> None:
@@ -185,15 +190,16 @@ def test_balance_sheet_without_total_assets_gets_no_memo_rows() -> None:
         ),
         cashflow=make_statement(_income_frame(), "cashflow"),
     )
-    adjusted = apply_adjustments(ss, [AdjustmentSpec(TYPE_ID, {})])
-    concepts = set(adjusted.balance.frame["concept"])
+    run = apply_adjustments(ss, [AdjustmentSpec(TYPE_ID, {})])
+    concepts = set(run.statements.balance.frame["concept"])
     assert not concepts & {GROSS_CONCEPT, NET_CONCEPT}
+    assert [s.reason for s in run.skipped] == ["balance sheet has no total assets"]
 
 
 @pytest.mark.data
 def test_defaults_reproduce_total_assets_on_test_tickers(data_ticker: str) -> None:
     base = load_statement_set(data_ticker, "annual")
-    balance = apply_adjustments(base, from_prefs(pd.DataFrame())).balance
+    balance = apply_adjustments(base, from_prefs(pd.DataFrame())).statements.balance
     frame = balance.frame.set_index("row_id")
     for period in base.balance.periods:
         total = frame.at[A, period] if A in frame.index else None
