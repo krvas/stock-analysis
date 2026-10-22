@@ -316,14 +316,20 @@ def _git(cwd: Path, *args: str) -> None:
 def test_a_run_from_a_worktree_logs_to_the_main_checkout(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A worktree's logs/ is deleted with it, so the log lives in the main checkout."""
+    """A worktree's logs/ is deleted with it, so the log lives in the main checkout.
+
+    ``git rebase -x`` exports GIT_DIR; the log must not follow it. Pointing it
+    at a throwaway repo keeps a failure from writing to this repo's log."""
     main = tmp_path / "main"
-    main.mkdir()
-    _git(main, "init", "-q")
+    other = tmp_path / "other"
+    for repo in (main, other):
+        repo.mkdir()
+        _git(repo, "init", "-q")
     _git(main, "commit", "-q", "--allow-empty", "-m", "root")
     worktree = main / ".claude" / "worktrees" / "w"
     _git(main, "worktree", "add", "-q", str(worktree))
     monkeypatch.setattr(src.config, "PROJECT_ROOT", worktree)
+    monkeypatch.setenv("GIT_DIR", str(other / ".git"))
     try:
         reloaded = importlib.reload(jd)
         reloaded.run("findings", {"findings": [{"id": 1}], "intent_notes": ""}, None)
@@ -333,6 +339,7 @@ def test_a_run_from_a_worktree_logs_to_the_main_checkout(
     logged = main / "logs" / "jev" / "decisions.jsonl"
     assert json.loads(logged.read_text())["decision"] == "human"
     assert not (worktree / "logs").exists()
+    assert not (other / "logs").exists()
 
 
 # the jev skill's triggers
