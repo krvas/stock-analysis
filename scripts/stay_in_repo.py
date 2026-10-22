@@ -156,6 +156,11 @@ def command_violation(command: str, cwd: Path, repo: Path) -> str | None:
     try:
         segments = list(_segments(command))
     except ValueError:
+        # Bash runs every complete line before the one it cannot parse.
+        lines = command.splitlines()
+        for line in lines if len(lines) > 1 else []:
+            if reason := command_violation(line, cwd, repo):
+                return reason
         return None
     for segment in segments:
         if segment[0] == "cd":
