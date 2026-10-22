@@ -46,7 +46,10 @@ STASH_FIX = (
 _SEPARATOR_CHARS = frozenset("&|;()\n")
 _SHELLS = frozenset({"bash", "sh", "zsh"})
 _APP_PROGRAMS = frozenset({"uvicorn", "serve.py"})
-_COMMAND_PREFIXES = frozenset({"exec", "nohup", "env", "time", "command"})
+_COMMAND_PREFIXES = frozenset({"exec", "nohup", "env", "time", "command", "sudo"})
+_SHELL_KEYWORDS = frozenset(
+    {"if", "then", "elif", "else", "do", "while", "until", "{", "!"}
+)
 _HEREDOC = re.compile(r"(?<!<)<<(-?)\s*(['\"]?)(\w+)\2")
 _WORKTREE_OPTIONS_WITH_VALUE = frozenset({"-b", "-B", "--reason"})
 _GIT_OPTIONS_WITH_VALUE = frozenset(
@@ -111,11 +114,22 @@ def _in_agent_worktree(path: Path) -> bool:
     )
 
 
+def _program_words(segment: list[str]) -> list[str]:
+    """``segment`` from the program it runs: no prefix, assignment or keyword."""
+    words = list(segment)
+    while words and (
+        words[0] in _COMMAND_PREFIXES or words[0] in _SHELL_KEYWORDS or "=" in words[0]
+    ):
+        words.pop(0)
+    return words
+
+
 def _git_stash_cwd(segment: list[str], cwd: Path) -> Path | None:
     """The directory a ``git stash`` that writes refs/stash runs in; or None."""
-    if Path(segment[0]).name != "git":
+    words = _program_words(segment)
+    if not words or Path(words[0]).name != "git":
         return None
-    args = iter(segment[1:])
+    args = iter(words[1:])
     for arg in args:
         if arg == "-C":
             cwd = cwd / next(args, "")
@@ -130,9 +144,7 @@ def _git_stash_cwd(segment: list[str], cwd: Path) -> Path | None:
 
 
 def _launches_app(segment: list[str]) -> bool:
-    words = list(segment)
-    while words and (words[0] in _COMMAND_PREFIXES or "=" in words[0]):
-        words.pop(0)
+    words = _program_words(segment)
     if words and Path(words[0]).name.startswith("python"):
         words = [word for word in words[1:] if not word.startswith("-")]
     return bool(words) and Path(words[0]).name in _APP_PROGRAMS
