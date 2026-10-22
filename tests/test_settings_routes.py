@@ -2,15 +2,18 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from unittest.mock import patch
 
+import pandas as pd
 import pytest
 from fastapi.testclient import TestClient
 from httpx import Response
 
+from src.models.statement import StatementSet
 from src.web import adjusted_statements
 from src.web.app import app
+from tests.statement_fixtures import _row, make_statement_set
 from tests.test_statement_pages import P1, P2, P3, _statement_set
 
 FUND_FLOW = "/wizard/AAPL/business-understanding/fund-flow"
@@ -183,3 +186,38 @@ def test_nav_lists_sub_pages_only_inside_a_wizard_page(client: TestClient) -> No
     assert FUND_FLOW in subtabs
     assert _subtabs(client.get("/statements/AAPL/income").text) == []
     assert _subtabs(client.get("/wizard/AAPL").text) == []
+
+
+def _owner_earnings_set() -> StatementSet:
+    values = {P1: 10.0, P2: 9.0, P3: 8.0}
+    pretax = _row(
+        "Pretax", "Pretax income", standard_concept="PretaxIncomeLoss", **values
+    )
+    dep = _row("Dep", "Depreciation", standard_concept="DepreciationExpense", **values)
+    return make_statement_set(pd.DataFrame([pretax, dep]))
+
+
+@pytest.mark.parametrize(
+    ("url", "statements"),
+    [
+        ("/wizard/AAPL/adjustments/opex-to-capex", _statement_set),
+        ("/wizard/AAPL/adjustments/owner-earnings", _owner_earnings_set),
+    ],
+)
+def test_adjustment_page_link_opens_the_adjusted_statements(
+    client: TestClient, url: str, statements: Callable[[], StatementSet]
+) -> None:
+    with patch.object(
+        adjusted_statements, "load_statement_set", return_value=statements()
+    ):
+        page = client.get(url).text
+        form = re.search(
+            r'<form class="wizard-next-link" method="post" action="([^"]+)">(.*?)</form>',
+            page,
+            re.DOTALL,
+        )
+        assert form, "adjusted statements link missing"
+        fields = dict(re.findall(r'name="([^"]+)" value="([^"]+)"', form.group(2)))
+        response = client.post(form.group(1), data=fields)
+    assert response.url.path == "/statements/AAPL/income"
+    assert ADJUSTED_NOTE in response.text

@@ -24,7 +24,5 @@
 {% call form_macro.form(post_url, form_id='owner-earnings-form', wizard_save='owner-earnings', data_table_id='oe-table') %}
 {{ table_macro.table('oe-table', oe_table) }}
 {% endcall %}
-<p class="wizard-next-link">
-  <a href="/statements/{{ ticker }}">View statements →</a>
-</p>
+{% include "wizard/adjustments/_adjusted_statements_link.html" %}
 {% endblock %}
