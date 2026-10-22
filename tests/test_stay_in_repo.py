@@ -107,6 +107,12 @@ def test_stash_into_a_worktree_with_dash_c_is_refused() -> None:
     assert command_violation(f"cd '{WORKTREE}' && git stash", MAIN, MAIN) is not None
 
 
+def test_a_stash_before_an_unparseable_line_is_refused() -> None:
+    """Bash runs every complete line before the one with an open quote."""
+    assert command_violation("git stash\necho 'x", WORKTREE, MAIN) is not None
+    assert command_violation("echo 'x", WORKTREE, MAIN) is None
+
+
 @pytest.mark.parametrize(
     ("command", "cwd"),
     [
