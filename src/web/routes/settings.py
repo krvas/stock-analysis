@@ -1,14 +1,13 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
-from dataclasses import dataclass
-from typing import Any, Final, Protocol
+from typing import Any, Final
 from urllib.parse import parse_qsl
 
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 from src.config import SETTINGS_COOKIE_MAX_AGE
+from src.web.page_types import NavContext
 from src.web.settings import (
     Refused,
     Saved,
@@ -29,26 +28,6 @@ _ERROR_COOKIE_MAX_AGE: Final = 60
 
 def settings_for(request: Request, decl: SettingsDecl) -> Settings:
     return resolve(request.cookies.get(_SETTINGS_COOKIE), decl)
-
-
-class NavSubPage(Protocol):
-    @property
-    def slug(self) -> str: ...
-    @property
-    def title(self) -> str: ...
-
-
-class NavPage(NavSubPage, Protocol):
-    @property
-    def subpages(self) -> Sequence[NavSubPage]: ...
-
-
-@dataclass(frozen=True)
-class NavContext:
-    prefix: str
-    pages: Sequence[NavPage]
-    page: NavPage | None = None
-    subpage: NavSubPage | None = None
 
 
 def render_with_settings(

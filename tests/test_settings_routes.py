@@ -169,3 +169,17 @@ def test_greyed_global_settings_show_their_reason(
     html = client.get(url).text
     for reason in reasons:
         assert re.search(rf'class="settings-reason"[^>]*>{reason}<', html)
+
+
+def _subtabs(html: str) -> list[str]:
+    return re.findall(
+        r'class="page-nav-tab page-nav-subtab[^"]*"\s+href="([^"]+)"', html
+    )
+
+
+def test_nav_lists_sub_pages_only_inside_a_wizard_page(client: TestClient) -> None:
+    subtabs = _subtabs(client.get(FUND_FLOW).text)
+    assert BALANCE_SHEET_SIZE in subtabs
+    assert FUND_FLOW in subtabs
+    assert _subtabs(client.get("/statements/AAPL/income").text) == []
+    assert _subtabs(client.get("/wizard/AAPL").text) == []

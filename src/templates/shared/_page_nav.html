@@ -10,9 +10,9 @@
     {% endfor %}
     <button type="button" class="page-nav-gear" data-settings-open aria-haspopup="dialog" aria-controls="settings-drawer" aria-label="Settings" title="Settings">⚙</button>
   </div>
-  {% if nav.page and nav.page.subpages %}
+  {% if nav.subpages %}
     <div class="page-nav-row page-nav-subpages" aria-label="{{ nav.page.title }} sub-pages">
-      {% for nav_subpage in nav.page.subpages %}
+      {% for nav_subpage in nav.subpages %}
         {% set is_current = nav.subpage and nav.subpage.slug == nav_subpage.slug %}
         <a
           class="page-nav-tab page-nav-subtab{% if is_current %} is-active{% endif %}"

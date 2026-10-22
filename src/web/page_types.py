@@ -1,4 +1,4 @@
-"""The shapes of wizard and statement pages.
+"""The shapes of wizard and statement pages and of the nav that lists them.
 
 Pure types; ``src/web/wizard_registry.py`` and
 ``src/web/statements_registry.py`` hold the actual pages.
@@ -6,9 +6,9 @@ Pure types; ``src/web/wizard_registry.py`` and
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing import Any, Final, Literal
+from typing import Any, Final, Literal, Protocol
 
 from src.models.statement import StatementType
 from src.web.settings import NO_SETTINGS, Settings, SettingsDecl
@@ -48,4 +48,19 @@ class StatementPage:
     heading: str
     order: int
     settings: SettingsDecl
-    subpages: tuple[()] = ()
+
+
+class NavItem(Protocol):
+    @property
+    def slug(self) -> str: ...
+    @property
+    def title(self) -> str: ...
+
+
+@dataclass(frozen=True)
+class NavContext:
+    prefix: str
+    pages: Sequence[NavItem]
+    page: NavItem | None = None
+    subpages: Sequence[NavItem] = ()
+    subpage: NavItem | None = None
