@@ -36,6 +36,20 @@ PAST_STASHES = [
     "git stash drop",
     f'git -C "{WORKTREE}" stash apply',
 ]
+# The same stash behind a prefix, an assignment or a shell keyword.
+PREFIXED_STASHES = [
+    "GIT_EDITOR=true git stash pop",
+    "env git stash",
+    "command git stash",
+    "time git stash",
+    "nohup git stash",
+    "exec git stash",
+    "sudo git stash",
+    "if true; then git stash; fi",
+    "{ git stash; }",
+    "! git stash",
+    "for i in 1; do git stash; done",
+]
 PAST_LAUNCH_ENTRY = {
     "name": "web-settings-wt",
     "runtimeExecutable": "bash",
@@ -80,7 +94,7 @@ def test_commands_inside_the_repo_are_allowed(command: str) -> None:
     assert command_violation(command, REPO, REPO) is None
 
 
-@pytest.mark.parametrize("command", PAST_STASHES)
+@pytest.mark.parametrize("command", PAST_STASHES + PREFIXED_STASHES)
 def test_stash_in_an_agent_worktree_is_refused(command: str) -> None:
     reason = command_violation(command, WORKTREE, MAIN)
     assert reason is not None
