@@ -112,3 +112,9 @@ implementation of the same job sitting next to the real one.
 check whether it's still true — a doc note can describe a real deferral or it
 can be quietly documenting a shortcut nobody corrected. If you're not sure
 which, ask rather than assuming the doc's framing is still accurate.
+
+## Rules from operator corrections
+
+`.claude/rules.md` pairs each rule an operator correction produced with what
+enforces it. Read it when you run `/correct` or an operator corrects you, and
+add new rules there, not here.
