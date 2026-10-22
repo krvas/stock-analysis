@@ -10,7 +10,8 @@ the key is missing, the API fails, or an item got no answer. All items of one
 run go to Jev in a single request.
 
 Writes ``<input stem>.jev.json`` beside the input and appends one JSON line
-per result to ``logs/jev/decisions.jsonl``. Every constant below the imports
+per result to the main checkout's ``logs/jev/decisions.jsonl``, also when run
+from a worktree, whose ``logs/`` is deleted with it. Every constant below the imports
 can be overridden by the environment variable of the same name prefixed with
 ``JEV_`` (``.env`` is read on import).
 
@@ -23,6 +24,7 @@ import argparse
 import json
 import os
 import re
+import subprocess
 import sys
 import time
 import urllib.error
@@ -52,7 +54,25 @@ COMMENTS_MIN_PROBABILITY = float(_setting("COMMENTS_MIN_PROBABILITY", "0.6"))
 EFFORT_MIN_CONFIDENCE = float(_setting("EFFORT_MIN_CONFIDENCE", "0.5"))
 ARENA_EXCLUDE = float(_setting("ARENA_EXCLUDE", "0.85"))
 
-LOG_PATH = PROJECT_ROOT / "logs" / "jev" / "decisions.jsonl"
+
+def _main_checkout(root: Path) -> Path:
+    """The main checkout that ``root`` (maybe a worktree) belongs to."""
+    try:
+        common_dir = subprocess.run(
+            ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
+            cwd=root,
+            # GIT_DIR (set by git rebase -x) would win over cwd.
+            env={k: v for k, v in os.environ.items() if not k.startswith("GIT_")},
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout
+    except (OSError, subprocess.CalledProcessError):
+        return root
+    return Path(common_dir.strip()).parent
+
+
+LOG_PATH = _main_checkout(PROJECT_ROOT) / "logs" / "jev" / "decisions.jsonl"
 _RETRY_STATUSES = {429, 529}
 
 Item = dict[str, Any]
