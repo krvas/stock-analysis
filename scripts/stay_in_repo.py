@@ -4,9 +4,10 @@ Two checks share one notion of "inside the repo":
 
 - ``command_violation``: a Claude Code ``PreToolUse`` hook on Bash (wired in
   ``.claude/settings.json``) refuses a command that adds a git worktree
-  outside the repo or starts the web app from outside it. It also refuses
-  ``git stash`` inside an agent worktree: ``refs/stash`` is shared by every
-  worktree, so parallel agents pop and drop each other's entries.
+  anywhere but ``<repo>/.claude/worktrees/`` or starts the web app from
+  outside the repo. It also refuses ``git stash`` inside an agent worktree:
+  ``refs/stash`` is shared by every worktree, so parallel agents pop and drop
+  each other's entries.
 - ``launch_config_violations``: ``tests/test_stay_in_repo.py`` fails when a
   ``.claude/launch.json`` entry would start the browser pane's server outside
   the repo.
@@ -29,7 +30,7 @@ from pathlib import Path
 from typing import Any
 
 WORKTREE_FIX = (
-    "create worktrees inside the repo: "
+    "create worktrees in .claude/worktrees, where the stash guard sees them: "
     "git worktree add .claude/worktrees/<name> -b <branch> <base> (gitignored)"
 )
 LAUNCH_FIX = (
@@ -175,8 +176,9 @@ def command_violation(command: str, cwd: Path, repo: Path) -> str | None:
         if stash_cwd is not None and _in_agent_worktree(stash_cwd):
             return f"git stash in worktree {os.path.normpath(stash_cwd)}; {STASH_FIX}"
         target = _worktree_target(segment)
-        if target is not None and not _inside(cwd / target, repo):
-            return f"worktree {target!r} is outside {repo}; {WORKTREE_FIX}"
+        worktrees = repo / ".claude" / "worktrees"
+        if target is not None and not _inside(cwd / target, worktrees):
+            return f"worktree {target!r} is outside {worktrees}; {WORKTREE_FIX}"
         if _launches_app(segment):
             if not _inside(cwd, repo):
                 return f"starts the app from {os.path.normpath(cwd.absolute())}; {LAUNCH_FIX}"
