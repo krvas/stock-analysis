@@ -1,6 +1,6 @@
 ---
 name: jev
-description: Use after picking a pstack playbook (for yourself or a delegate) and when briefing a delegate that triages review findings. Hands those and a few other cheap pstack decisions to Jev (TypeSafe) instead of reasoning through them - logging the playbook pick, triaging bloat-reviewer findings, classifying PR review comments during Babysit, pre-filtering arena candidates, and picking a delegate's reasoning effort or model tier when the override sheet leaves it open.
+description: Hand a few cheap pstack decisions to Jev (TypeSafe) instead of reasoning through them - triaging bloat-reviewer findings, classifying PR review comments during Babysit, logging a playbook pick, picking a delegate's reasoning effort, pre-filtering arena candidates, and picking a delegate's model tier. Use when one of those decisions comes up in this repo.
 ---
 
 # Jev for cheap decisions
@@ -11,15 +11,10 @@ choice. Use it for the decisions below, where one Jev call costs far fewer
 tokens than reasoning through the choice yourself.
 
 Each runs as `make jev KIND=<kind> INPUT=<path.json>`. It writes
-`<input stem>.jev.json` beside the input and logs every result to the main
-checkout's `logs/jev/decisions.jsonl`, also when run from a worktree. `scripts/jev_decide.py --help` lists each kind's
+`<input stem>.jev.json` beside the input and logs every result to
+`logs/jev/decisions.jsonl`. `scripts/jev_decide.py --help` lists each kind's
 input format. The thresholds and API settings sit at the top of that script;
 override any of them from `.env` with its `JEV_` variable.
-
-Under fully pinned model roles in `~/.claude/pstack-models.md`, only the
-`findings`, `comments`, `playbook` and `arena` kinds apply. A delegate's
-branch must contain `scripts/jev_decide.py`; if it does not, say that Jev is
-unavailable rather than falling back silently.
 
 ## What to do with each decision
 

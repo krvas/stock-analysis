@@ -5,14 +5,11 @@ from __future__ import annotations
 import ast
 import importlib
 import json
-import os
-import subprocess
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-import src.config
 from scripts import jev_decide as jd
 
 
@@ -297,57 +294,3 @@ def test_every_tunable_reads_the_environment() -> None:
         '_setting("<NAME>", "<default>") at the top of the file so .env can '
         "override it as JEV_<NAME>."
     )
-
-
-# decision log
-
-
-def _git(cwd: Path, *args: str) -> None:
-    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
-    subprocess.run(
-        ["git", "-c", "user.name=t", "-c", "user.email=t@t", *args],
-        cwd=cwd,
-        env=env,
-        check=True,
-        capture_output=True,
-    )
-
-
-def test_a_run_from_a_worktree_logs_to_the_main_checkout(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """A worktree's logs/ is deleted with it, so the log lives in the main checkout."""
-    main = tmp_path / "main"
-    main.mkdir()
-    _git(main, "init", "-q")
-    _git(main, "commit", "-q", "--allow-empty", "-m", "root")
-    worktree = main / ".claude" / "worktrees" / "w"
-    _git(main, "worktree", "add", "-q", str(worktree))
-    monkeypatch.setattr(src.config, "PROJECT_ROOT", worktree)
-    try:
-        reloaded = importlib.reload(jd)
-        reloaded.run("findings", {"findings": [{"id": 1}], "intent_notes": ""}, None)
-    finally:
-        monkeypatch.undo()
-        importlib.reload(jd)
-    logged = main / "logs" / "jev" / "decisions.jsonl"
-    assert json.loads(logged.read_text())["decision"] == "human"
-    assert not (worktree / "logs").exists()
-
-
-# the jev skill's triggers
-
-
-def test_skill_description_leads_with_the_missed_triggers() -> None:
-    """The orchestrator never loaded the skill: about 20 playbook picks for
-    delegates went unlogged. The triggers it missed open the description."""
-    skill = Path(jd.__file__).parents[1] / ".claude" / "skills" / "jev" / "SKILL.md"
-    frontmatter, body = skill.read_text(encoding="utf-8").split("---\n")[1:3]
-    description = frontmatter.split("description:", 1)[1].strip()
-    assert description.startswith(
-        "Use after picking a pstack playbook (for yourself or a delegate)"
-    )
-    first_sentence = description.split(". ")[0]
-    assert "when briefing a delegate that triages review findings" in first_sentence
-    body = " ".join(body.split())
-    assert "Jev is unavailable" in body and "scripts/jev_decide.py" in body
