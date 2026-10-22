@@ -61,6 +61,8 @@ def _main_checkout(root: Path) -> Path:
         common_dir = subprocess.run(
             ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
             cwd=root,
+            # GIT_DIR (set by git rebase -x) would win over cwd.
+            env={k: v for k, v in os.environ.items() if not k.startswith("GIT_")},
             check=True,
             capture_output=True,
             text=True,
