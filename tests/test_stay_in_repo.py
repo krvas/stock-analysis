@@ -65,6 +65,7 @@ PAST_LAUNCH_ENTRY = {
         PAST_LAUNCH,
         f"bash -c {json.dumps(PAST_LAUNCH)}",
         "git worktree add /tmp/elsewhere HEAD",
+        "git worktree add scratch/w -b x",
         "../stock-analysis-wt-settings/.venv/bin/uvicorn src.web.app:app",
         "cd && .venv/bin/python .claude/skills/verify/scripts/serve.py r 8790",
         f"cd /tmp\n.venv/bin/python {SERVE} r 8790",
