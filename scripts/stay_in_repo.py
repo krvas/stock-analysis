@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shlex
 import sys
 from collections.abc import Iterator, Mapping
@@ -34,9 +35,11 @@ LAUNCH_FIX = (
     ".venv/bin/python .claude/skills/verify/scripts/serve.py <run dir> <port> "
     "(see .claude/skills/verify/SKILL.md), or the `web` entry in .claude/launch.json"
 )
-_SEPARATORS = frozenset({"&&", "||", ";", "|", "&", "(", ")"})
+_SEPARATOR_CHARS = frozenset("&|;()\n")
 _SHELLS = frozenset({"bash", "sh", "zsh"})
-_APP_MARKERS = ("uvicorn", "serve.py", "src.web.app:app")
+_APP_PROGRAMS = frozenset({"uvicorn", "serve.py"})
+_COMMAND_PREFIXES = frozenset({"exec", "nohup", "env", "time", "command"})
+_HEREDOC = re.compile(r"(?<!<)<<(-?)\s*(['\"]?)(\w+)\2")
 _WORKTREE_OPTIONS_WITH_VALUE = frozenset({"-b", "-B", "--reason"})
 
 
@@ -46,12 +49,28 @@ def _inside(path: Path, repo: Path) -> bool:
     return normal.is_relative_to(os.path.normpath(repo.absolute()))
 
 
+def _without_heredoc_bodies(command: str) -> str:
+    kept: list[str] = []
+    pending: list[tuple[bool, str]] = []
+    for line in command.split("\n"):
+        if pending:
+            strip_tabs, word = pending[0]
+            if (line.lstrip("\t") if strip_tabs else line) == word:
+                pending.pop(0)
+            continue
+        kept.append(line)
+        pending = [(dash == "-", word) for dash, _, word in _HEREDOC.findall(line)]
+    return "\n".join(kept)
+
+
 def _segments(command: str) -> Iterator[list[str]]:
-    lexer = shlex.shlex(command, posix=True, punctuation_chars=True)
+    text = _without_heredoc_bodies(command).replace("\\\n", " ")
+    lexer = shlex.shlex(text, posix=True, punctuation_chars="();<>|&\n")
+    lexer.whitespace = " \t\r"
     lexer.whitespace_split = True
     segment: list[str] = []
     for token in lexer:
-        if token in _SEPARATORS:
+        if set(token) <= _SEPARATOR_CHARS:
             if segment:
                 yield segment
             segment = []
@@ -74,7 +93,12 @@ def _worktree_target(segment: list[str]) -> str | None:
 
 
 def _launches_app(segment: list[str]) -> bool:
-    return any(token.endswith(_APP_MARKERS) for token in segment)
+    words = list(segment)
+    while words and (words[0] in _COMMAND_PREFIXES or "=" in words[0]):
+        words.pop(0)
+    if words and Path(words[0]).name.startswith("python"):
+        words = [word for word in words[1:] if not word.startswith("-")]
+    return bool(words) and Path(words[0]).name in _APP_PROGRAMS
 
 
 def command_violation(command: str, cwd: Path, repo: Path) -> str | None:
