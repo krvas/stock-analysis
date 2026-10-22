@@ -38,12 +38,16 @@ def _cookie(**values: object) -> str:
 
 def test_defaults_on_a_fresh_browser() -> None:
     s = resolve(None, FUND_FLOW_LIKE)
-    assert (s.period, s.view, s.basis) == ("annual", "standard", "reported")
-    assert s.period_at("current_period", PERIODS) == PERIODS[0]
-    assert s.period_at("previous_period", PERIODS) == PERIODS[1]
+    assert (
+        s[GlobalSetting.PERIOD],
+        s[GlobalSetting.VIEW],
+        s[SubpageSetting.BASIS],
+    ) == ("annual", "standard", "reported")
+    assert s.period_at(SubpageSetting.CURRENT_PERIOD, PERIODS) == PERIODS[0]
+    assert s.period_at(SubpageSetting.PREVIOUS_PERIOD, PERIODS) == PERIODS[1]
     bss = resolve(None, SettingsDecl(uses=(SubpageSetting.ITEMS_PER_SIDE,)))
-    assert bss.items_per_side == 5
-    assert resolve(None, NO_SETTINGS).num_periods == 10
+    assert bss[SubpageSetting.ITEMS_PER_SIDE] == 5
+    assert resolve(None, NO_SETTINGS)[GlobalSetting.NUM_PERIODS] == 10
 
 
 def test_invalid_values_fall_back_per_field() -> None:
@@ -51,16 +55,28 @@ def test_invalid_values_fall_back_per_field() -> None:
         _cookie(period="weekly", num_periods=3, view=7, basis="adjusted", junk=1),
         SettingsDecl(uses=(SubpageSetting.BASIS,)),
     )
-    assert (s.period, s.num_periods, s.view, s.basis) == (
+    assert (
+        s[GlobalSetting.PERIOD],
+        s[GlobalSetting.NUM_PERIODS],
+        s[GlobalSetting.VIEW],
+        s[SubpageSetting.BASIS],
+    ) == (
         "annual",
         3,
         "standard",
         "adjusted",
     )
     out_of_range = resolve(_cookie(num_periods=0, view="detailed"), NO_SETTINGS)
-    assert (out_of_range.num_periods, out_of_range.view) == (10, "detailed")
-    assert resolve(_cookie(num_periods=True), NO_SETTINGS).num_periods == 10
-    assert resolve(_cookie(num_periods="4"), NO_SETTINGS).num_periods == 4
+    assert (
+        out_of_range[GlobalSetting.NUM_PERIODS],
+        out_of_range[GlobalSetting.VIEW],
+    ) == (10, "detailed")
+    assert (
+        resolve(_cookie(num_periods=True), NO_SETTINGS)[GlobalSetting.NUM_PERIODS] == 10
+    )
+    assert (
+        resolve(_cookie(num_periods="4"), NO_SETTINGS)[GlobalSetting.NUM_PERIODS] == 4
+    )
 
 
 @pytest.mark.parametrize(
@@ -68,19 +84,23 @@ def test_invalid_values_fall_back_per_field() -> None:
 )
 def test_broken_or_non_object_cookie_gives_defaults(raw: str) -> None:
     s = resolve(raw, NO_SETTINGS)
-    assert (s.period, s.num_periods, s.view) == ("annual", 10, "standard")
+    assert (
+        s[GlobalSetting.PERIOD],
+        s[GlobalSetting.NUM_PERIODS],
+        s[GlobalSetting.VIEW],
+    ) == ("annual", 10, "standard")
 
 
 def test_greyed_and_undeclared_reads_raise() -> None:
     s = resolve(None, FUND_FLOW_LIKE)
     with pytest.raises(SettingNotApplicable):
-        _ = s.num_periods
+        _ = s[GlobalSetting.NUM_PERIODS]
     with pytest.raises(SettingNotApplicable):
-        _ = s.items_per_side
+        _ = s[SubpageSetting.ITEMS_PER_SIDE]
     with pytest.raises(SettingNotApplicable):
         s.recent_periods(PERIODS)
     with pytest.raises(SettingNotApplicable):
-        resolve(None, NO_SETTINGS).period_at("current_period", PERIODS)
+        resolve(None, NO_SETTINGS).period_at(SubpageSetting.CURRENT_PERIOD, PERIODS)
 
 
 def test_recent_periods_clamps_to_cap_and_available() -> None:
@@ -97,18 +117,18 @@ def test_recent_periods_clamps_to_cap_and_available() -> None:
 
 def test_period_at_clamps_to_oldest_and_handles_empty() -> None:
     s = resolve(_cookie(current_period=30, previous_period=40), FUND_FLOW_LIKE)
-    assert s.period_at("current_period", PERIODS) == PERIODS[-1]
-    assert s.period_at("previous_period", PERIODS[:3]) == PERIODS[2]
-    assert s.period_at("current_period", []) is None
+    assert s.period_at(SubpageSetting.CURRENT_PERIOD, PERIODS) == PERIODS[-1]
+    assert s.period_at(SubpageSetting.PREVIOUS_PERIOD, PERIODS[:3]) == PERIODS[2]
+    assert s.period_at(SubpageSetting.CURRENT_PERIOD, []) is None
 
 
 def test_failing_rule_keeps_current_and_repairs_previous() -> None:
     raw = _cookie(current_period=3, previous_period=1)
     s = resolve(raw, FUND_FLOW_LIKE)
-    assert s.period_at("current_period", PERIODS) == PERIODS[3]
-    assert s.period_at("previous_period", PERIODS) == PERIODS[4]
+    assert s.period_at(SubpageSetting.CURRENT_PERIOD, PERIODS) == PERIODS[3]
+    assert s.period_at(SubpageSetting.PREVIOUS_PERIOD, PERIODS) == PERIODS[4]
     only_current = resolve(raw, SettingsDecl(uses=(SubpageSetting.CURRENT_PERIOD,)))
-    assert only_current.period_at("current_period", PERIODS) == PERIODS[3]
+    assert only_current.period_at(SubpageSetting.CURRENT_PERIOD, PERIODS) == PERIODS[3]
 
 
 def test_repaired_previous_stays_in_range_at_the_oldest_current() -> None:

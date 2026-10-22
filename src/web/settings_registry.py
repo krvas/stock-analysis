@@ -7,12 +7,13 @@ resolve, validate and render them live in ``src/web/settings.py``.
 from __future__ import annotations
 
 from enum import Enum
-from typing import Final, cast
+from typing import Final, Literal, cast, get_args
 
 from src.config import MAX_CACHE_QUARTERS, MAX_ITEMS_PER_SIDE
 from src.models.statement import PERIOD_TYPES, STATEMENT_VIEWS
 from src.web.setting_types import ChoiceSetting, CrossRule, IntSetting, Option
 
+Basis = Literal["reported", "adjusted"]
 MAX_OFFSET: Final = MAX_CACHE_QUARTERS - 1
 
 RULES: Final[tuple[CrossRule, ...]] = (
@@ -57,7 +58,7 @@ class SubpageSetting(Enum):
     BASIS = ChoiceSetting(
         "basis",
         "Basis",
-        (Option("reported", "Reported"), Option("adjusted", "Adjusted")),
+        tuple(Option(b, b.capitalize()) for b in get_args(Basis)),
         "reported",
     )
     CURRENT_PERIOD = IntSetting(

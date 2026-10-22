@@ -19,6 +19,7 @@ from src.models.statement import Statement, StatementView
 from src.models.table import ColumnSpec, Table, period_column_specs
 from src.web.adjusted_statements import load_for_basis
 from src.web.settings import Settings
+from src.web.settings_registry import GlobalSetting, SubpageSetting
 
 EQUITY_ROW_ID = "equity"
 VALUE_COLUMN = ColumnSpec(
@@ -35,7 +36,7 @@ def one_line_answers_context(ticker: str, settings: Settings) -> dict[str, Any]:
         return {"ai_pending": True}
     fields = type(result.answer).model_fields
     return {
-        "view": settings.view,
+        "view": settings[GlobalSetting.VIEW],
         "answers": [
             {"question": fields[name].description} | value.model_dump()
             for name, value in result.answer
@@ -91,19 +92,19 @@ def _side_table(items: list[dict[str, Any]], limit: int) -> dict[str, Any]:
 
 
 def balance_sheet_size_context(ticker: str, settings: Settings) -> dict[str, Any]:
-    loaded = load_for_basis(ticker, "annual", settings.basis)
+    loaded = load_for_basis(ticker, "annual", settings[SubpageSetting.BASIS])
     balance = loaded.statements.balance
     context: dict[str, Any] = {
-        "basis": settings.basis,
+        "basis": settings[SubpageSetting.BASIS],
         "adjustments": describe(loaded.specs),
-        "as_of": settings.period_at("current_period", balance.periods),
+        "as_of": settings.period_at(SubpageSetting.CURRENT_PERIOD, balance.periods),
     }
     if context["as_of"] is None:
         return context
     items = _snapshot_items(balance, context["as_of"])
     return context | {
         "sides": {
-            side: _side_table(rows, settings.items_per_side)
+            side: _side_table(rows, settings[SubpageSetting.ITEMS_PER_SIDE])
             for side, rows in items.items()
         }
     }
@@ -126,15 +127,17 @@ def fund_flow_table(
 
 
 def fund_flow_context(ticker: str, settings: Settings) -> dict[str, Any]:
-    loaded = load_for_basis(ticker, settings.period, settings.basis)
+    loaded = load_for_basis(
+        ticker, settings[GlobalSetting.PERIOD], settings[SubpageSetting.BASIS]
+    )
     balance = loaded.statements.balance
-    current = settings.period_at("current_period", balance.periods)
-    previous = settings.period_at("previous_period", balance.periods)
+    current = settings.period_at(SubpageSetting.CURRENT_PERIOD, balance.periods)
+    previous = settings.period_at(SubpageSetting.PREVIOUS_PERIOD, balance.periods)
     context: dict[str, Any] = {
-        "basis": settings.basis,
+        "basis": settings[SubpageSetting.BASIS],
         "adjustments": describe(loaded.specs),
     }
     if current is None or previous is None or current == previous:
         return context | {"not_enough_periods": True}
-    table = fund_flow_table(balance, settings.view, current, previous)
+    table = fund_flow_table(balance, settings[GlobalSetting.VIEW], current, previous)
     return context | {"fund_flow_table": table.serialize()}

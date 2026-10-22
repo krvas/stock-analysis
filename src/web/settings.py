@@ -4,23 +4,22 @@ import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from types import MappingProxyType
-from typing import Final, Literal, cast
+from typing import Final, Literal
 
 from src.config import MAX_PERIODS_BY_PERIOD
-from src.models.statement import PeriodType, StatementView
 from src.web.setting_types import ChoiceSetting, Option, SettingDef, SettingValue
 from src.web.settings_registry import RULES, GlobalSetting, SubpageSetting
 
 SETTINGS: Final[tuple[SettingDef, ...]] = tuple(
     s.value for s in (*GlobalSetting, *SubpageSetting)
 )
-GLOBAL_SETTING_IDS: Final[frozenset[str]] = frozenset(s.value.id for s in GlobalSetting)
+SettingKey = GlobalSetting | SubpageSetting
+_BY_ID: Final[Mapping[str, SettingKey]] = {
+    s.value.id: s for s in (*GlobalSetting, *SubpageSetting)
+}
 
 if len({s.id for s in SETTINGS}) != len(SETTINGS):
     raise RuntimeError("Setting ids must be unique")
-
-OffsetSettingId = Literal["current_period", "previous_period"]
-Basis = Literal["reported", "adjusted"]
 
 
 @dataclass(frozen=True)
@@ -40,10 +39,10 @@ class SettingsDecl:
             if not reason.strip():
                 raise ValueError(f"greyed {setting!r} needs a reason")
 
-    def applies(self, setting_id: str) -> bool:
-        if setting_id in GLOBAL_SETTING_IDS:
-            return all(s.value.id != setting_id for s in self.cannot_honour)
-        return any(s.value.id == setting_id for s in self.uses)
+    def applies(self, setting: SettingKey) -> bool:
+        if isinstance(setting, GlobalSetting):
+            return setting not in self.cannot_honour
+        return setting in self.uses
 
 
 NO_SETTINGS: Final = SettingsDecl()
@@ -58,40 +57,20 @@ class Settings:
     decl: SettingsDecl
     values: Mapping[str, SettingValue]
 
-    def _read(self, setting_id: str) -> SettingValue:
-        if not self.decl.applies(setting_id):
+    def __getitem__(self, setting: SettingKey) -> SettingValue:
+        if not self.decl.applies(setting):
             raise SettingNotApplicable(
-                f"read of {setting_id!r}, which this page's SettingsDecl greys "
+                f"read of {setting!r}, which this page's SettingsDecl greys "
                 "out or does not declare; declare it or stop reading it"
             )
-        return self.values[setting_id]
-
-    @property
-    def period(self) -> PeriodType:
-        return cast(PeriodType, self._read("period"))
-
-    @property
-    def num_periods(self) -> int:
-        return cast(int, self._read("num_periods"))
-
-    @property
-    def view(self) -> StatementView:
-        return cast(StatementView, self._read("view"))
-
-    @property
-    def basis(self) -> Basis:
-        return cast(Basis, self._read("basis"))
-
-    @property
-    def items_per_side(self) -> int:
-        return cast(int, self._read("items_per_side"))
+        return self.values[setting.value.id]
 
     def recent_periods(self, available: Sequence[str]) -> list[str]:
-        count = min(self.num_periods, MAX_PERIODS_BY_PERIOD[self.period])
-        return list(available[:count])
+        cap = MAX_PERIODS_BY_PERIOD[self[GlobalSetting.PERIOD]]
+        return list(available[: min(self[GlobalSetting.NUM_PERIODS], cap)])
 
-    def period_at(self, which: OffsetSettingId, available: Sequence[str]) -> str | None:
-        offset = cast(int, self._read(which))
+    def period_at(self, which: SubpageSetting, available: Sequence[str]) -> str | None:
+        offset = self[which]
         if not available:
             return None
         return available[min(offset, len(available) - 1)]
@@ -121,7 +100,7 @@ def resolve(raw_cookie: str | None, decl: SettingsDecl) -> Settings:
         for s in (*GlobalSetting, *decl.uses)
     }
     for rule in RULES:
-        if all(decl.applies(i) for i in rule.ids) and not rule.holds(values):
+        if all(decl.applies(_BY_ID[i]) for i in rule.ids) and not rule.holds(values):
             values |= rule.repair(values)
     return Settings(decl=decl, values=MappingProxyType(values))
 

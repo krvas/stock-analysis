@@ -14,7 +14,7 @@ from src.adjustments.specs import from_prefs
 from src.api.edgartools.source import load_statement_set
 from src.database.wizard_manager import WizardDatabaseManager
 from src.models.statement import PeriodType, StatementSet
-from src.web.settings import Basis
+from src.web.settings_registry import Basis
 
 # The wizard route layer only supports a single exchange for now; the DB
 # layer has a real exchange column, but nothing above it threads a value
