@@ -70,7 +70,9 @@ def _statement(slug: str, specs: list | None = None, **values: object) -> dict:
             adjusted_statements, "load_statement_set", return_value=_statement_set()
         ),
         patch.object(adjusted_statements, "load_specs", return_value=specs or []),
-        patch.object(adjusted_statements, "apply_adjustments", lambda ss, _: ss),
+        patch.object(
+            adjusted_statements, "apply_adjustments", lambda ss, _, until=None: ss
+        ),
     ):
         return statement_context(
             "AAPL", page, resolve(json.dumps(values), page.settings)
