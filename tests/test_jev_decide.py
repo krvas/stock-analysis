@@ -5,7 +5,6 @@ from __future__ import annotations
 import ast
 import importlib
 import json
-import os
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -303,11 +302,9 @@ def test_every_tunable_reads_the_environment() -> None:
 
 
 def _git(cwd: Path, *args: str) -> None:
-    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
     subprocess.run(
         ["git", "-c", "user.name=t", "-c", "user.email=t@t", *args],
         cwd=cwd,
-        env=env,
         check=True,
         capture_output=True,
     )

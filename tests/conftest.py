@@ -1,8 +1,21 @@
 """Pytest fixtures shared across tests."""
 
+import os
+
 import pytest
 
 import src.api.edgartools.cache as cache_mod
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    """Drop every GIT_* variable before any test module is imported.
+
+    The agent shell exports GIT_EDITOR and git rebase -x sets GIT_DIR; a test
+    that runs git in a temp repo inherits them, and one once corrupted this
+    repo's .git that way.
+    """
+    for key in [k for k in os.environ if k.startswith("GIT_")]:
+        del os.environ[key]
 
 
 @pytest.fixture
