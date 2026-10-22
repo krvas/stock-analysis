@@ -13,6 +13,8 @@ from src.config import MAX_CACHE_QUARTERS, MAX_ITEMS_PER_SIDE
 from src.models.statement import PERIOD_TYPES, STATEMENT_VIEWS
 from src.web.setting_types import ChoiceSetting, CrossRule, IntSetting, Option
 
+MAX_OFFSET: Final = MAX_CACHE_QUARTERS - 1
+
 RULES: Final[tuple[CrossRule, ...]] = (
     CrossRule(
         ids=("current_period", "previous_period"),
@@ -20,7 +22,9 @@ RULES: Final[tuple[CrossRule, ...]] = (
             cast(int, v["previous_period"]) > cast(int, v["current_period"])
         ),
         # Keep the current period: pages share it, so it must not move.
-        repair=lambda v: {"previous_period": cast(int, v["current_period"]) + 1},
+        repair=lambda v: {
+            "previous_period": min(cast(int, v["current_period"]) + 1, MAX_OFFSET)
+        },
         message="Previous period must be older than the current period",
     ),
 )
@@ -60,7 +64,7 @@ class SubpageSetting(Enum):
         "current_period",
         "Current period",
         0,
-        MAX_CACHE_QUARTERS - 1,
+        MAX_OFFSET,
         0,
         widget="offset",
     )
@@ -68,7 +72,7 @@ class SubpageSetting(Enum):
         "previous_period",
         "Previous period",
         0,
-        MAX_CACHE_QUARTERS - 1,
+        MAX_OFFSET,
         1,
         widget="offset",
     )

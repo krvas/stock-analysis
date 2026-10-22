@@ -111,6 +111,15 @@ def test_failing_rule_keeps_current_and_repairs_previous() -> None:
     assert only_current.period_at("current_period", PERIODS) == PERIODS[3]
 
 
+def test_repaired_previous_stays_in_range_at_the_oldest_current() -> None:
+    oldest = MAX_CACHE_QUARTERS - 1
+    s = resolve(_cookie(current_period=oldest, previous_period=0), FUND_FLOW_LIKE)
+    drawer = build_drawer(s, next_path="/", error=None)
+    previous = next(f for f in drawer.page_fields if f.setting.id == "previous_period")
+    assert previous.value == str(oldest)
+    assert previous.value in {o.value for o in previous.options}
+
+
 def test_submission_merges_into_stored_values() -> None:
     stored = _cookie(period="quarterly", num_periods=20, basis="adjusted")
     out = apply_submission({"num_periods": "4", "next": "/wizard/T/a/b"}, stored)
@@ -131,7 +140,12 @@ def test_submission_ignores_unknown_and_drops_invalid_stored() -> None:
 
 @pytest.mark.parametrize(
     "form",
-    [{"num_periods": "0"}, {"num_periods": ""}, {"period": "weekly"}],
+    [
+        {"num_periods": "0"},
+        {"num_periods": ""},
+        {"num_periods": "9" * 5000},
+        {"period": "weekly"},
+    ],
 )
 def test_invalid_submission_is_refused(form: dict[str, str]) -> None:
     out = apply_submission(form | {"next": "/statements/T/income"}, None)

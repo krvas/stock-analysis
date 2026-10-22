@@ -46,7 +46,7 @@ class IntSetting:
         if isinstance(raw, bool):
             return None
         if isinstance(raw, str):
-            if not (raw.isascii() and raw.isdigit()):
+            if not (raw.isascii() and raw.isdigit()) or len(raw) > len(str(self.max)):
                 return None
             raw = int(raw)
         if isinstance(raw, int) and self.min <= raw <= self.max:
