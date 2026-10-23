@@ -1,17 +1,16 @@
+import { Emitter } from "./emitter.js";
+
 /**
  * Controller for one <dialog>. The only object that opens or closes it and
  * the only one that listens to its events. Subscribers hear every close,
  * whichever path caused it (Esc, a close button, `form method="dialog"`).
  */
-export class DialogController {
+export class DialogController extends Emitter {
   /** @param {HTMLDialogElement} element */
   constructor(element) {
+    super();
     this._element = element;
-    /** @type {Array<(open: boolean) => void>} */
-    this._listeners = [];
-    element.addEventListener("close", () => {
-      this._listeners.forEach((fn) => fn(false));
-    });
+    element.addEventListener("close", () => this.notify(false));
   }
 
   set(open) {
@@ -23,9 +22,5 @@ export class DialogController {
     } else {
       this._element.close();
     }
-  }
-
-  subscribe(fn) {
-    this._listeners.push(fn);
   }
 }

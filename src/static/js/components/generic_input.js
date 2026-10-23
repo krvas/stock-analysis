@@ -1,11 +1,12 @@
-import { coerceNumber } from "../utils.js";
+import { coerceNumber } from "../coerce.js";
+import { Emitter } from "./emitter.js";
 
 /**
  * Controller for a single form control (table cells, drawer fields). This is
  * the only object that creates event handlers for that control. Subscribers
  * receive the coerced value.
  */
-export class GenericInput {
+export class GenericInput extends Emitter {
   /**
    * @param {string} id
    * @param {ParentNode} parent
@@ -17,9 +18,8 @@ export class GenericInput {
    *   `true` sets a boolean attribute, `false` and `null` are skipped.
    */
   constructor(id, parent, value, type, { choices = [], attributes = {} } = {}) {
+    super();
     this._type = type;
-    /** @type {Array<(value: *) => void>} */
-    this._listeners = [];
     this._element = this._createElement(id, parent, type, choices, attributes);
     this._value = this._coerce(value);
     this._writeElement(this._value);
@@ -94,10 +94,6 @@ export class GenericInput {
     }
     this._value = coerced;
     this._writeElement(coerced);
-    this._listeners.forEach((fn) => fn(coerced));
-  }
-
-  subscribe(fn) {
-    this._listeners.push(fn);
+    this.notify(coerced);
   }
 }

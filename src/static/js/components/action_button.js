@@ -1,18 +1,25 @@
+import { Emitter } from "./emitter.js";
+
 /**
- * Controller for one button that triggers an action. The only object that
- * listens to its clicks. Subscribers are called with no arguments.
+ * Controller for one button. The only object that listens to its clicks or
+ * writes its state (`disabled`, `aria-expanded`). Subscribers are called with
+ * no arguments.
  */
-export class ActionButton {
-  /** @param {HTMLElement} element */
+export class ActionButton extends Emitter {
+  /** @param {HTMLButtonElement} element */
   constructor(element) {
-    /** @type {Array<() => void>} */
-    this._listeners = [];
-    element.addEventListener("click", () => {
-      this._listeners.forEach((fn) => fn());
-    });
+    super();
+    this._element = element;
+    element.addEventListener("click", () => this.notify());
   }
 
-  subscribe(fn) {
-    this._listeners.push(fn);
+  /** @param {boolean} disabled */
+  setDisabled(disabled) {
+    this._element.disabled = disabled;
+  }
+
+  /** @param {boolean} expanded */
+  setExpanded(expanded) {
+    this._element.setAttribute("aria-expanded", String(expanded));
   }
 }
