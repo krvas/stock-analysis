@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Callable, Iterator
+from contextlib import ExitStack
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pandas as pd
@@ -13,6 +15,8 @@ from httpx import Response
 from src.models.statement import StatementSet
 from src.web import adjusted_statements
 from src.web.app import app
+from src.web.statements_registry import STATEMENT_PAGES
+from src.web.wizard_registry import WIZARD_PAGES
 from tests.statement_fixtures import _row, make_statement_set
 from tests.test_statement_pages import P1, P2, P3, _statement_set
 
@@ -20,6 +24,9 @@ FUND_FLOW = "/wizard/AAPL/business-understanding/fund-flow"
 BALANCE_SHEET_SIZE = "/wizard/AAPL/business-understanding/balance-sheet-size"
 OFFSET_ERROR = "Previous period must be older than the current period"
 ADJUSTED_NOTE = "Adjusted basis (no adjustments applied)"
+ADJUSTMENTS_CONTEXT = "src.web.routes.wizard_pages.adjustments_context"
+BUSINESS_UNDERSTANDING = "src.web.routes.wizard_pages.business_understanding"
+NO_AI_ANSWER = SimpleNamespace(answer=None)
 
 
 @pytest.fixture
@@ -35,6 +42,10 @@ def client() -> Iterator[TestClient]:
 
 def _save(client: TestClient, **form: str) -> Response:
     return client.post("/settings", data=form, follow_redirects=False)
+
+
+def _save_from(client: TestClient, headers: dict[str, str], **form: str) -> Response:
+    return client.post("/settings", data=form, headers=headers, follow_redirects=False)
 
 
 def _table(html: str, table_id: str = "statement-table") -> dict:
@@ -221,3 +232,85 @@ def test_adjustment_page_link_opens_the_adjusted_statements(
         response = client.post(form.group(1), data=fields)
     assert response.url.path == "/statements/AAPL/income"
     assert ADJUSTED_NOTE in response.text
+
+
+@pytest.mark.parametrize(
+    "headers",
+    [
+        {"sec-fetch-site": "cross-site"},
+        {"sec-fetch-site": "same-site"},
+        {"origin": "https://evil.example"},
+        {"origin": "null"},
+    ],
+)
+def test_cross_site_post_is_refused_and_leaves_no_cookie(
+    client: TestClient, headers: dict[str, str]
+) -> None:
+    response = _save_from(client, headers, view="detailed", next="/")
+    assert response.status_code == 403
+    assert "set-cookie" not in response.headers
+
+
+@pytest.mark.parametrize(
+    "headers",
+    [{}, {"sec-fetch-site": "same-origin"}, {"origin": "http://testserver"}],
+)
+def test_same_origin_post_is_accepted(
+    client: TestClient, headers: dict[str, str]
+) -> None:
+    assert _save_from(client, headers, view="detailed", next="/").status_code == 303
+
+
+def test_oversized_or_overfull_forms_are_rejected(client: TestClient) -> None:
+    assert _save(client, next="/", view="x" * 9000).status_code == 413
+    many = {f"f{i}": "1" for i in range(100)}
+    assert _save(client, **many).status_code == 400
+
+
+def test_refusal_cookie_is_scoped_to_the_page_it_returns_to(
+    client: TestClient,
+) -> None:
+    response = _save(client, current_period="2", previous_period="1", next=FUND_FLOW)
+    error = next(
+        c for c in response.headers.get_list("set-cookie") if "settings_error" in c
+    )
+    assert f"Path={FUND_FLOW}" in error
+    root = _save(client, current_period="2", previous_period="1", next="/")
+    assert "settings_error" not in root.headers.get("set-cookie", "")
+
+
+def test_a_forged_error_cookie_is_not_shown(client: TestClient) -> None:
+    client.cookies.set("settings_error", "<b>send money</b>")
+    html = client.get(FUND_FLOW).text
+    assert "send money" not in html
+    assert "data-open-on-load" not in html
+
+
+def _every_page_url() -> list[str]:
+    wizard = [
+        f"/wizard/AAPL/{page.slug}/{sub.slug}"
+        for page in WIZARD_PAGES
+        for sub in page.subpages
+    ]
+    statements = [f"/statements/AAPL/{page.slug}" for page in STATEMENT_PAGES]
+    return ["/wizard/AAPL", *wizard, *statements]
+
+
+@pytest.mark.parametrize("url", _every_page_url())
+def test_every_page_renders_with_default_settings(client: TestClient, url: str) -> None:
+    with ExitStack() as stack:
+        stack.enter_context(
+            patch(f"{ADJUSTMENTS_CONTEXT}._apply_saved_opex_to_capex_preferences")
+        )
+        stack.enter_context(
+            patch(f"{BUSINESS_UNDERSTANDING}.run_task", return_value=NO_AI_ANSWER)
+        )
+        if url.endswith("owner-earnings"):
+            stack.enter_context(
+                patch.object(
+                    adjusted_statements,
+                    "load_statement_set",
+                    return_value=_owner_earnings_set(),
+                )
+            )
+        assert client.get(url).status_code == 200

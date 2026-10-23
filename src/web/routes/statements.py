@@ -9,7 +9,7 @@ from src.adjustments.specs import describe
 from src.models.table import statement_table_from_dataframe
 from src.web.adjusted_statements import load_for_basis
 from src.web.page_types import NavContext, StatementPage
-from src.web.routes.settings import render_with_settings, settings_for
+from src.web.render import render_with_settings, settings_for
 from src.web.settings import Settings
 from src.web.settings_registry import GlobalSetting, SubpageSetting
 from src.web.statements_registry import STATEMENT_PAGES, get_statement_page

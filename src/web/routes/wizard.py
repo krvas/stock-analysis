@@ -11,7 +11,7 @@ from jinja2 import TemplateNotFound
 from starlette.responses import Response
 
 from src.web.page_types import NavContext, Page, SubPage
-from src.web.routes.settings import render_with_settings, settings_for
+from src.web.render import render_with_settings, settings_for
 from src.web.settings import NO_SETTINGS, Settings
 from src.web.templating import templates
 from src.web.wizard_registry import (
