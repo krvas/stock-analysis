@@ -62,7 +62,7 @@ src/web/settings_registry.py  GlobalSetting / SubpageSetting enums, Basis,
                            MAX_OFFSET + RULES (data only)
 src/web/settings.py        SETTINGS, SettingsDecl, Settings +
                            pure rules (resolve, apply_submission,
-                           build_drawer); no HTTP
+                           build_drawer, Drawer.serialize); no HTTP
 src/web/page_types.py      Page / SubPage / StatementPage, PageGroup,
                            builder/handler aliases, NavItem / NavContext
                            (shapes only)
@@ -85,9 +85,17 @@ src/templates/macros/line_item_table.html
 src/static/js/             api_client.js (only fetch() home; wizard save posts)
                            components/table_model.js, linked_groups.js,
                            table_view.js, generic_input.js, table_wiring.js
-                           settings_drawer.js, utils.js
+                           components/emitter.js (subscribe/notify base),
+                           drawer_model.js, drawer_view.js,
+                           dialog_controller.js, action_button.js,
+                           form_controller.js
+                           settings_drawer.js (drawer + gear wiring), utils.js,
+                           coerce.js (coerceNumber; no DOM, no globals)
 tests/                     pytest; pure seams (Settings, builders);
-                           test_settings_routes.py over HTTP (TestClient)
+                           test_settings_routes.py over HTTP (TestClient);
+                           test_frontend_mvc.py (which JS files may listen)
+tests/js/                  node --test: pure models, plus controllers and
+                           settings_drawer.js over happy-dom (dom.js)
 ```
 
 `finfetch_client.py` is a broken stub; ignore as a template.
@@ -265,20 +273,27 @@ member (`settings[GlobalSetting.PERIOD]`, `settings.period_at(
 SubpageSetting.CURRENT_PERIOD, periods)`), never by id string. `recent_periods` /
 `period_at` are the only data-dependent clamp (stored values stay as chosen).
 `build_drawer` yields `DrawerField(setting, value, disabled_reason)`; widget
-and options derive from the `SettingDef`.
+and options derive from the `SettingDef`. An `instant` setting must use a
+select widget (`IntSetting.__post_init__` raises otherwise): the drawer
+submits an instant field on every change, and a typed number would post per
+keystroke.
 `RULES` (`settings_registry.py`): `previous_period > current_period`; on read a failing pair renders
 previous = current + 1 (capped at `MAX_OFFSET`), on save it is refused (only when both are
 submitted). Storage: one JSON cookie `settings` (HttpOnly, SameSite=Lax,
-path /, one year), written only by `POST /settings` (urlencoded form, parsed
+path /, one year), written only by `POST /settings` (urlencoded body, parsed
 with `parse_qsl`, 303 to a same-site `next`); a refused save sets a one-shot
-`settings_error` cookie that opens the drawer once. Every page with the
+`settings_error` cookie that opens the drawer once. The browser posts that
+body with `api_client.postForm` (`fetch`, `redirect: "manual"`) and then
+loads `next` itself (§5b); the drawer needs JS. Every page with the
 shared nav renders through `render_with_settings` with a `NavContext`
 (`page_types.py`: prefix, pages, current page, its sub-pages, current
 sub-page; each typed by the `NavItem` protocol, slug + title, which `Page`,
 `SubPage` and `StatementPage` satisfy); `shared/_page_nav.html`
-names neither half of the app and hosts the gear + `<dialog>` drawer (Global
-section; This page section for declared Sub-page Settings). No in-page
-display controls exist; URLs carry no Settings.
+names neither half of the app and hosts the gear and includes
+`shared/_settings_drawer.html`, which embeds `Drawer.serialize()` as JSON
+(`#settings-drawer-data`, `data-action` = `url_for('save_settings')`) next to an empty
+`<dialog id="settings-drawer">`. The drawer is client-side MVC (§5b). No
+in-page display controls exist; URLs carry no Settings.
 
 **wizard.duckdb** `adjustment_preferences`: PK `adjustment_id`, unique
 `(ticker, exchange, adjustment_type, base_concept)`; `base_concept` holds a
@@ -320,7 +335,7 @@ serialize() → {
   link cells, and empty input slots (`data-input-slot`, `data-row-id`,
   `data-col-id`, `data-dtype`). No event handlers.
 - **Input controller** (`components/generic_input.js`): `GenericInput` is the
-  only module that creates an `<input>` and attaches `input`/`change`
+  only module that creates an `<input>` or `<select>` and attaches `input`/`change`
   listeners; `subscribe` receives the coerced value; `set()` writes the
   element and skips notify when unchanged.
 - **Wiring** (`components/table_wiring.js`): table hydration (wizard
@@ -361,6 +376,70 @@ Embed: `{% table(id, data) %}` → JSON script + empty `<table>`;
 `base_subpage.html` and `statements/statement_view.html` load
 `components/table_wiring.js` to hydrate them. Tests: `tests/test_table.py`.
 
+## 5b. Settings drawer MVC (`Drawer.serialize()`, `components/drawer_model.js`)
+
+The same split as the table (§5), for the drawer and its gear button.
+
+```
+Drawer.serialize() → {
+  next_path, error,
+  global_fields | page_fields: [{id, label, widget: "select" | "number", value,
+    instant, disabled_reason, options: [{value, label}],
+    min, max /* number widgets only */}]
+}
+```
+
+- **Model** (`DrawerModel`, extends `Emitter`): `fromSerialized`;
+  `sections()` (`"global"`, `"page"`), `fields(section)`, `field(id)`
+  (descriptors without `value` or `disabled_reason`); `isDisabled(id)`,
+  `reason(id)`; `getValue`/`setValue` (the only value accessors; each value
+  is normalized to its widget once, on load and on set: number widgets hold
+  a `Number` or `null`, selects a string); `isOpen`/`setOpen`; `nextPath()`,
+  `error()`; `isSaving()`, `startSave()` (claims the single in-flight save,
+  clears the error, returns `false` when one is running), `failSave(message)`.
+  `subscribe(change)` with `{type: "open", open}`, `{type: "value", id,
+  value}`, `{type: "saving", saving}` or `{type: "error", error}` (no
+  notify when unchanged); `serialize({instant})`. Opens on load when `error`
+  is set. No DOM. Send direction is asymmetric like the table: `serialize`
+  returns the urlencoded body for one submit (`next` plus the enabled fields
+  whose `instant` matches, as strings), not the received shape.
+- **View** (`drawer_view.js`): `render_drawer(dialog, model)` paints the
+  header and a `<form data-drawer-form>` holding the error alert
+  (`data-drawer-error`), the Global and This page sections, empty field slots
+  (`data-input-slot`, `data-field-id`), reasons (`#setting-<id>-reason`) and
+  a bare submit button (`data-drawer-apply`); × is `data-drawer-close`.
+  `paint_error(dialog, message)` repaints the alert. `render_unavailable`
+  paints a header and a message when the drawer JSON is missing or
+  unreadable. `controlSpec(model, id)` is the per-field control spec
+  (`GenericInput` id, type, choices, `min`/`max`/`step`, `disabled`,
+  `aria-describedby`); the `setting-<id>` id convention lives only in this
+  file. No listeners.
+- **Controllers** (each extends `Emitter`): `GenericInput` (one per field;
+  `select` type with `choices`, element `attributes`); `ActionButton` (click
+  → subscribers; `setDisabled`, `setExpanded`; the gear, ×, Apply);
+  `FormController` (the only `submit` listener; cancels navigation and
+  notifies, so Enter in a field and Apply share one path);
+  `DialogController` (only caller of `showModal`/`close`; reports every
+  `close` event, so Esc and × both reach the model).
+- **Wiring** (`settings_drawer.js`): builds each `GenericInput` from
+  `controlSpec` and subscribes controllers → model setters and
+  `model.subscribe` → `input.set` / `dialog.set` / gear `setExpanded` /
+  Apply `setDisabled` / `paint_error`. A changed `instant` field or a form
+  submit runs one save: `startSave`, `postForm(model.serialize(...))`, then
+  load `nextPath()`; a rejected `postForm` goes to `failSave`, so the error
+  shows in the open drawer and Apply re-enables. Submits while a save runs
+  are dropped. Reads the JSON and `data-action` once at start-up, never
+  control state.
+- **Redirect target**: `postForm` fetches with `redirect: "manual"`, so the
+  drawer gets an opaque response and cannot read the 303 `Location`; it
+  loads its own `next_path`. The adjustments-link form (a plain `<form>`)
+  still follows the server's redirect. A server-side change to where
+  `POST /settings` redirects therefore does not reach the drawer.
+- **Enforced** by `tests/test_frontend_mvc.py` (only controller files call
+  `addEventListener`; only `DialogController` opens or closes a dialog;
+  models never touch `document`/`window`), `tests/js/drawer_model.test.js`
+  and, for instant widgets, `tests/test_settings.py`.
+
 ## 6. Status (short)
 
 Working: vendor DuckDB + IndianAPI/AlphaVantage; edgartools fetch/cache;
@@ -381,7 +460,15 @@ Tests cover clients, DBs, edgartools, Table, wizard DB, Settings
 `test_settings_routes.py` is the only HTTP suite: TestClient over fixture
 statements for the statements redirect and 404, `POST /settings` (redirect
 guard, cookie attributes, refused saves), cookie round-trips and the drawer
-per page. `test_module_layout.py` fails on an UPPER_CASE module constant
+JSON per page. `tests/js/` (`node --test`, in `make test`; run `npm install`
+once for happy-dom) covers `DrawerModel`, `Emitter`, `coerceNumber`, the DOM
+controllers, `postForm`, and `settings_drawer.js` end to end against a stubbed
+`fetch` on a happy-dom page. happy-dom has no Esc-closes-dialog or
+Enter-submits-form behavior, so those tests call `dialog.close()` and
+`form.requestSubmit()`; the real keys are checked by the `verify` skill.
+`test_frontend_mvc.py` scans comment-stripped JS for listeners, dialog
+open/close and DOM globals in models.
+`test_module_layout.py` fails on an UPPER_CASE module constant
 below the module's first def/class under `src/`; exceptions go in its
 `ALLOWED_BELOW_DEFINITIONS`. Cache miss hits live SEC. `pytest -m data` (deselected by default)
 runs the calc-residual check on real filings for the tickers in the gitignored

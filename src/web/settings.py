@@ -7,7 +7,13 @@ from types import MappingProxyType
 from typing import Final, Literal
 
 from src.config import MAX_PERIODS_BY_PERIOD
-from src.web.setting_types import ChoiceSetting, Option, SettingDef, SettingValue
+from src.web.setting_types import (
+    ChoiceSetting,
+    IntSetting,
+    Option,
+    SettingDef,
+    SettingValue,
+)
 from src.web.settings_registry import RULES, GlobalSetting, SubpageSetting
 
 SETTINGS: Final[tuple[SettingDef, ...]] = tuple(
@@ -173,6 +179,21 @@ class DrawerField:
             )
         return ()
 
+    def serialize(self) -> dict[str, object]:
+        setting = self.setting
+        payload: dict[str, object] = {
+            "id": setting.id,
+            "label": setting.label,
+            "widget": self.widget,
+            "value": self.value,
+            "instant": setting.instant,
+            "disabled_reason": self.disabled_reason,
+            "options": [{"value": v, "label": label} for v, label in self.options],
+        }
+        if self.widget == "number" and isinstance(setting, IntSetting):
+            payload |= {"min": setting.min, "max": setting.max}
+        return payload
+
 
 @dataclass(frozen=True)
 class Drawer:
@@ -180,6 +201,14 @@ class Drawer:
     page_fields: tuple[DrawerField, ...]
     next_path: str
     error: str | None
+
+    def serialize(self) -> dict[str, object]:
+        return {
+            "next_path": self.next_path,
+            "error": self.error,
+            "global_fields": [f.serialize() for f in self.global_fields],
+            "page_fields": [f.serialize() for f in self.page_fields],
+        }
 
 
 def build_drawer(settings: Settings, *, next_path: str, error: str | None) -> Drawer:

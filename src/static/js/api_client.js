@@ -54,8 +54,28 @@ export async function postJson(url, body, options = {}) {
   });
 }
 
+/**
+ * POST an urlencoded form to an endpoint that answers with a redirect (the
+ * Post/Redirect/Get routes). Cookies the redirect sets are stored; the caller
+ * decides where to navigate.
+ *
+ * @param {string} url
+ * @param {Record<string, string>} fields
+ */
+export async function postForm(url, fields) {
+  const response = await fetch(url, {
+    method: "POST",
+    body: new URLSearchParams(fields),
+    redirect: "manual",
+  });
+  if (response.type !== "opaqueredirect" && !response.ok) {
+    throw new Error(`Request failed: ${response.status} ${response.statusText}`);
+  }
+}
+
 window.apiClient = {
   getWizardPageData,
   getJson,
   postJson,
+  postForm,
 };

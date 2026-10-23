@@ -5,6 +5,7 @@ import json
 import pytest
 
 from src.config import MAX_CACHE_QUARTERS, MAX_CACHE_YEARS
+from src.web.setting_types import IntSetting
 from src.web.settings import (
     NO_SETTINGS,
     SETTINGS,
@@ -253,6 +254,66 @@ def test_drawer_greys_globals_and_lists_declared_subpage_fields() -> None:
         build_drawer(resolve(None, NO_SETTINGS), next_path="/", error=None).page_fields
         == ()
     )
+
+
+def test_drawer_serializes_every_field_for_the_browser() -> None:
+    decl = SettingsDecl(
+        uses=(SubpageSetting.CURRENT_PERIOD, SubpageSetting.ITEMS_PER_SIDE),
+        cannot_honour={GlobalSetting.PERIOD: "Annual only"},
+    )
+    payload = build_drawer(
+        resolve(_cookie(view="detailed"), decl), next_path="/p", error="bad"
+    ).serialize()
+
+    assert (payload["next_path"], payload["error"]) == ("/p", "bad")
+    assert [f["id"] for f in payload["global_fields"]] == [
+        "period",
+        "num_periods",
+        "view",
+    ]
+    period, num_periods, view = payload["global_fields"]
+    assert period == {
+        "id": "period",
+        "label": "Period type",
+        "widget": "select",
+        "value": "annual",
+        "instant": False,
+        "disabled_reason": "Annual only",
+        "options": [
+            {"value": "annual", "label": "Annual"},
+            {"value": "quarterly", "label": "Quarterly"},
+        ],
+    }
+    assert num_periods == {
+        "id": "num_periods",
+        "label": "Number of periods",
+        "widget": "number",
+        "value": "10",
+        "instant": False,
+        "disabled_reason": None,
+        "options": [],
+        "min": 1,
+        "max": MAX_CACHE_QUARTERS,
+    }
+    assert (view["value"], view["instant"]) == ("detailed", True)
+    current, items = payload["page_fields"]
+    assert (current["widget"], current["options"][:2]) == (
+        "select",
+        [{"value": "0", "label": "Latest"}, {"value": "1", "label": "1 back"}],
+    )
+    assert "min" not in current and "max" not in current
+    assert (items["id"], items["widget"], items["value"]) == (
+        "items_per_side",
+        "number",
+        "5",
+    )
+    assert json.loads(json.dumps(payload)) == payload
+
+
+def test_an_instant_setting_must_use_a_select_widget() -> None:
+    with pytest.raises(ValueError, match="instant setting 'n' must use a select"):
+        IntSetting("n", "N", 1, 5, 1, instant=True)
+    assert IntSetting("n", "N", 0, 5, 0, widget="offset", instant=True).instant
 
 
 def test_every_default_is_valid() -> None:

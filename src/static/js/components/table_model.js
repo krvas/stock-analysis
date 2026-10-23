@@ -2,10 +2,11 @@
  * Pure data model for column-schema financial tables (no DOM).
  */
 
+import { coerceNumber } from "../coerce.js";
+import { Emitter } from "./emitter.js";
 import { LINKED_GROUP_HANDLERS } from "./linked_groups.js";
-import { coerceNumber } from "../utils.js";
 
-export class TableModel {
+export class TableModel extends Emitter {
   /**
    * @param {object} data - Serialized table JSON from the backend.
    * @returns {TableModel}
@@ -17,14 +18,13 @@ export class TableModel {
   }
 
   constructor() {
+    super();
     /** @type {Map<string, object>} */
     this._columns = new Map();
     /** @type {Map<string, object>} */
     this._rows = new Map();
     /** @type {Map<string, object>} */
     this._linkedGroups = new Map();
-    /** @type {Array<(rowId: string, colId: string, value: *) => void>} */
-    this._listeners = [];
     /** @type {Map<string, Set<string>>} colId -> linked group names */
     this._colToGroups = new Map();
     /** @type {Array<{row_id: string, col_id: string, expr: object}>} */
@@ -91,20 +91,6 @@ export class TableModel {
     return [...this._noInputCells];
   }
 
-  /**
-   * @param {(rowId: string, colId: string, value: *) => void} callback
-   * @returns {() => void} Unsubscribes this callback.
-   */
-  subscribe(callback) {
-    this._listeners.push(callback);
-    return () => {
-      const index = this._listeners.indexOf(callback);
-      if (index >= 0) {
-        this._listeners.splice(index, 1);
-      }
-    };
-  }
-
   getCell(rowId, colId) {
     return this._rows.get(rowId)?.cells[colId];
   }
@@ -119,7 +105,7 @@ export class TableModel {
     }
 
     row.cells[colId] = value;
-    this._notify(rowId, colId, value);
+    this.notify(rowId, colId, value);
 
     for (const groupName of this._colToGroups.get(colId) ?? []) {
       const group = this._linkedGroups.get(groupName);
@@ -134,13 +120,7 @@ export class TableModel {
       return;
     }
     row.cells[colId] = value;
-    this._notify(rowId, colId, value);
-  }
-
-  _notify(rowId, colId, value) {
-    for (const listener of this._listeners) {
-      listener(rowId, colId, value);
-    }
+    this.notify(rowId, colId, value);
   }
 
   _coerceNumber(value) {

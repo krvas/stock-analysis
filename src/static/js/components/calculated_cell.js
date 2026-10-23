@@ -9,7 +9,8 @@
  * changes in the model. Owns only its own <td>; never writes to the model.
  */
 
-import { coerceNumber, formatNumber, getStatementUnit } from "../utils.js";
+import { coerceNumber } from "../coerce.js";
+import { formatNumber, getStatementUnit } from "../utils.js";
 
 const OPS = {
   add: (values) => values.reduce((sum, v) => sum + v, 0),
