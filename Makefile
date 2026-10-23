@@ -1,6 +1,7 @@
 .PHONY: test fix jev
 
-# Lint, format check, unit tests. Run before every commit.
+# Lint, format check, unit tests. Run before every commit. tests/conftest.py
+# drops every GIT_* variable, so pytest needs no env scrub here.
 test:
 	.venv/bin/ruff check .
 	.venv/bin/ruff format --check .
