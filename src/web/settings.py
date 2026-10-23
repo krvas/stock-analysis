@@ -4,10 +4,17 @@ import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from types import MappingProxyType
-from typing import Final, Literal
+from typing import Final, Literal, cast
 
 from src.config import MAX_PERIODS_BY_PERIOD
-from src.web.setting_types import ChoiceSetting, Option, SettingDef, SettingValue
+from src.models.statement import PeriodType
+from src.web.setting_types import (
+    ChoiceSetting,
+    IntSetting,
+    Option,
+    SettingDef,
+    SettingValue,
+)
 from src.web.settings_registry import RULES, GlobalSetting, SubpageSetting
 
 SETTINGS: Final[tuple[SettingDef, ...]] = tuple(
@@ -18,16 +25,37 @@ _BY_ID: Final[Mapping[str, SettingKey]] = {
     s.value.id: s for s in (*GlobalSetting, *SubpageSetting)
 }
 
+_OFFSET_UNIT: Final = {"annual": "yr", "quarterly": "qtr"}
+
 if len({s.id for s in SETTINGS}) != len(SETTINGS):
     raise RuntimeError("Setting ids must be unique")
+for _rule in RULES:
+    if unknown := [i for i in _rule.ids if i not in _BY_ID]:
+        raise RuntimeError(f"rule {_rule.message!r} names unknown Settings {unknown}")
+
+
+def _invalid_message(setting: SettingDef) -> str:
+    return f"Invalid {setting.label.lower()}"
+
+
+def known_refusal(raw: str | None) -> str | None:
+    """``raw`` if it is a message ``apply_submission`` can refuse with, else None."""
+    known = {_invalid_message(s) for s in SETTINGS} | {r.message for r in RULES}
+    return raw if raw in known else None
 
 
 @dataclass(frozen=True)
 class SettingsDecl:
     uses: tuple[SubpageSetting, ...] = ()
     cannot_honour: Mapping[GlobalSetting, str] = field(default_factory=dict)
+    fixed_period: PeriodType | None = None
 
     def __post_init__(self) -> None:
+        object.__setattr__(
+            self, "cannot_honour", MappingProxyType(dict(self.cannot_honour))
+        )
+        if self.fixed_period and GlobalSetting.PERIOD not in self.cannot_honour:
+            raise ValueError("fixed_period needs the Period type greyed out")
         for setting in self.uses:
             if not isinstance(setting, SubpageSetting):
                 raise TypeError(f"{setting!r} in uses is not a SubpageSetting")
@@ -52,6 +80,14 @@ class SettingNotApplicable(LookupError):
     pass
 
 
+def _period_type(decl: SettingsDecl, values: Mapping[str, SettingValue]) -> PeriodType:
+    return decl.fixed_period or cast(PeriodType, values[GlobalSetting.PERIOD.value.id])
+
+
+def _offset_ceiling(period_type: PeriodType) -> int:
+    return MAX_PERIODS_BY_PERIOD[period_type] - 1
+
+
 @dataclass(frozen=True)
 class Settings:
     decl: SettingsDecl
@@ -64,6 +100,10 @@ class Settings:
                 "out or does not declare; declare it or stop reading it"
             )
         return self.values[setting.value.id]
+
+    @property
+    def period_type(self) -> PeriodType:
+        return _period_type(self.decl, self.values)
 
     def recent_periods(self, available: Sequence[str]) -> list[str]:
         cap = MAX_PERIODS_BY_PERIOD[self[GlobalSetting.PERIOD]]
@@ -99,9 +139,13 @@ def resolve(raw_cookie: str | None, decl: SettingsDecl) -> Settings:
         s.value.id: stored.get(s.value.id, s.value.default)
         for s in (*GlobalSetting, *decl.uses)
     }
+    ceiling = _offset_ceiling(_period_type(decl, values))
+    for setting in decl.uses:
+        if isinstance(setting.value, IntSetting) and setting.value.widget == "offset":
+            values[setting.value.id] = min(cast(int, values[setting.value.id]), ceiling)
     for rule in RULES:
         if all(decl.applies(_BY_ID[i]) for i in rule.ids) and not rule.holds(values):
-            values |= rule.repair(values)
+            values |= rule.repair(values, ceiling)
     return Settings(decl=decl, values=MappingProxyType(values))
 
 
@@ -140,7 +184,7 @@ def apply_submission(form: Mapping[str, str], raw_cookie: str | None) -> SaveOut
             continue
         value = setting.parse(form[setting.id])
         if value is None:
-            return Refused(redirect_to, f"Invalid {setting.label.lower()}")
+            return Refused(redirect_to, _invalid_message(setting))
         submitted[setting.id] = value
     merged = _stored_values(raw_cookie) | submitted
     for rule in RULES:
@@ -154,6 +198,7 @@ class DrawerField:
     setting: SettingDef
     value: str
     disabled_reason: str | None
+    period_type: PeriodType
 
     @property
     def widget(self) -> Literal["select", "number"]:
@@ -167,9 +212,13 @@ class DrawerField:
         if isinstance(setting, ChoiceSetting):
             return setting.options
         if setting.widget == "offset":
+            unit = _OFFSET_UNIT[self.period_type]
             return tuple(
-                Option(str(i), "Latest" if i == 0 else f"{i} back")
-                for i in range(setting.min, setting.max + 1)
+                Option(str(i), "Latest" if i == 0 else f"{i} {unit} back")
+                for i in range(
+                    setting.min,
+                    min(setting.max, _offset_ceiling(self.period_type)) + 1,
+                )
             )
         return ()
 
@@ -184,14 +233,18 @@ class Drawer:
 
 def build_drawer(settings: Settings, *, next_path: str, error: str | None) -> Drawer:
     decl = settings.decl
+    period_type = settings.period_type
     global_fields = tuple(
         DrawerField(
-            s.value, str(settings.values[s.value.id]), decl.cannot_honour.get(s)
+            s.value,
+            str(settings.values[s.value.id]),
+            decl.cannot_honour.get(s),
+            period_type,
         )
         for s in GlobalSetting
     )
     page_fields = tuple(
-        DrawerField(s.value, str(settings.values[s.value.id]), None)
+        DrawerField(s.value, str(settings.values[s.value.id]), None, period_type)
         for s in SubpageSetting
         if s in decl.uses
     )

@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from src.config import MAX_CACHE_QUARTERS, MAX_CACHE_YEARS
+from src.config import MAX_CACHE_QUARTERS, MAX_CACHE_YEARS, MAX_PERIODS_BY_PERIOD
 from src.web.settings import (
     NO_SETTINGS,
     SETTINGS,
@@ -14,6 +14,7 @@ from src.web.settings import (
     SettingsDecl,
     apply_submission,
     build_drawer,
+    known_refusal,
     resolve,
     safe_next,
 )
@@ -116,7 +117,10 @@ def test_recent_periods_clamps_to_cap_and_available() -> None:
 
 
 def test_period_at_clamps_to_oldest_and_handles_empty() -> None:
-    s = resolve(_cookie(current_period=30, previous_period=40), FUND_FLOW_LIKE)
+    s = resolve(
+        _cookie(period="quarterly", current_period=30, previous_period=40),
+        FUND_FLOW_LIKE,
+    )
     assert s.period_at(SubpageSetting.CURRENT_PERIOD, PERIODS) == PERIODS[-1]
     assert s.period_at(SubpageSetting.PREVIOUS_PERIOD, PERIODS[:3]) == PERIODS[2]
     assert s.period_at(SubpageSetting.CURRENT_PERIOD, []) is None
@@ -131,13 +135,53 @@ def test_failing_rule_keeps_current_and_repairs_previous() -> None:
     assert only_current.period_at(SubpageSetting.CURRENT_PERIOD, PERIODS) == PERIODS[3]
 
 
-def test_repaired_previous_stays_in_range_at_the_oldest_current() -> None:
-    oldest = MAX_CACHE_QUARTERS - 1
-    s = resolve(_cookie(current_period=oldest, previous_period=0), FUND_FLOW_LIKE)
-    drawer = build_drawer(s, next_path="/", error=None)
-    previous = next(f for f in drawer.page_fields if f.setting.id == "previous_period")
-    assert previous.value == str(oldest)
-    assert previous.value in {o.value for o in previous.options}
+@pytest.mark.parametrize("period", ["annual", "quarterly"])
+def test_rule_holds_after_repair_even_at_the_oldest_offset(period: str) -> None:
+    ceiling = MAX_PERIODS_BY_PERIOD[period] - 1
+    s = resolve(
+        _cookie(period=period, current_period=ceiling, previous_period=0),
+        FUND_FLOW_LIKE,
+    )
+    current, previous = (
+        s[SubpageSetting.CURRENT_PERIOD],
+        s[SubpageSetting.PREVIOUS_PERIOD],
+    )
+    assert (current, previous) == (ceiling - 1, ceiling)
+    fields = {
+        f.setting.id: f for f in build_drawer(s, next_path="/", error=None).page_fields
+    }
+    for field in (fields["current_period"], fields["previous_period"]):
+        assert field.value in {o.value for o in field.options}
+
+
+def test_offsets_past_the_periods_a_page_can_serve_are_clamped_together() -> None:
+    s = resolve(_cookie(current_period=20, previous_period=30), FUND_FLOW_LIKE)
+    ceiling = MAX_CACHE_YEARS - 1
+    assert s[SubpageSetting.CURRENT_PERIOD] == ceiling - 1
+    assert s[SubpageSetting.PREVIOUS_PERIOD] == ceiling
+
+
+def test_drawer_offers_only_offsets_the_period_type_can_serve() -> None:
+    def last_offset(raw: str | None, decl: SettingsDecl) -> str:
+        drawer = build_drawer(resolve(raw, decl), next_path="/", error=None)
+        return drawer.page_fields[-1].options[-1].label
+
+    assert last_offset(None, FUND_FLOW_LIKE) == f"{MAX_CACHE_YEARS - 1} yr back"
+    quarterly = _cookie(period="quarterly")
+    assert last_offset(quarterly, FUND_FLOW_LIKE) == (
+        f"{MAX_CACHE_QUARTERS - 1} qtr back"
+    )
+
+
+def test_a_fixed_period_overrides_the_global_period_type() -> None:
+    decl = SettingsDecl(
+        uses=(SubpageSetting.CURRENT_PERIOD,),
+        cannot_honour={GlobalSetting.PERIOD: "Annual only"},
+        fixed_period="annual",
+    )
+    s = resolve(_cookie(period="quarterly", current_period=40), decl)
+    assert s.period_type == "annual"
+    assert s[SubpageSetting.CURRENT_PERIOD] == MAX_CACHE_YEARS - 1
 
 
 def test_submission_merges_into_stored_values() -> None:
@@ -215,6 +259,7 @@ def test_safe_next(raw: str | None, expected: str) -> None:
         ({"cannot_honour": {SubpageSetting.BASIS: "No"}}, TypeError),
         ({"cannot_honour": {"view": "Summary only"}}, TypeError),
         ({"cannot_honour": {GlobalSetting.VIEW: "  "}}, ValueError),
+        ({"fixed_period": "annual"}, ValueError),
     ],
 )
 def test_bad_declaration_raises(decl: dict, error: type[Exception]) -> None:
@@ -245,7 +290,7 @@ def test_drawer_greys_globals_and_lists_declared_subpage_fields() -> None:
     current, items = drawer.page_fields
     assert (current.widget, current.options[:2]) == (
         "select",
-        (("0", "Latest"), ("1", "1 back")),
+        (("0", "Latest"), ("1", "1 yr back")),
     )
     assert (items.widget, items.options, items.value) == ("number", (), "5")
     assert (drawer.next_path, drawer.error) == ("/p", "bad")
@@ -253,6 +298,18 @@ def test_drawer_greys_globals_and_lists_declared_subpage_fields() -> None:
         build_drawer(resolve(None, NO_SETTINGS), next_path="/", error=None).page_fields
         == ()
     )
+
+
+def test_declared_greyed_settings_cannot_be_mutated() -> None:
+    with pytest.raises(TypeError):
+        NO_SETTINGS.cannot_honour[GlobalSetting.VIEW] = "x"  # type: ignore[index]
+
+
+def test_only_messages_the_server_writes_reach_the_drawer() -> None:
+    assert known_refusal("Invalid number of periods") == "Invalid number of periods"
+    assert known_refusal("Previous period must be older than the current period")
+    assert known_refusal("<b>pay me</b>") is None
+    assert known_refusal(None) is None
 
 
 def test_every_default_is_valid() -> None:

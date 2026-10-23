@@ -7,14 +7,19 @@ resolve, validate and render them live in ``src/web/settings.py``.
 from __future__ import annotations
 
 from enum import Enum
-from typing import Final, Literal, cast, get_args
+from typing import Final, cast, get_args
 
 from src.config import MAX_CACHE_QUARTERS, MAX_ITEMS_PER_SIDE
-from src.models.statement import PERIOD_TYPES, STATEMENT_VIEWS
-from src.web.setting_types import ChoiceSetting, CrossRule, IntSetting, Option
+from src.models.statement import PERIOD_TYPES, STATEMENT_VIEWS, Basis
+from src.web.setting_types import (
+    ChoiceSetting,
+    CrossRule,
+    IntSetting,
+    Option,
+)
 
-Basis = Literal["reported", "adjusted"]
 MAX_OFFSET: Final = MAX_CACHE_QUARTERS - 1
+
 
 RULES: Final[tuple[CrossRule, ...]] = (
     CrossRule(
@@ -22,9 +27,11 @@ RULES: Final[tuple[CrossRule, ...]] = (
         holds=lambda v: (
             cast(int, v["previous_period"]) > cast(int, v["current_period"])
         ),
-        # Keep the current period: pages share it, so it must not move.
-        repair=lambda v: {
-            "previous_period": min(cast(int, v["current_period"]) + 1, MAX_OFFSET)
+        # Pages share the current period, so it moves only when it sits at the
+        # oldest offset and leaves no room for an older previous period.
+        repair=lambda v, ceiling: {
+            "current_period": min(cast(int, v["current_period"]), max(ceiling - 1, 0)),
+            "previous_period": min(cast(int, v["current_period"]) + 1, ceiling),
         },
         message="Previous period must be older than the current period",
     ),

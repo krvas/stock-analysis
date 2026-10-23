@@ -61,5 +61,6 @@ SettingDef = ChoiceSetting | IntSetting
 class CrossRule:
     ids: tuple[str, ...]
     holds: Callable[[Mapping[str, SettingValue]], bool]
-    repair: Callable[[Mapping[str, SettingValue]], Mapping[str, SettingValue]]
+    # Second argument: the highest offset the page can serve.
+    repair: Callable[[Mapping[str, SettingValue], int], Mapping[str, SettingValue]]
     message: str

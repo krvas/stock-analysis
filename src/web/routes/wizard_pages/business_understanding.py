@@ -92,7 +92,9 @@ def _side_table(items: list[dict[str, Any]], limit: int) -> dict[str, Any]:
 
 
 def balance_sheet_size_context(ticker: str, settings: Settings) -> dict[str, Any]:
-    loaded = load_for_basis(ticker, "annual", settings[SubpageSetting.BASIS])
+    loaded = load_for_basis(
+        ticker, settings.period_type, settings[SubpageSetting.BASIS]
+    )
     balance = loaded.statements.balance
     context: dict[str, Any] = {
         "basis": settings[SubpageSetting.BASIS],

@@ -64,6 +64,7 @@ WIZARD_PAGES: list[Page] = [
                         SubpageSetting.CURRENT_PERIOD,
                         SubpageSetting.ITEMS_PER_SIDE,
                     ),
+                    fixed_period="annual",
                     cannot_honour={
                         GlobalSetting.PERIOD: "Annual only",
                         GlobalSetting.NUM_PERIODS: "Single period",

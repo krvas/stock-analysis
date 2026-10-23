@@ -35,6 +35,7 @@ from src.utils.text import clean_str, is_missing
 StatementType = Literal["income", "balance", "cashflow"]
 StatementView = Literal["summary", "standard", "detailed"]
 PeriodType = Literal["annual", "quarterly"]
+Basis = Literal["reported", "adjusted"]
 
 STATEMENT_TYPES: tuple[StatementType, ...] = get_args(StatementType)
 STATEMENT_VIEWS: tuple[StatementView, ...] = get_args(StatementView)
