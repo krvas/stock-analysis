@@ -73,7 +73,6 @@ def _render(
         prefix=f"/wizard/{symbol}",
         pages=WIZARD_PAGES,
         page=page,
-        subpages=page.subpages if page else (),
         subpage=subpage,
     )
     return render_with_settings(

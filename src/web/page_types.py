@@ -62,5 +62,4 @@ class NavContext:
     prefix: str
     pages: Sequence[NavItem]
     page: NavItem | None = None
-    subpages: Sequence[NavItem] = ()
     subpage: NavItem | None = None
