@@ -1,6 +1,6 @@
 # Spec: Assets in Use
 
-- **Status:** ready for agent, not built
+- **Status:** built (period handling follows the Settings framework, not the annual-only marker in A12)
 - **Depends on:** none. The `owner_earnings` adjustment type it runs after already exists. `owner-earnings-exceptional-items.md` changes how Owner Earnings is computed but nothing on this page.
 - **Consumed by:** `roce.md` (ROCE's denominator is the average of opening and closing Net Assets in Use).
 - **Related docs:** `CONTEXT.md` (Gross Assets in Use, Net Assets in Use, ROCE), `specs/vision.md` (Page 2 › "Assets in-use"), `specs/adjustments_architecture.md` (§2 pipeline and registry, §8 stage semantics), `specs/features/dimensional-breakdowns.md` (detailed-view rows, future scope), `specs/STATE.md` (stale; trust the code).

@@ -11,6 +11,8 @@ from typing import Any
 
 from src.models.statement import StatementType
 
+MEMO_TAG = "memo"
+
 
 @dataclass(frozen=True)
 class AdjustmentSpec:
@@ -26,7 +28,9 @@ class NewRow:
 
     ``parent_concept`` / ``weight`` wire the row into the calc tree of every
     period whose tree contains ``parent_concept``; with no parent the row is a
-    memo row (shown, never summed). ``values`` are raw-sign period values.
+    memo row (shown, never summed); tag it :data:`MEMO_TAG` so views that
+    compare reported lines (Fund Flow) can leave it out. ``values`` are
+    raw-sign period values.
     """
 
     statement: StatementType
