@@ -1,11 +1,3 @@
-"""Single source of truth for wizard page and sub-page identity.
-
-GET sub-pages are rendered from ``src/web/routes/wizard.py``. Sub-pages that
-accept user saves declare a ``post_handler``; requests go to
-``POST /wizard/{ticker}/{page_slug}/{subpage_slug}`` (see
-``src/web/routes/wizard_pages/adjustments_post.py``).
-"""
-
 from __future__ import annotations
 
 from typing import Final
@@ -17,6 +9,7 @@ from src.web.routes.wizard_pages import (
     business_understanding,
     owner_earnings,
 )
+from src.web.setting_types import Greyed
 from src.web.settings import SettingsDecl
 from src.web.settings_registry import GlobalSetting, SubpageSetting
 
@@ -48,8 +41,8 @@ WIZARD_PAGES: list[Page] = [
                 context_builder=business_understanding.one_line_answers_context,
                 settings=SettingsDecl(
                     cannot_honour={
-                        GlobalSetting.PERIOD: "Not period-based",
-                        GlobalSetting.NUM_PERIODS: "Not period-based",
+                        GlobalSetting.PERIOD: Greyed("Not period-based"),
+                        GlobalSetting.NUM_PERIODS: Greyed("Not period-based"),
                     }
                 ),
             ),
@@ -64,11 +57,10 @@ WIZARD_PAGES: list[Page] = [
                         SubpageSetting.CURRENT_PERIOD,
                         SubpageSetting.ITEMS_PER_SIDE,
                     ),
-                    fixed_period="annual",
                     cannot_honour={
-                        GlobalSetting.PERIOD: "Annual only",
-                        GlobalSetting.NUM_PERIODS: "Single period",
-                        GlobalSetting.VIEW: "Summary only",
+                        GlobalSetting.PERIOD: Greyed("Annual only", fixed="annual"),
+                        GlobalSetting.NUM_PERIODS: Greyed("Single period"),
+                        GlobalSetting.VIEW: Greyed("Summary only"),
                     },
                 ),
             ),
@@ -83,7 +75,7 @@ WIZARD_PAGES: list[Page] = [
                         SubpageSetting.CURRENT_PERIOD,
                         SubpageSetting.PREVIOUS_PERIOD,
                     ),
-                    cannot_honour={GlobalSetting.NUM_PERIODS: "Two periods"},
+                    cannot_honour={GlobalSetting.NUM_PERIODS: Greyed("Two periods")},
                 ),
             ),
         ],
@@ -104,7 +96,7 @@ WIZARD_PAGES: list[Page] = [
                 context_builder=adjustments_context.opex_to_capex_context,
                 post_handler=adjustments_post.opex_to_capex_post,
                 settings=SettingsDecl(
-                    cannot_honour={GlobalSetting.VIEW: "Detailed only"}
+                    cannot_honour={GlobalSetting.VIEW: Greyed("Detailed only")}
                 ),
             ),
             SubPage(
@@ -114,7 +106,7 @@ WIZARD_PAGES: list[Page] = [
                 context_builder=owner_earnings.owner_earnings_context,
                 post_handler=owner_earnings.owner_earnings_post,
                 settings=SettingsDecl(
-                    cannot_honour={GlobalSetting.VIEW: "Fixed layout"}
+                    cannot_honour={GlobalSetting.VIEW: Greyed("Fixed layout")}
                 ),
             ),
             SubPage(slug="assets-in-use", title="Assets in Use", order=4),

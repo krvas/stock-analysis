@@ -1,9 +1,3 @@
-"""The Settings registry: every Setting and cross-Setting rule, declared once.
-
-Data only. The shapes live in ``src/web/setting_types.py``; the rules that
-resolve, validate and render them live in ``src/web/settings.py``.
-"""
-
 from __future__ import annotations
 
 from enum import Enum
@@ -27,8 +21,6 @@ RULES: Final[tuple[CrossRule, ...]] = (
         holds=lambda v: (
             cast(int, v["previous_period"]) > cast(int, v["current_period"])
         ),
-        # Pages share the current period, so it moves only when it sits at the
-        # oldest offset and leaves no room for an older previous period.
         repair=lambda v, ceiling: {
             "current_period": min(cast(int, v["current_period"]), max(ceiling - 1, 0)),
             "previous_period": min(cast(int, v["current_period"]) + 1, ceiling),

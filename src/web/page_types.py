@@ -1,9 +1,3 @@
-"""The shapes of wizard and statement pages and of the nav that lists them.
-
-Pure types; ``src/web/wizard_registry.py`` and
-``src/web/statements_registry.py`` hold the actual pages.
-"""
-
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence

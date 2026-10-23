@@ -1,9 +1,3 @@
-"""The shapes of a Setting and of a rule over several Settings.
-
-Pure types with no registry knowledge; ``src/web/settings_registry.py`` holds
-the actual Settings and rules.
-"""
-
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
@@ -58,9 +52,23 @@ SettingDef = ChoiceSetting | IntSetting
 
 
 @dataclass(frozen=True)
+class Greyed:
+    """A Global Setting a page cannot honour.
+
+    ``fixed`` is the value the page uses in its place, if it uses one.
+    """
+
+    reason: str
+    fixed: SettingValue | None = None
+
+    def __post_init__(self) -> None:
+        if not self.reason.strip():
+            raise ValueError("a greyed Setting needs a reason")
+
+
+@dataclass(frozen=True)
 class CrossRule:
     ids: tuple[str, ...]
     holds: Callable[[Mapping[str, SettingValue]], bool]
-    # Second argument: the highest offset the page can serve.
     repair: Callable[[Mapping[str, SettingValue], int], Mapping[str, SettingValue]]
     message: str

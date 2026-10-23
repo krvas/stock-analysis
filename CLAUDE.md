@@ -45,6 +45,7 @@ Shared files: `src/static/js/components/table_model.js`,
 `src/static/js/components/table_wiring.js`, `src/models/table.py`,
 `src/web/wizard_registry.py`, `src/web/routes/wizard.py`,
 `src/web/settings.py`, `src/web/routes/settings.py`,
+`src/web/render.py`,
 `src/web/statements_registry.py`, `src/templates/shared/_page_nav.html`,
 `src/templates/shared/_settings_drawer.html`,
 `src/templates/shared/_adjustments_note.html`,
@@ -121,4 +122,6 @@ enforcing it is a repeat waiting to happen: encode it before adding another.
 | Rule | Enforced by |
 | --- | --- |
 | The app, its browser-pane server and agent worktrees run from this repo folder, never from a sibling folder (e.g. `../<name>` under `~/Documents`). Worktrees go in `.claude/worktrees/<name>` (gitignored); the app starts through `.claude/skills/verify/scripts/serve.py` or the `web` entry in `.claude/launch.json`. | `scripts/stay_in_repo.py`: a Bash `PreToolUse` hook in `.claude/settings.json` blocks out-of-repo `git worktree add` and app launches; `tests/test_stay_in_repo.py` fails on a `.claude/launch.json` entry that leaves the repo. |
+| `SettingsDecl` holds no per-Setting information; it goes in that Setting's entry (`uses`, or a `Greyed` value in `cannot_honour`). | `tests/test_settings.py::test_settings_decl_holds_no_per_setting_field` fails when `SettingsDecl` gains a field beyond `uses` and `cannot_honour`; the message says where the information goes. |
+| `DrawerField` holds only what the drawer renders (`setting`, `value`, `disabled_reason`, `options`); anything derived from the page's Settings is computed by `Settings`. | `tests/test_settings.py::test_drawer_field_holds_only_what_it_renders` fails when `DrawerField` gains another field; the message names `Settings.options`. |
 | A threshold pair that mirrors itself (execute at `1 - x`, drop at `x`) is one constant, not two. Jev's tunables sit at the top of `scripts/jev_decide.py` and each reads a `JEV_` override from `.env`. | `FINDINGS_MARGIN` is the only findings threshold. In `tests/test_jev_decide.py`, `test_every_tunable_reads_the_environment` fails on a module-level number not read through `_setting`, and `test_one_margin_sets_both_finding_thresholds` fails when the pair drifts apart. |

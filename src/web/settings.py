@@ -10,6 +10,7 @@ from src.config import MAX_PERIODS_BY_PERIOD
 from src.models.statement import PeriodType
 from src.web.setting_types import (
     ChoiceSetting,
+    Greyed,
     IntSetting,
     Option,
     SettingDef,
@@ -39,7 +40,6 @@ def _invalid_message(setting: SettingDef) -> str:
 
 
 def known_refusal(raw: str | None) -> str | None:
-    """``raw`` if it is a message ``apply_submission`` can refuse with, else None."""
     known = {_invalid_message(s) for s in SETTINGS} | {r.message for r in RULES}
     return raw if raw in known else None
 
@@ -47,25 +47,24 @@ def known_refusal(raw: str | None) -> str | None:
 @dataclass(frozen=True)
 class SettingsDecl:
     uses: tuple[SubpageSetting, ...] = ()
-    cannot_honour: Mapping[GlobalSetting, str] = field(default_factory=dict)
-    fixed_period: PeriodType | None = None
+    cannot_honour: Mapping[GlobalSetting, Greyed] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         object.__setattr__(
             self, "cannot_honour", MappingProxyType(dict(self.cannot_honour))
         )
-        if self.fixed_period and GlobalSetting.PERIOD not in self.cannot_honour:
-            raise ValueError("fixed_period needs the Period type greyed out")
         for setting in self.uses:
             if not isinstance(setting, SubpageSetting):
                 raise TypeError(f"{setting!r} in uses is not a SubpageSetting")
         if len(set(self.uses)) != len(self.uses):
             raise ValueError(f"duplicate Setting in uses: {self.uses}")
-        for setting, reason in self.cannot_honour.items():
+        for setting, greyed in self.cannot_honour.items():
             if not isinstance(setting, GlobalSetting):
                 raise TypeError(f"{setting!r} in cannot_honour is not a GlobalSetting")
-            if not reason.strip():
-                raise ValueError(f"greyed {setting!r} needs a reason")
+            if not isinstance(greyed, Greyed):
+                raise TypeError(f"greyed {setting!r} must be a Greyed, not {greyed!r}")
+            if greyed.fixed is not None and setting.value.parse(greyed.fixed) is None:
+                raise ValueError(f"{greyed.fixed!r} is not a value of {setting!r}")
 
     def applies(self, setting: SettingKey) -> bool:
         if isinstance(setting, GlobalSetting):
@@ -81,7 +80,10 @@ class SettingNotApplicable(LookupError):
 
 
 def _period_type(decl: SettingsDecl, values: Mapping[str, SettingValue]) -> PeriodType:
-    return decl.fixed_period or cast(PeriodType, values[GlobalSetting.PERIOD.value.id])
+    greyed = decl.cannot_honour.get(GlobalSetting.PERIOD)
+    if greyed and greyed.fixed is not None:
+        return cast(PeriodType, greyed.fixed)
+    return cast(PeriodType, values[GlobalSetting.PERIOD.value.id])
 
 
 def _offset_ceiling(period_type: PeriodType) -> int:
@@ -104,6 +106,18 @@ class Settings:
     @property
     def period_type(self) -> PeriodType:
         return _period_type(self.decl, self.values)
+
+    def options(self, setting: SettingDef) -> tuple[Option, ...]:
+        if isinstance(setting, ChoiceSetting):
+            return setting.options
+        if setting.widget == "offset":
+            unit = _OFFSET_UNIT[self.period_type]
+            ceiling = _offset_ceiling(self.period_type)
+            return tuple(
+                Option(str(i), "Latest" if i == 0 else f"{i} {unit} back")
+                for i in range(setting.min, min(setting.max, ceiling) + 1)
+            )
+        return ()
 
     def recent_periods(self, available: Sequence[str]) -> list[str]:
         cap = MAX_PERIODS_BY_PERIOD[self[GlobalSetting.PERIOD]]
@@ -198,29 +212,13 @@ class DrawerField:
     setting: SettingDef
     value: str
     disabled_reason: str | None
-    period_type: PeriodType
+    options: tuple[Option, ...]
 
     @property
     def widget(self) -> Literal["select", "number"]:
         if isinstance(self.setting, ChoiceSetting) or self.setting.widget == "offset":
             return "select"
         return "number"
-
-    @property
-    def options(self) -> tuple[Option, ...]:
-        setting = self.setting
-        if isinstance(setting, ChoiceSetting):
-            return setting.options
-        if setting.widget == "offset":
-            unit = _OFFSET_UNIT[self.period_type]
-            return tuple(
-                Option(str(i), "Latest" if i == 0 else f"{i} {unit} back")
-                for i in range(
-                    setting.min,
-                    min(setting.max, _offset_ceiling(self.period_type)) + 1,
-                )
-            )
-        return ()
 
 
 @dataclass(frozen=True)
@@ -231,20 +229,28 @@ class Drawer:
     error: str | None
 
 
+def reason(greyed: Greyed | None) -> str | None:
+    return greyed.reason if greyed else None
+
+
 def build_drawer(settings: Settings, *, next_path: str, error: str | None) -> Drawer:
     decl = settings.decl
-    period_type = settings.period_type
     global_fields = tuple(
         DrawerField(
             s.value,
             str(settings.values[s.value.id]),
-            decl.cannot_honour.get(s),
-            period_type,
+            reason(decl.cannot_honour.get(s)),
+            settings.options(s.value),
         )
         for s in GlobalSetting
     )
     page_fields = tuple(
-        DrawerField(s.value, str(settings.values[s.value.id]), None, period_type)
+        DrawerField(
+            s.value,
+            str(settings.values[s.value.id]),
+            None,
+            settings.options(s.value),
+        )
         for s in SubpageSetting
         if s in decl.uses
     )

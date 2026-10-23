@@ -1,13 +1,18 @@
 from __future__ import annotations
 
+import dataclasses
 import json
+from collections.abc import MutableMapping
+from typing import cast
 
 import pytest
 
 from src.config import MAX_CACHE_QUARTERS, MAX_CACHE_YEARS, MAX_PERIODS_BY_PERIOD
+from src.web.setting_types import Greyed
 from src.web.settings import (
     NO_SETTINGS,
     SETTINGS,
+    DrawerField,
     Refused,
     Saved,
     SettingNotApplicable,
@@ -28,7 +33,7 @@ FUND_FLOW_LIKE = SettingsDecl(
         SubpageSetting.CURRENT_PERIOD,
         SubpageSetting.PREVIOUS_PERIOD,
     ),
-    cannot_honour={GlobalSetting.NUM_PERIODS: "Two periods"},
+    cannot_honour={GlobalSetting.NUM_PERIODS: Greyed("Two periods")},
 )
 PERIODS = [f"20{y:02d}-12-31" for y in range(24, 0, -1)]
 
@@ -176,8 +181,7 @@ def test_drawer_offers_only_offsets_the_period_type_can_serve() -> None:
 def test_a_fixed_period_overrides_the_global_period_type() -> None:
     decl = SettingsDecl(
         uses=(SubpageSetting.CURRENT_PERIOD,),
-        cannot_honour={GlobalSetting.PERIOD: "Annual only"},
-        fixed_period="annual",
+        cannot_honour={GlobalSetting.PERIOD: Greyed("Annual only", fixed="annual")},
     )
     s = resolve(_cookie(period="quarterly", current_period=40), decl)
     assert s.period_type == "annual"
@@ -250,16 +254,24 @@ def test_safe_next(raw: str | None, expected: str) -> None:
     assert apply_submission({"next": raw} if raw else {}, None).redirect_to == expected
 
 
+def test_a_greyed_setting_needs_a_reason() -> None:
+    with pytest.raises(ValueError):
+        Greyed("  ")
+
+
 @pytest.mark.parametrize(
     ("decl", "error"),
     [
         ({"uses": ("basis",)}, TypeError),
         ({"uses": (GlobalSetting.PERIOD,)}, TypeError),
         ({"uses": (SubpageSetting.BASIS, SubpageSetting.BASIS)}, ValueError),
-        ({"cannot_honour": {SubpageSetting.BASIS: "No"}}, TypeError),
-        ({"cannot_honour": {"view": "Summary only"}}, TypeError),
-        ({"cannot_honour": {GlobalSetting.VIEW: "  "}}, ValueError),
-        ({"fixed_period": "annual"}, ValueError),
+        ({"cannot_honour": {SubpageSetting.BASIS: Greyed("No")}}, TypeError),
+        ({"cannot_honour": {"view": Greyed("Summary only")}}, TypeError),
+        ({"cannot_honour": {GlobalSetting.VIEW: "Summary only"}}, TypeError),
+        (
+            {"cannot_honour": {GlobalSetting.PERIOD: Greyed("x", fixed="weekly")}},
+            ValueError,
+        ),
     ],
 )
 def test_bad_declaration_raises(decl: dict, error: type[Exception]) -> None:
@@ -270,7 +282,7 @@ def test_bad_declaration_raises(decl: dict, error: type[Exception]) -> None:
 def test_drawer_greys_globals_and_lists_declared_subpage_fields() -> None:
     decl = SettingsDecl(
         uses=(SubpageSetting.CURRENT_PERIOD, SubpageSetting.ITEMS_PER_SIDE),
-        cannot_honour={GlobalSetting.VIEW: "Summary only"},
+        cannot_honour={GlobalSetting.VIEW: Greyed("Summary only")},
     )
     drawer = build_drawer(
         resolve(_cookie(view="detailed"), decl), next_path="/p", error="bad"
@@ -302,7 +314,10 @@ def test_drawer_greys_globals_and_lists_declared_subpage_fields() -> None:
 
 def test_declared_greyed_settings_cannot_be_mutated() -> None:
     with pytest.raises(TypeError):
-        NO_SETTINGS.cannot_honour[GlobalSetting.VIEW] = "x"  # type: ignore[index]
+        mapping = cast(
+            "MutableMapping[GlobalSetting, Greyed]", NO_SETTINGS.cannot_honour
+        )
+        mapping[GlobalSetting.VIEW] = Greyed("x")
 
 
 def test_only_messages_the_server_writes_reach_the_drawer() -> None:
@@ -337,5 +352,31 @@ def test_every_page_declaration_names_registry_settings_with_reasons() -> None:
     for name, decl in declarations:
         assert isinstance(decl, SettingsDecl), name
         assert all(isinstance(s, SubpageSetting) for s in decl.uses), name
-        for setting, reason in decl.cannot_honour.items():
-            assert isinstance(setting, GlobalSetting) and reason.strip(), name
+        for setting, greyed in decl.cannot_honour.items():
+            assert isinstance(setting, GlobalSetting) and greyed.reason.strip(), name
+
+
+def test_drawer_field_holds_only_what_it_renders() -> None:
+    extra = {f.name for f in dataclasses.fields(DrawerField)} - {
+        "setting",
+        "value",
+        "disabled_reason",
+        "options",
+    }
+    assert not extra, (
+        f"DrawerField gained {sorted(extra)}. Whatever depends on the page's "
+        "Settings (the period type, a ceiling) is computed by Settings, e.g. "
+        "Settings.options, and DrawerField receives the result."
+    )
+
+
+def test_settings_decl_holds_no_per_setting_field() -> None:
+    extra = {f.name for f in dataclasses.fields(SettingsDecl)} - {
+        "uses",
+        "cannot_honour",
+    }
+    assert not extra, (
+        f"SettingsDecl gained {sorted(extra)}. Information about one Setting "
+        "belongs in that Setting's entry: a greyed Global Setting carries it "
+        "in its Greyed value inside cannot_honour; a Sub-page Setting is in uses."
+    )

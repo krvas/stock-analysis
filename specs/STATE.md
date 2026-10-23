@@ -58,21 +58,23 @@ src/models/table.py        Table / ColumnSpec / LinkedGroupSpec  (FE↔BE contra
 src/web/app.py             FastAPI; / → {statements, wizard, screener, docs}
 src/web/setting_types.py   Setting shapes (ChoiceSetting, IntSetting,
                            Option, CrossRule); no registry knowledge
-src/web/settings_registry.py  GlobalSetting / SubpageSetting enums, Basis,
-                           MAX_OFFSET + RULES (data only)
+src/web/settings_registry.py  GlobalSetting / SubpageSetting enums,
+                           MAX_OFFSET + RULES (data only); Basis lives in
+                           src/models/statement.py
 src/web/settings.py        SETTINGS, SettingsDecl, Settings +
                            pure rules (resolve, apply_submission,
                            build_drawer); no HTTP
 src/web/page_types.py      Page / SubPage / StatementPage, PageGroup,
                            builder/handler aliases, NavItem / NavContext
-                           (shapes only)
+                           (shapes only; sub-pages come from nav.page)
 src/web/wizard_registry.py wizard page/sub-page identity (only place)
 src/web/statements_registry.py  statement page identity (income, balance,
                            cashflow)
 src/web/adjusted_statements.py  load_for_basis (until= for a staged set)
+src/web/render.py          settings_for, render_with_settings (cookie
+                           names; shared by both routers)
 src/web/routes/            statements.py, wizard.py, screener.py,
-                           settings.py (cookies, POST /settings,
-                           render_with_settings)
+                           settings.py (POST /settings only)
 src/web/routes/wizard_pages/  business_understanding.py, adjustments_context.py,
                            owner_earnings.py (builders),
                            adjustments_post.py (POST handler)
@@ -257,24 +259,32 @@ default (`instant` = View only, submits on change); `SETTINGS` flattens them.
 Global: `period`, `num_periods`, `view`. Sub-page: `basis`,
 `current_period`, `previous_period` (offsets from the latest period),
 `items_per_side`. Every `SubPage` and `StatementPage` carries a
-`SettingsDecl(uses=(SubpageSetting...), cannot_honour={GlobalSetting: reason})`
-(identity, in the registries; validated at import). `resolve(cookie, decl)` falls back per
+`SettingsDecl(uses=(SubpageSetting...), cannot_honour={GlobalSetting: Greyed(
+reason, fixed=None)})` (identity, in the registries; validated at import).
+The decl has no per-Setting fields: what a page does about one Setting lives
+in that Setting's entry, e.g. `Greyed("Annual only", fixed="annual")` makes
+`settings.period_type` that page's real unit. `resolve(cookie, decl)` falls back per
 field to defaults and never rewrites the cookie; reading a greyed or
 undeclared Setting raises `SettingNotApplicable`. Builders read by enum
 member (`settings[GlobalSetting.PERIOD]`, `settings.period_at(
 SubpageSetting.CURRENT_PERIOD, periods)`), never by id string. `recent_periods` /
 `period_at` are the only data-dependent clamp (stored values stay as chosen).
-`build_drawer` yields `DrawerField(setting, value, disabled_reason)`; widget
-and options derive from the `SettingDef`.
-`RULES` (`settings_registry.py`): `previous_period > current_period`; on read a failing pair renders
-previous = current + 1 (capped at `MAX_OFFSET`), on save it is refused (only when both are
-submitted). Storage: one JSON cookie `settings` (HttpOnly, SameSite=Lax,
+`build_drawer` yields `DrawerField(setting, value, disabled_reason, options)`;
+`Settings.options(setting)` computes the options, so offset options stop at
+the oldest period the page's period type can hold (labelled `yr` / `qtr`).
+`RULES` (`settings_registry.py`): `previous_period > current_period`. On read,
+offsets are first clamped to the page's ceiling (`MAX_PERIODS_BY_PERIOD[
+period_type] - 1`); a failing pair then renders previous = current + 1, and
+current steps back one only when previous would pass the ceiling. On save it
+is refused (only when both are submitted). Storage: one JSON cookie `settings` (HttpOnly, SameSite=Lax,
 path /, one year), written only by `POST /settings` (urlencoded form, parsed
-with `parse_qsl`, 303 to a same-site `next`); a refused save sets a one-shot
-`settings_error` cookie that opens the drawer once. Every page with the
-shared nav renders through `render_with_settings` with a `NavContext`
-(`page_types.py`: prefix, pages, current page, its sub-pages, current
-sub-page; each typed by the `NavItem` protocol, slug + title, which `Page`,
+with `parse_qsl`, at most 8 KB and a few fields, 303 to a same-site `next`;
+403 when `Sec-Fetch-Site` / `Origin` say cross-site); a refused save sets a
+one-shot `settings_error` cookie, scoped to the page it returns to, that
+opens the drawer once (only messages `apply_submission` can write are shown).
+Every page with the shared nav renders through `render_with_settings`
+(`src/web/render.py`) with a `NavContext` (`page_types.py`: prefix, pages,
+current page, current sub-page; sub-pages are `page.subpages`; each typed by the `NavItem` protocol, slug + title, which `Page`,
 `SubPage` and `StatementPage` satisfy); `shared/_page_nav.html`
 names neither half of the app and hosts the gear + `<dialog>` drawer (Global
 section; This page section for declared Sub-page Settings). No in-page
