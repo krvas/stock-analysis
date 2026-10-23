@@ -7,7 +7,7 @@ what belongs where, so scope violations don't happen in the first place.
 
 ## Checks before every commit
 
-Run `make test` (ruff check, ruff format --check, pytest, `node --test tests/js`)
+Run `make test` (ruff check, ruff format --check, pytest, `node --test "tests/js/*.test.js"`)
 from the repo root.
 Don't commit code that fails it. `make fix` applies ruff's fixes and formatting.
 
@@ -47,7 +47,9 @@ Shared files: `src/static/js/components/table_model.js`,
 `src/static/js/components/drawer_model.js`,
 `src/static/js/components/drawer_view.js`,
 `src/static/js/components/dialog_controller.js`,
-`src/static/js/components/action_button.js`, `src/models/table.py`,
+`src/static/js/components/action_button.js`,
+`src/static/js/components/form_controller.js`,
+`src/static/js/components/emitter.js`, `src/models/table.py`,
 `src/web/wizard_registry.py`, `src/web/routes/wizard.py`,
 `src/web/settings.py`, `src/web/routes/settings.py`,
 `src/web/statements_registry.py`, `src/templates/shared/_page_nav.html`,
@@ -96,9 +98,12 @@ back to the input (`input.subscribe` → `setCell`; `model.subscribe` →
 `model.serialize()`.
 
 The Settings drawer follows the same split (`specs/STATE.md` §5b):
-`DrawerModel` owns open state and field values, `render_drawer` paints,
-`GenericInput` / `ActionButton` / `DialogController` are the only listeners,
-and `settings_drawer.js` only subscribes them. `tests/test_frontend_mvc.py`
+`DrawerModel` owns open state, field values, save state and the error;
+`drawer_view.js` paints and owns the per-field control spec (`controlSpec`);
+`GenericInput` / `ActionButton` / `FormController` / `DialogController` are
+the only listeners, and `settings_drawer.js` only constructs and subscribes
+them. Models and controllers extend `Emitter` (`components/emitter.js`);
+don't hand-roll another `_listeners` array. `tests/test_frontend_mvc.py`
 fails on a listener or `showModal`/`close` call outside a controller file.
 
 `Table.serialize()` (Python) and `TableModel.serialize()` (JS) are
