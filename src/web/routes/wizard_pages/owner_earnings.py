@@ -19,8 +19,9 @@ import pandas as pd
 from src.adjustments.types import owner_earnings as oe
 from src.database.wizard_manager import WizardDatabaseManager
 from src.models.table import CalculatedCellSpec, ColumnSpec, Table
-from src.web.adjusted_statements import DEFAULT_EXCHANGE, load_adjusted
+from src.web.adjusted_statements import DEFAULT_EXCHANGE, load_for_basis
 from src.web.settings import Settings
+from src.web.settings_registry import GlobalSetting
 
 logger = logging.getLogger(__name__)
 
@@ -124,7 +125,10 @@ def _oe_table(
 
 
 def owner_earnings_context(ticker: str, settings: Settings) -> dict[str, object]:
-    _, staged, specs = load_adjusted(ticker, settings.period, until=oe.TYPE_ID)
+    loaded = load_for_basis(
+        ticker, settings[GlobalSetting.PERIOD], "adjusted", until=oe.TYPE_ID
+    )
+    staged, specs = loaded.statements, loaded.specs
     parts = oe.components(staged)
     periods = settings.recent_periods(list(parts.index))
     items = oe.da_items(staged.cashflow)

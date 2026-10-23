@@ -1,6 +1,6 @@
 # Spec: Shared nav and Settings drawer
 
-- **Status:** ready for agent, not built
+- **Status:** built
 - **Depends on:** none of the other grilled specs. Pages built from them (Assets in Use, ROCE, Neff, …) declare their Settings the way this spec describes.
 - **Related docs:** `CONTEXT.md` (Setting, Global Setting, Sub-page Setting, View), `specs/STATE.md` (§3 hard rules, §4 wizard identity, §5 Table contract; stale on the adjustment engine, so trust the code), `CLAUDE.md` (shared-file checklist: nothing page-specific in shared files), `specs/vision.md` ("Fund flow View" under Business Understanding).
 
@@ -195,7 +195,7 @@ Business Understanding, built on the server.
 - Good tests assert external behaviour: resolved values, the `Table` payload, the error returned. They don't assert on the template HTML or on internal helper calls.
 - Registry consistency test: every Setting id named in any page declaration exists in the Settings registry, and every greyed Global Setting has a non-empty reason.
 - Prior art: `tests/test_balance_sheet_size.py` and `tests/test_business_understanding.py` (builder tests against fixture statements), `tests/statement_fixtures.py` (fixture `StatementSet`s), `tests/test_html_renderer.py` (statement payloads), `tests/test_table.py`.
-- No route/HTTP tests (the repo has none). The redirect, the cookie attributes and the `next` path check are exercised through the validate-a-submission seam, plus a manual check in the browser preview.
+- Route/HTTP tests were first left out. The build removed the few TestClient page tests the repo had. Route tests were then added in `tests/test_settings_routes.py`. They cover the statements redirect and 404, the `next` path check, the cookie attributes, cookie round-trips, refused saves and the drawer per page.
 
 ## Out of Scope
 

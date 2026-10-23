@@ -1,5 +1,3 @@
-"""Single-company financial statement pages: one statement per URL."""
-
 from __future__ import annotations
 
 from typing import Any
@@ -10,9 +8,10 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from src.adjustments.specs import describe
 from src.models.table import statement_table_from_dataframe
 from src.web.adjusted_statements import load_for_basis
-from src.web.page_types import StatementPage
-from src.web.routes.settings import NavContext, render_with_settings, settings_for
+from src.web.page_types import NavContext, StatementPage
+from src.web.render import render_with_settings, settings_for
 from src.web.settings import Settings
+from src.web.settings_registry import GlobalSetting, SubpageSetting
 from src.web.statements_registry import STATEMENT_PAGES, get_statement_page
 
 router = APIRouter(tags=["statements"])
@@ -25,15 +24,18 @@ def _normalize_ticker(ticker: str) -> str:
 def statement_context(
     symbol: str, page: StatementPage, settings: Settings
 ) -> dict[str, Any]:
-    """The page's statement in the resolved View and Basis, newest periods first."""
-    loaded = load_for_basis(symbol, settings.period, settings.basis)
+    loaded = load_for_basis(
+        symbol, settings[GlobalSetting.PERIOD], settings[SubpageSetting.BASIS]
+    )
     statement = loaded.statements.get(page.slug)
-    frame = statement.project(settings.view, settings.recent_periods(statement.periods))
+    frame = statement.project(
+        settings[GlobalSetting.VIEW], settings.recent_periods(statement.periods)
+    )
     return {
         "ticker": symbol,
         "page": page,
-        "period": settings.period,
-        "basis": settings.basis,
+        "period": settings[GlobalSetting.PERIOD],
+        "basis": settings[SubpageSetting.BASIS],
         "adjustments": describe(loaded.specs),
         "statement_table": statement_table_from_dataframe(frame).serialize(),
         "active_nav": "statements",

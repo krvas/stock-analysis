@@ -1,17 +1,19 @@
-"""The Settings registry: every Setting and cross-Setting rule, declared once.
-
-Data only. The shapes live in ``src/web/setting_types.py``; the rules that
-resolve, validate and render them live in ``src/web/settings.py``.
-"""
-
 from __future__ import annotations
 
 from enum import Enum
-from typing import Final, cast
+from typing import Final, cast, get_args
 
 from src.config import MAX_CACHE_QUARTERS, MAX_ITEMS_PER_SIDE
-from src.models.statement import PERIOD_TYPES, STATEMENT_VIEWS
-from src.web.setting_types import ChoiceSetting, CrossRule, IntSetting
+from src.models.statement import PERIOD_TYPES, STATEMENT_VIEWS, Basis
+from src.web.setting_types import (
+    ChoiceSetting,
+    CrossRule,
+    IntSetting,
+    Option,
+)
+
+MAX_OFFSET: Final = MAX_CACHE_QUARTERS - 1
+
 
 RULES: Final[tuple[CrossRule, ...]] = (
     CrossRule(
@@ -19,8 +21,10 @@ RULES: Final[tuple[CrossRule, ...]] = (
         holds=lambda v: (
             cast(int, v["previous_period"]) > cast(int, v["current_period"])
         ),
-        # Keep the current period: pages share it, so it must not move.
-        repair=lambda v: {"previous_period": cast(int, v["current_period"]) + 1},
+        repair=lambda v, ceiling: {
+            "current_period": min(cast(int, v["current_period"]), max(ceiling - 1, 0)),
+            "previous_period": min(cast(int, v["current_period"]) + 1, ceiling),
+        },
         message="Previous period must be older than the current period",
     ),
 )
@@ -32,18 +36,16 @@ class GlobalSetting(Enum):
     PERIOD = ChoiceSetting(
         "period",
         "Period type",
-        tuple((p, p.capitalize()) for p in PERIOD_TYPES),
+        tuple(Option(p, p.capitalize()) for p in PERIOD_TYPES),
         "annual",
     )
-    # The per-period-type cache cap is a clamp at load time, not a validation
-    # bound, so switching period type never invalidates the stored count.
     NUM_PERIODS = IntSetting(
         "num_periods", "Number of periods", 1, MAX_CACHE_QUARTERS, 10
     )
     VIEW = ChoiceSetting(
         "view",
         "View",
-        tuple((v, v.capitalize()) for v in STATEMENT_VIEWS),
+        tuple(Option(v, v.capitalize()) for v in STATEMENT_VIEWS),
         "standard",
         instant=True,
     )
@@ -55,14 +57,14 @@ class SubpageSetting(Enum):
     BASIS = ChoiceSetting(
         "basis",
         "Basis",
-        (("reported", "Reported"), ("adjusted", "Adjusted")),
+        tuple(Option(b, b.capitalize()) for b in get_args(Basis)),
         "reported",
     )
     CURRENT_PERIOD = IntSetting(
         "current_period",
         "Current period",
         0,
-        MAX_CACHE_QUARTERS - 1,
+        MAX_OFFSET,
         0,
         widget="offset",
     )
@@ -70,7 +72,7 @@ class SubpageSetting(Enum):
         "previous_period",
         "Previous period",
         0,
-        MAX_CACHE_QUARTERS - 1,
+        MAX_OFFSET,
         1,
         widget="offset",
     )

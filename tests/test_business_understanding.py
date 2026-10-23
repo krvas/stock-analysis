@@ -1,5 +1,3 @@
-"""Business Understanding › One-line Answers: context builder (no LLM)."""
-
 from __future__ import annotations
 
 import json

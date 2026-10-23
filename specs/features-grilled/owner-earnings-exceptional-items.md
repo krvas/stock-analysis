@@ -112,7 +112,7 @@ Test external behaviour only. Given a StatementSet and a spec, what Owner Earnin
    - With an `opex_to_capex` spec that capitalizes the restructuring row, the restructuring charge is not removed a second time.
    - Maintenance % behaviour is unchanged (an unset % counts as 0).
    - Reported pre-tax income in the adjusted set is unchanged.
-2. **Secondary (only if the user wants the read-only display covered): the Owner Earnings context builder** with `load_adjusted` monkeypatched to return the fixture StatementSet. Assert that the serialized "Exceptional items excluded" table lists the expected labels and signed effects, that the Owner Earnings table has the "Less: exceptional items" row with no input cell, and that a POST body containing that row id writes no preference for it.
+2. **Secondary (only if the user wants the read-only display covered): the Owner Earnings context builder** with `load_for_basis` monkeypatched to return the fixture StatementSet. Assert that the serialized "Exceptional items excluded" table lists the expected labels and signed effects, that the Owner Earnings table has the "Less: exceptional items" row with no input cell, and that a POST body containing that row id writes no preference for it.
 
 ### Prior art
 

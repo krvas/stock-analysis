@@ -13,8 +13,7 @@ from src.adjustments.engine import apply_adjustments
 from src.adjustments.specs import from_prefs
 from src.api.edgartools.source import load_statement_set
 from src.database.wizard_manager import WizardDatabaseManager
-from src.models.statement import PeriodType, StatementSet
-from src.web.settings import Basis
+from src.models.statement import Basis, PeriodType, StatementSet
 
 # The wizard route layer only supports a single exchange for now; the DB
 # layer has a real exchange column, but nothing above it threads a value
@@ -28,26 +27,18 @@ def load_specs(ticker: str) -> list[AdjustmentSpec]:
     return from_prefs(prefs)
 
 
-def load_adjusted(
-    ticker: str, period: PeriodType, until: str | None = None
-) -> tuple[StatementSet, StatementSet, list[AdjustmentSpec]]:
-    """``(reported, adjusted, specs)``; ``until`` stops before that type."""
-    base = load_statement_set(ticker, period)
-    specs = load_specs(ticker)
-    return base, apply_adjustments(base, specs, until=until), specs
-
-
 @dataclass(frozen=True)
 class Loaded:
     statements: StatementSet
-    # Applied adjustments; empty on the reported basis.
     specs: list[AdjustmentSpec]
 
 
-def load_for_basis(ticker: str, period: PeriodType, basis: Basis) -> Loaded:
-    """The statements on ``basis``: reported, or with every saved adjustment."""
+def load_for_basis(
+    ticker: str, period: PeriodType, basis: Basis, *, until: str | None = None
+) -> Loaded:
+    """``until`` stops the adjusted set before that adjustment type."""
     reported = load_statement_set(ticker, period)
     if basis == "reported":
         return Loaded(reported, [])
     specs = load_specs(ticker)
-    return Loaded(apply_adjustments(reported, specs), specs)
+    return Loaded(apply_adjustments(reported, specs, until=until), specs)

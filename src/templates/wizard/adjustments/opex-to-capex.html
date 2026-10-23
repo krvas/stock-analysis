@@ -19,7 +19,5 @@
 {% call form_macro.form(post_url, form_id='opex-to-capex-form', wizard_save='opex-to-capex', data_table_id='opex-to-capex-table') %}
 {{ table_macro.table('opex-to-capex-table', opex_table) }}
 {% endcall %}
-<p class="wizard-next-link">
-  <a href="/statements/{{ ticker }}">View statements →</a>
-</p>
+{% include "wizard/adjustments/_adjusted_statements_link.html" %}
 {% endblock %}

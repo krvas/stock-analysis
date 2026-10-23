@@ -1,5 +1,3 @@
-"""Statement pages and the Capitalizing Opex builder over a fixture StatementSet."""
-
 from __future__ import annotations
 
 import json
@@ -72,7 +70,9 @@ def _statement(slug: str, specs: list | None = None, **values: object) -> dict:
             adjusted_statements, "load_statement_set", return_value=_statement_set()
         ),
         patch.object(adjusted_statements, "load_specs", return_value=specs or []),
-        patch.object(adjusted_statements, "apply_adjustments", lambda ss, _: ss),
+        patch.object(
+            adjusted_statements, "apply_adjustments", lambda ss, _, until=None: ss
+        ),
     ):
         return statement_context(
             "AAPL", page, resolve(json.dumps(values), page.settings)
@@ -89,7 +89,6 @@ def test_statement_is_one_table_over_num_periods() -> None:
         "calculated_cells",
         "no_input_cells",
     }
-    # Only the newest two periods; no row_id (or other metadata) column.
     assert [col["id"] for col in table["columns"]] == [P1, P2]
     assert all(
         col["kind"] == "static" and col["dtype"] == "number" for col in table["columns"]
@@ -160,7 +159,6 @@ def test_opex_to_capex_prefill_matches_row_id_keys() -> None:
     prefs = pd.DataFrame(
         {
             "adjustment_type": ["opex_to_capex"] * 3,
-            # The legacy standard_concept key no longer matches (exact row ids).
             "base_concept": [RND, "ResearchAndDevelopmentExpenses", "NotInTable"],
             "value": [5, 3, 2],
         }

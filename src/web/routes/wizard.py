@@ -10,8 +10,8 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from jinja2 import TemplateNotFound
 from starlette.responses import Response
 
-from src.web.page_types import Page, SubPage
-from src.web.routes.settings import NavContext, render_with_settings, settings_for
+from src.web.page_types import NavContext, Page, SubPage
+from src.web.render import render_with_settings, settings_for
 from src.web.settings import NO_SETTINGS, Settings
 from src.web.templating import templates
 from src.web.wizard_registry import (
@@ -70,7 +70,10 @@ def _render(
 ) -> HTMLResponse:
     context = _wizard_context(ticker=symbol, page=page, subpage=subpage)
     nav = NavContext(
-        prefix=f"/wizard/{symbol}", pages=WIZARD_PAGES, page=page, subpage=subpage
+        prefix=f"/wizard/{symbol}",
+        pages=WIZARD_PAGES,
+        page=page,
+        subpage=subpage,
     )
     return render_with_settings(
         request, template, context | (extra or {}), settings=settings, nav=nav

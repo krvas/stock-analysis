@@ -111,7 +111,7 @@ With no choices saved, Gross Assets in Use = Net Assets in Use = reported total 
   - the context builder;
   - the POST handler;
   - one public function that returns the page's asset and liability rows for the displayed periods. The builder and the handler both call it, so they always agree on which posted ids are assets and which are liabilities.
-- **Stage:** both use `load_adjusted(ticker, "annual", until="assets_in_use")`, which is the input to this type: capitalized-opex rows are present, the memo rows are not.
+- **Stage:** both use `load_for_basis(ticker, "annual", "adjusted", until="assets_in_use")`, which is the input to this type: capitalized-opex rows are present, the memo rows are not.
 - **Displayed periods:** the latest five annual periods.
 - **Rows:** the union of leaves across those periods that have a value in at least one of them. Period cells hold contributions on the total-assets sign. They are blank where the row is not a leaf in that period.
 - **One `Table`, one form, one save.** Rows in order:

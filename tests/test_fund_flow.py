@@ -1,5 +1,3 @@
-"""Business Understanding › Fund Flow: table and context builder (no network)."""
-
 from __future__ import annotations
 
 import json
@@ -86,7 +84,9 @@ def loaded(monkeypatch: pytest.MonkeyPatch) -> list[tuple]:
 
     monkeypatch.setattr(adjusted_statements, "load_statement_set", fake_load)
     monkeypatch.setattr(adjusted_statements, "load_specs", fake_specs)
-    monkeypatch.setattr(adjusted_statements, "apply_adjustments", lambda ss, _: ss)
+    monkeypatch.setattr(
+        adjusted_statements, "apply_adjustments", lambda ss, _, until=None: ss
+    )
     return calls
 
 

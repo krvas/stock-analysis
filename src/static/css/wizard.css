@@ -178,13 +178,17 @@
   margin: 16px 0 0;
 }
 
-.wizard-next-link a {
+.wizard-next-link button {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
   color: var(--accent);
-  text-decoration: none;
   font-weight: 600;
+  cursor: pointer;
 }
 
-.wizard-next-link a:hover {
+.wizard-next-link button:hover {
   text-decoration: underline;
 }
 

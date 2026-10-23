@@ -1,29 +1,26 @@
-"""The shapes of a Setting and of a rule over several Settings.
-
-Pure types with no registry knowledge; ``src/web/settings_registry.py`` holds
-the actual Settings and rules.
-"""
-
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import Literal
+from typing import Literal, NamedTuple
 
 SettingValue = str | int
+
+
+class Option(NamedTuple):
+    value: str
+    label: str
 
 
 @dataclass(frozen=True)
 class ChoiceSetting:
     id: str
     label: str
-    options: tuple[tuple[str, str], ...]  # (value, display label), drawer order
+    options: tuple[Option, ...]
     default: str
-    # Applies as soon as it changes (own form, submits on change).
     instant: bool = False
 
     def parse(self, raw: object) -> str | None:
-        """``raw`` if it is one of the option values, else None."""
         if isinstance(raw, str) and any(raw == value for value, _ in self.options):
             return raw
         return None
@@ -36,16 +33,14 @@ class IntSetting:
     min: int
     max: int
     default: int
-    # "offset" renders as a select of "Latest", "1 back", ...
     widget: Literal["number", "offset"] = "number"
     instant: bool = False
 
     def parse(self, raw: object) -> int | None:
-        """``raw`` as an int in ``[min, max]`` (an int or ASCII-digit str), else None."""
         if isinstance(raw, bool):
             return None
         if isinstance(raw, str):
-            if not (raw.isascii() and raw.isdigit()):
+            if not (raw.isascii() and raw.isdigit()) or len(raw) > len(str(self.max)):
                 return None
             raw = int(raw)
         if isinstance(raw, int) and self.min <= raw <= self.max:
@@ -57,14 +52,23 @@ SettingDef = ChoiceSetting | IntSetting
 
 
 @dataclass(frozen=True)
-class CrossRule:
-    """A rule over several Settings. It binds only where all its ids are in play.
+class Greyed:
+    """A Global Setting a page cannot honour.
 
-    ``repair`` gives the values that make a failing rule hold for one render
-    (``resolve``); a submission that breaks the rule is refused instead.
+    ``fixed`` is the value the page uses in its place, if it uses one.
     """
 
+    reason: str
+    fixed: SettingValue | None = None
+
+    def __post_init__(self) -> None:
+        if not self.reason.strip():
+            raise ValueError("a greyed Setting needs a reason")
+
+
+@dataclass(frozen=True)
+class CrossRule:
     ids: tuple[str, ...]
     holds: Callable[[Mapping[str, SettingValue]], bool]
-    repair: Callable[[Mapping[str, SettingValue]], Mapping[str, SettingValue]]
+    repair: Callable[[Mapping[str, SettingValue], int], Mapping[str, SettingValue]]
     message: str
