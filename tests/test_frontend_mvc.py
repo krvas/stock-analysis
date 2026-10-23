@@ -12,6 +12,7 @@ LISTENER_OWNERS = frozenset(
         "components/generic_input.js",
         "components/dialog_controller.js",
         "components/action_button.js",
+        "components/form_controller.js",
         # The wizard save form's submit handler predates ActionButton.
         "components/table_wiring.js",
     }
@@ -31,7 +32,7 @@ def test_only_controllers_attach_listeners() -> None:
         if "addEventListener" in source and name not in LISTENER_OWNERS
     )
     assert offenders == [], (
-        "listen through GenericInput, ActionButton or DialogController"
+        "listen through GenericInput, ActionButton, FormController or DialogController"
     )
 
 

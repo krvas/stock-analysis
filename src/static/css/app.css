@@ -336,3 +336,8 @@ tbody tr.row-adjusted td:first-child {
   font: inherit;
   cursor: pointer;
 }
+
+.settings-actions button:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}

@@ -1,12 +1,14 @@
 /**
- * Paints a field drawer into its <dialog>. Field inputs are empty slots
- * (`data-input-slot`, `data-field-id`); buttons are painted bare. No listeners.
+ * Paints a field drawer into its <dialog> and owns the per-field control
+ * spec. Fields sit in a <form> (`data-drawer-form`) so Enter submits; field
+ * inputs are empty slots (`data-input-slot`, `data-field-id`); buttons are
+ * painted bare. No listeners.
  */
 
-const SECTIONS = [
-  { key: "global_fields", title: "Global", id: "settings-global-title" },
-  { key: "page_fields", title: "This page", id: "settings-page-title" },
-];
+const SECTIONS = {
+  global: { title: "Global", id: "settings-global-title" },
+  page: { title: "This page", id: "settings-page-title" },
+};
 
 function el(tag, attrs = {}, text) {
   const node = document.createElement(tag);
@@ -19,41 +21,63 @@ function el(tag, attrs = {}, text) {
   return node;
 }
 
-export function fieldInputId(fieldId) {
+function fieldInputId(fieldId) {
   return `setting-${fieldId}`;
 }
 
-export function fieldReasonId(fieldId) {
+function fieldReasonId(fieldId) {
   return `${fieldInputId(fieldId)}-reason`;
 }
 
-function renderField(field) {
+/**
+ * How to build the control in a field's slot: the `GenericInput` id, type
+ * and options.
+ *
+ * @param {import("./drawer_model.js").DrawerModel} drawer
+ * @param {string} id
+ * @returns {{id: string, type: "select" | "number", options: object}}
+ */
+export function controlSpec(drawer, id) {
+  const field = drawer.field(id);
+  const disabled = drawer.isDisabled(id);
+  const attributes = {
+    disabled,
+    "aria-describedby": disabled ? fieldReasonId(id) : null,
+  };
+  if (field.widget === "select") {
+    return {
+      id: fieldInputId(id),
+      type: "select",
+      options: { choices: field.options, attributes },
+    };
+  }
+  return {
+    id: fieldInputId(id),
+    type: "number",
+    options: {
+      attributes: { ...attributes, min: field.min, max: field.max, step: 1 },
+    },
+  };
+}
+
+function renderField(drawer, field) {
+  const reason = drawer.reason(field.id);
   const row = el("div", {
-    class: field.disabled_reason ? "settings-field is-disabled" : "settings-field",
+    class: reason ? "settings-field is-disabled" : "settings-field",
   });
   row.append(
     el("label", { for: fieldInputId(field.id) }, field.label),
     el("span", { "data-input-slot": "", "data-field-id": field.id }),
   );
-  if (field.disabled_reason) {
+  if (reason) {
     row.append(
-      el(
-        "span",
-        { class: "settings-reason", id: fieldReasonId(field.id) },
-        field.disabled_reason,
-      ),
+      el("span", { class: "settings-reason", id: fieldReasonId(field.id) }, reason),
     );
   }
   return row;
 }
 
-/**
- * @param {HTMLDialogElement} container
- * @param {import("./drawer_model.js").DrawerModel} drawer
- */
-export function render_drawer(container, drawer) {
-  container.replaceChildren();
-
+function renderHeader(container) {
   const header = el("div", { class: "settings-drawer-header" });
   header.append(
     el("h2", { id: container.getAttribute("aria-labelledby") }, "Settings"),
@@ -68,31 +92,66 @@ export function render_drawer(container, drawer) {
       "×",
     ),
   );
-  container.append(header);
+  return header;
+}
 
-  if (drawer.error) {
-    container.append(
-      el("p", { class: "settings-error", role: "alert" }, drawer.error),
-    );
-  }
+/**
+ * Shows `message` in the drawer's alert, or hides the alert when null.
+ *
+ * @param {HTMLDialogElement} container
+ * @param {string | null} message
+ */
+export function paint_error(container, message) {
+  const alert = container.querySelector("[data-drawer-error]");
+  alert.textContent = message ?? "";
+  alert.hidden = message == null;
+}
 
-  for (const section of SECTIONS) {
-    const fields = drawer[section.key];
+/**
+ * Paints a drawer with only its header and `message`, for when the drawer
+ * data cannot be read.
+ *
+ * @param {HTMLDialogElement} container
+ * @param {string} message
+ */
+export function render_unavailable(container, message) {
+  container.replaceChildren(
+    renderHeader(container),
+    el("p", { class: "settings-error", role: "alert" }, message),
+  );
+}
+
+/**
+ * @param {HTMLDialogElement} container
+ * @param {import("./drawer_model.js").DrawerModel} drawer
+ */
+export function render_drawer(container, drawer) {
+  const form = el("form", { "data-drawer-form": "" });
+  form.append(
+    el("p", { class: "settings-error", role: "alert", "data-drawer-error": "" }),
+  );
+
+  for (const sectionKey of drawer.sections()) {
+    const fields = drawer.fields(sectionKey);
     if (!fields.length) {
       continue;
     }
+    const section = SECTIONS[sectionKey];
     const node = el("section", {
       class: "settings-section",
       "aria-labelledby": section.id,
     });
     node.append(el("h3", { id: section.id }, section.title));
-    fields.forEach((field) => node.append(renderField(field)));
-    container.append(node);
+    fields.forEach((field) => node.append(renderField(drawer, field)));
+    form.append(node);
   }
 
   const actions = el("div", { class: "settings-actions" });
   actions.append(
-    el("button", { type: "button", "data-drawer-apply": "" }, "Apply"),
+    el("button", { type: "submit", "data-drawer-apply": "" }, "Apply"),
   );
-  container.append(actions);
+  form.append(actions);
+
+  container.replaceChildren(renderHeader(container), form);
+  paint_error(container, drawer.error());
 }

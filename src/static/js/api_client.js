@@ -77,4 +77,5 @@ window.apiClient = {
   getWizardPageData,
   getJson,
   postJson,
+  postForm,
 };
