@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import json
 from unittest.mock import patch
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from src.config import MAX_CACHE_QUARTERS, MAX_CACHE_YEARS
 from src.models.edgartools.html_renderer import build_statement_payload
@@ -13,6 +15,8 @@ from src.models.statement import StatementSet
 from src.web import adjusted_statements
 from src.web.routes.statements import clamp_num_periods
 from src.web.routes.wizard_pages import adjustments_context
+from src.web.settings import Settings, resolve
+from src.web.wizard_registry import get_subpage
 from tests.statement_fixtures import make_statement
 
 P1, P2, P3 = "2024-09-28", "2023-09-30", "2022-09-24"
@@ -50,6 +54,11 @@ def _statement_set() -> StatementSet:
         balance=make_statement(_frame("balance"), "balance"),
         cashflow=make_statement(_frame("cashflow"), "cashflow"),
     )
+
+
+def _opex_settings(**values: object) -> Settings:
+    decl = get_subpage("adjustments", "opex-to-capex").settings
+    return resolve(json.dumps(values), decl)
 
 
 def _rows_by_id(table: dict) -> dict[str, dict]:
@@ -117,7 +126,9 @@ def test_opex_to_capex_context_uses_detailed_projection() -> None:
         patch.object(adjusted_statements, "load_specs", return_value=[]),
         patch.object(adjustments_context, "_apply_saved_opex_to_capex_preferences"),
     ):
-        context = adjustments_context.opex_to_capex_context("AAPL", "annual")
+        context = adjustments_context.opex_to_capex_context(
+            "AAPL", _opex_settings(num_periods=2)
+        )
 
     mock_load.assert_called_once_with("AAPL", "annual")
     table = context["opex_table"]
@@ -126,6 +137,29 @@ def test_opex_to_capex_context_uses_detailed_projection() -> None:
     # Keyed by get_row_id, not standard_concept (which only drives selection).
     assert [row["id"] for row in rows] == [RND]
     assert rows[0]["cells"] == {P1: -5.0, P2: -4.0, "capitalize": None, "years": None}
+
+
+@pytest.mark.parametrize(
+    ("values", "expected"),
+    [
+        ({"num_periods": 1}, [P1]),
+        ({}, [P1, P2, P3]),
+        ({"period": "quarterly", "num_periods": 2}, [P1, P2]),
+    ],
+)
+def test_opex_to_capex_follows_num_periods(values: dict, expected: list) -> None:
+    with (
+        patch.object(
+            adjusted_statements, "load_statement_set", return_value=_statement_set()
+        ),
+        patch.object(adjusted_statements, "load_specs", return_value=[]),
+        patch.object(adjustments_context, "_apply_saved_opex_to_capex_preferences"),
+    ):
+        context = adjustments_context.opex_to_capex_context(
+            "AAPL", _opex_settings(**values)
+        )
+    columns = [c["id"] for c in context["opex_table"]["columns"]]
+    assert columns == [*expected, "capitalize", "years"]
 
 
 def test_opex_to_capex_prefill_matches_row_id_keys() -> None:
@@ -146,7 +180,7 @@ def test_opex_to_capex_prefill_matches_row_id_keys() -> None:
     ):
         db = mock_db.return_value.__enter__.return_value
         db.read_adjustment_preferences.return_value = prefs
-        context = adjustments_context.opex_to_capex_context("AAPL", "annual")
+        context = adjustments_context.opex_to_capex_context("AAPL", _opex_settings())
 
     (row,) = context["opex_table"]["rows"]
     assert row["id"] == RND

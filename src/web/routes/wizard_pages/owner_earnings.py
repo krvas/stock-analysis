@@ -18,13 +18,11 @@ import pandas as pd
 
 from src.adjustments.types import owner_earnings as oe
 from src.database.wizard_manager import WizardDatabaseManager
-from src.models.statement import PeriodType
 from src.models.table import CalculatedCellSpec, ColumnSpec, Table
 from src.web.adjusted_statements import DEFAULT_EXCHANGE, load_adjusted
+from src.web.settings import Settings
 
 logger = logging.getLogger(__name__)
-
-NUM_PERIODS = 5
 
 PCT_COLUMN = ColumnSpec(
     id="maintenance_pct", label="Maintenance %", kind="input", dtype="number"
@@ -125,10 +123,10 @@ def _oe_table(
     )
 
 
-def owner_earnings_context(ticker: str, period: PeriodType) -> dict[str, object]:
-    _, staged, specs = load_adjusted(ticker, period, until=oe.TYPE_ID)
+def owner_earnings_context(ticker: str, settings: Settings) -> dict[str, object]:
+    _, staged, specs = load_adjusted(ticker, settings.period, until=oe.TYPE_ID)
     parts = oe.components(staged)
-    periods = list(parts.index[:NUM_PERIODS])
+    periods = settings.recent_periods(list(parts.index))
     items = oe.da_items(staged.cashflow)
     items = items[items[periods].notna().any(axis=1)]
     saved = next((dict(s.params) for s in specs if s.type_id == oe.TYPE_ID), {})

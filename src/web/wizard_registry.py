@@ -8,18 +8,17 @@ accept user saves declare a ``post_handler``; requests go to
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from dataclasses import dataclass
-from typing import Any, Final, Literal
+from typing import Final
 
+from src.web.page_types import Page, PageGroup, SubPage
 from src.web.routes.wizard_pages import (
     adjustments_context,
     adjustments_post,
     business_understanding,
     owner_earnings,
 )
-
-PageGroup = Literal["business", "people", "price", "red_flags"]
+from src.web.settings import SettingsDecl
+from src.web.settings_registry import GlobalSetting, SubpageSetting
 
 GROUP_LABELS: Final[dict[PageGroup, str]] = {
     "business": "Business",
@@ -35,31 +34,6 @@ GROUP_ORDER: Final[tuple[PageGroup, ...]] = (
     "red_flags",
 )
 
-SubPageContextBuilder = Callable[[str, str], dict[str, Any]]
-default_context_builder: Final[SubPageContextBuilder] = lambda ticker, period: {}
-
-SubPagePostHandler = Callable[[str, dict[str, Any]], dict[str, Any]]
-default_post_handler: Final[SubPagePostHandler | None] = None
-
-
-@dataclass(frozen=True)
-class SubPage:
-    slug: str
-    title: str
-    order: int
-    context_builder: SubPageContextBuilder = default_context_builder
-    post_handler: SubPagePostHandler | None = default_post_handler
-
-
-@dataclass(frozen=True)
-class Page:
-    slug: str
-    title: str
-    order: int
-    group: PageGroup
-    subpages: list[SubPage]
-
-
 WIZARD_PAGES: list[Page] = [
     Page(
         slug="business-understanding",
@@ -72,12 +46,30 @@ WIZARD_PAGES: list[Page] = [
                 title="One-line Answers",
                 order=1,
                 context_builder=business_understanding.one_line_answers_context,
+                settings=SettingsDecl(
+                    cannot_honour={
+                        GlobalSetting.PERIOD: "Not period-based",
+                        GlobalSetting.NUM_PERIODS: "Not period-based",
+                    }
+                ),
             ),
             SubPage(
                 slug="balance-sheet-size",
                 title="Balance Sheet Size",
                 order=2,
                 context_builder=business_understanding.balance_sheet_size_context,
+                settings=SettingsDecl(
+                    uses=(
+                        SubpageSetting.BASIS,
+                        SubpageSetting.CURRENT_PERIOD,
+                        SubpageSetting.ITEMS_PER_SIDE,
+                    ),
+                    cannot_honour={
+                        GlobalSetting.PERIOD: "Annual only",
+                        GlobalSetting.NUM_PERIODS: "Single period",
+                        GlobalSetting.VIEW: "Summary only",
+                    },
+                ),
             ),
         ],
     ),
@@ -96,6 +88,9 @@ WIZARD_PAGES: list[Page] = [
                 order=2,
                 context_builder=adjustments_context.opex_to_capex_context,
                 post_handler=adjustments_post.opex_to_capex_post,
+                settings=SettingsDecl(
+                    cannot_honour={GlobalSetting.VIEW: "Detailed only"}
+                ),
             ),
             SubPage(
                 slug="owner-earnings",
@@ -103,6 +98,9 @@ WIZARD_PAGES: list[Page] = [
                 order=3,
                 context_builder=owner_earnings.owner_earnings_context,
                 post_handler=owner_earnings.owner_earnings_post,
+                settings=SettingsDecl(
+                    cannot_honour={GlobalSetting.VIEW: "Fixed layout"}
+                ),
             ),
             SubPage(slug="assets-in-use", title="Assets in Use", order=4),
         ],

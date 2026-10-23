@@ -8,9 +8,9 @@ import pandas as pd
 
 from src.api.edgartools.standard_terms import OPERATING_EXPENSES
 from src.database.wizard_manager import WizardDatabaseManager
-from src.models.statement import PeriodType
 from src.models.table import ColumnSpec, Table, period_column_specs
 from src.web.adjusted_statements import DEFAULT_EXCHANGE, load_adjusted
+from src.web.settings import Settings
 
 logger = logging.getLogger(__name__)
 
@@ -55,14 +55,13 @@ def _apply_saved_opex_to_capex_preferences(
         table.set_cell("years", row_id, float(pref["value"]))
 
 
-def opex_to_capex_context(
-    ticker: str,
-    period: PeriodType,
-) -> dict[str, object]:
+def opex_to_capex_context(ticker: str, settings: Settings) -> dict[str, object]:
     # Stage semantics: the opex page shows the input to opex-to-capex.
-    _, staged, _ = load_adjusted(ticker, period, until=OPEX_TO_CAPEX_ADJUSTMENT_TYPE)
+    _, staged, _ = load_adjusted(
+        ticker, settings.period, until=OPEX_TO_CAPEX_ADJUSTMENT_TYPE
+    )
     income = staged.income
-    df = income.project("detailed", income.periods[:2])
+    df = income.project("detailed", settings.recent_periods(income.periods))
     # Selection by standard_concept; identity is the ``row_id`` from get_row_id.
     opex = df[df["standard_concept"].isin(OPERATING_EXPENSES)]
     columns = period_column_specs(opex) + OPEX_TO_CAPEX_INPUT_COLUMNS

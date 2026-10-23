@@ -15,6 +15,7 @@ LinkedGroupType = Literal["pct_of_base"]
 NumberFormat = Literal["financial", "percent", "integer"]
 
 _NUMBER_FORMATS: frozenset[str] = frozenset({"financial", "percent", "integer"})
+_EXPR_OPS: frozenset[str] = frozenset({"add", "mul"})
 
 # Non-period columns of a statement view frame. Includes every column a
 # :class:`~src.models.statement.Statement` frame / projection carries (e.g.
@@ -74,9 +75,6 @@ class CalculatedCellSpec:
 
 class TableSerializationError(ValueError):
     """Invalid table configuration or source data for serialization."""
-
-
-_EXPR_OPS: frozenset[str] = frozenset({"add", "mul"})
 
 
 def _validate_expr(
