@@ -5,6 +5,7 @@ import json
 import pytest
 
 from src.config import MAX_CACHE_QUARTERS, MAX_CACHE_YEARS
+from src.web.setting_types import IntSetting
 from src.web.settings import (
     NO_SETTINGS,
     SETTINGS,
@@ -282,8 +283,6 @@ def test_drawer_serializes_every_field_for_the_browser() -> None:
             {"value": "annual", "label": "Annual"},
             {"value": "quarterly", "label": "Quarterly"},
         ],
-        "min": None,
-        "max": None,
     }
     assert num_periods == {
         "id": "num_periods",
@@ -302,12 +301,19 @@ def test_drawer_serializes_every_field_for_the_browser() -> None:
         "select",
         [{"value": "0", "label": "Latest"}, {"value": "1", "label": "1 back"}],
     )
+    assert "min" not in current and "max" not in current
     assert (items["id"], items["widget"], items["value"]) == (
         "items_per_side",
         "number",
         "5",
     )
     assert json.loads(json.dumps(payload)) == payload
+
+
+def test_an_instant_setting_must_use_a_select_widget() -> None:
+    with pytest.raises(ValueError, match="instant setting 'n' must use a select"):
+        IntSetting("n", "N", 1, 5, 1, instant=True)
+    assert IntSetting("n", "N", 0, 5, 0, widget="offset", instant=True).instant
 
 
 def test_every_default_is_valid() -> None:

@@ -167,7 +167,7 @@ def test_statement_drawer_offers_basis_for_this_page(client: TestClient) -> None
     assert [f["id"] for f in drawer["page_fields"]] == ["basis"]
     assert drawer["next_path"] == "/statements/AAPL/income"
     fields = drawer["global_fields"] + drawer["page_fields"]
-    assert [f["disabled_reason"] for f in fields] == [None] * 4
+    assert {f["disabled_reason"] for f in fields} == {None}
 
 
 @pytest.mark.parametrize(

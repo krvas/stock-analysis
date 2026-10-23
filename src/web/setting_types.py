@@ -42,6 +42,12 @@ class IntSetting:
     widget: Literal["number", "offset"] = "number"
     instant: bool = False
 
+    def __post_init__(self) -> None:
+        # The drawer submits an instant setting on every change event; a typed
+        # number fires one per keystroke, so instant needs the select widget.
+        if self.instant and self.widget == "number":
+            raise ValueError(f"instant setting {self.id!r} must use a select widget")
+
     def parse(self, raw: object) -> int | None:
         if isinstance(raw, bool):
             return None

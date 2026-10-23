@@ -181,8 +181,7 @@ class DrawerField:
 
     def serialize(self) -> dict[str, object]:
         setting = self.setting
-        is_int = isinstance(setting, IntSetting)
-        return {
+        payload: dict[str, object] = {
             "id": setting.id,
             "label": setting.label,
             "widget": self.widget,
@@ -190,9 +189,10 @@ class DrawerField:
             "instant": setting.instant,
             "disabled_reason": self.disabled_reason,
             "options": [{"value": v, "label": label} for v, label in self.options],
-            "min": setting.min if is_int else None,
-            "max": setting.max if is_int else None,
         }
+        if self.widget == "number" and isinstance(setting, IntSetting):
+            payload |= {"min": setting.min, "max": setting.max}
+        return payload
 
 
 @dataclass(frozen=True)
