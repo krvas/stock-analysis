@@ -94,7 +94,8 @@ src/static/js/             api_client.js (only fetch() home; wizard save posts)
 tests/                     pytest; pure seams (Settings, builders);
                            test_settings_routes.py over HTTP (TestClient);
                            test_frontend_mvc.py (which JS files may listen)
-tests/js/                  node --test over pure JS models (no DOM)
+tests/js/                  node --test: pure models, plus controllers and
+                           settings_drawer.js over happy-dom (dom.js)
 ```
 
 `finfetch_client.py` is a broken stub; ignore as a template.
@@ -459,8 +460,14 @@ Tests cover clients, DBs, edgartools, Table, wizard DB, Settings
 `test_settings_routes.py` is the only HTTP suite: TestClient over fixture
 statements for the statements redirect and 404, `POST /settings` (redirect
 guard, cookie attributes, refused saves), cookie round-trips and the drawer
-JSON per page. `tests/js/` (`node --test`, in `make test`) covers
-`DrawerModel`; DOM controllers are covered only by the `verify` skill.
+JSON per page. `tests/js/` (`node --test`, in `make test`; run `npm install`
+once for happy-dom) covers `DrawerModel`, `Emitter`, `coerceNumber`, the DOM
+controllers, `postForm`, and `settings_drawer.js` end to end against a stubbed
+`fetch` on a happy-dom page. happy-dom has no Esc-closes-dialog or
+Enter-submits-form behavior, so those tests call `dialog.close()` and
+`form.requestSubmit()`; the real keys are checked by the `verify` skill.
+`test_frontend_mvc.py` scans comment-stripped JS for listeners, dialog
+open/close and DOM globals in models.
 `test_module_layout.py` fails on an UPPER_CASE module constant
 below the module's first def/class under `src/`; exceptions go in its
 `ALLOWED_BELOW_DEFINITIONS`. Cache miss hits live SEC. `pytest -m data` (deselected by default)

@@ -8,7 +8,7 @@ what belongs where, so scope violations don't happen in the first place.
 ## Checks before every commit
 
 Run `make test` (ruff check, ruff format --check, pytest, `node --test "tests/js/*.test.js"`)
-from the repo root.
+from the repo root. The JS DOM tests need `npm install` once (happy-dom).
 Don't commit code that fails it. `make fix` applies ruff's fixes and formatting.
 
 ## Workflow
