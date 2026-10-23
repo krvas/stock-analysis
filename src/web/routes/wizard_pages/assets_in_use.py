@@ -17,8 +17,9 @@ from src.models.table import (
     TableSerializationError,
     period_column_specs,
 )
-from src.web.adjusted_statements import DEFAULT_EXCHANGE, load_adjusted
+from src.web.adjusted_statements import DEFAULT_EXCHANGE, load_for_basis
 from src.web.settings import Settings
+from src.web.settings_registry import GlobalSetting
 
 logger = logging.getLogger(__name__)
 
@@ -53,9 +54,9 @@ def side_rows(balance: Statement, periods: list[str]) -> dict[Side, pd.DataFrame
 
 
 def _staged_balance_and_saved(ticker: str) -> tuple[Statement, dict[str, float]]:
-    _, staged, specs = load_adjusted(ticker, "annual", until=aiu.TYPE_ID)
-    saved = next((dict(s.params) for s in specs if s.type_id == aiu.TYPE_ID), {})
-    return staged.balance, saved
+    loaded = load_for_basis(ticker, "annual", "adjusted", until=aiu.TYPE_ID)
+    saved = next((dict(s.params) for s in loaded.specs if s.type_id == aiu.TYPE_ID), {})
+    return loaded.statements.balance, saved
 
 
 def _cell(row: str, col: str) -> dict[str, Any]:
@@ -138,7 +139,9 @@ def _table(
 
 def assets_in_use_context(ticker: str, settings: Settings) -> dict[str, object]:
     balance, saved = _staged_balance_and_saved(ticker)
-    count = min(settings.num_periods, MAX_PERIODS_BY_PERIOD["annual"])
+    count = min(
+        settings[GlobalSetting.NUM_PERIODS], MAX_PERIODS_BY_PERIOD[settings.period_type]
+    )
     periods = balance.periods[:count]
     _, total = aiu.total_assets(balance)
     table = _table(total, side_rows(balance, periods), periods, saved)

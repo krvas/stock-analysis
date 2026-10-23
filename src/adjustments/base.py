@@ -11,6 +11,8 @@ from typing import Any
 
 from src.models.statement import StatementType
 
+MEMO_TAG = "memo"
+
 
 @dataclass(frozen=True)
 class AdjustmentSpec:
@@ -18,9 +20,6 @@ class AdjustmentSpec:
 
     type_id: str
     params: Mapping[str, Any]
-
-
-MEMO_TAG = "memo"
 
 
 @dataclass(frozen=True)

@@ -125,7 +125,11 @@ WIZARD_PAGES: list[Page] = [
                 context_builder=assets_in_use.assets_in_use_context,
                 post_handler=assets_in_use.assets_in_use_post,
                 settings=SettingsDecl(
-                    cannot_honour={"period": "Annual only", "view": "Fixed layout"}
+                    fixed_period="annual",
+                    cannot_honour={
+                        GlobalSetting.PERIOD: "Annual only",
+                        GlobalSetting.VIEW: "Fixed layout",
+                    },
                 ),
             ),
         ],
